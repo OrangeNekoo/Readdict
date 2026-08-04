@@ -98,6 +98,15 @@ Item {
                 Layout.fillWidth: true
                 placeholderText: qsTr("输入新分类名称…")
             }
+            Button {
+                text: qsTr("清除分类")
+                // 仅当该书已设分类时可清除；清除后侧栏 categoriesModel（按书籍分类派生）自动移除该分类
+                enabled: (card.book.category ?? "").length > 0
+                onClicked: {
+                    Books.setCategory(card.book.id, "")
+                    categoryDialog.close()
+                }
+            }
         }
         onOpened: {
             newCatField.text = ""

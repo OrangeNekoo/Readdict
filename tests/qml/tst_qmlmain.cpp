@@ -9,6 +9,7 @@
 #include <QGuiApplication>
 #include <QQuickStyle>
 #include <QStringList>
+#include <QTemporaryDir>
 #include <QUrl>
 #include <QtQuickTest/quicktest.h>
 #include <qqml.h>
@@ -46,10 +47,11 @@ private:
 int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
     QQuickStyle::setStyle("Material");
-    // 独立临时数据目录：不污染真实书库（AppData），进程唯一（pid 后缀）
-    const QString appData = QDir::temp().filePath(
-        QStringLiteral("readdict_test_") + QString::number(QCoreApplication::applicationPid()));
-    QDir().mkpath(appData);
+    // 独立临时数据目录：QTemporaryDir 在进程退出时自动清理，避免 PID 复用后遗留
+    // stale t.db（books.path UNIQUE 约束）导致 e2e 重导入失败（审查反馈）；也不污染真实书库
+    QTemporaryDir tmpDir;
+    if (!tmpDir.isValid()) return -1;
+    const QString appData = tmpDir.path();
     auto *books = new BookManager(appData + "/t.db");
     auto *settings = new SettingsStore(appData + "/settings.json");
     // importer 内部 BookManager 固定用连接名 readdict_importer（见 BookImporter.cpp），

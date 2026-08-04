@@ -56,6 +56,10 @@ TestCase {
         compare(Books.booksModel[0].category, "科幻")
         Books.setFilter("") // 复位分类筛选
         compare(Books.booksModel.length, 3)
+        // 清除分类路径（A8 复审修复）：空串清除后分类列表不再含“科幻”
+        Books.setCategory(id, "")
+        verify(Books.categoriesModel.indexOf("科幻") < 0, "清除分类后分类列表应移除“科幻”")
+        compare(Books.booksModel.length, 3, "清除分类不影响书籍数量")
     }
 
     function test_05_remove() {
