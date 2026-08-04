@@ -13,6 +13,7 @@ public:
     QString importFile(const QString &srcPath, bool moveIntoLibrary);
     QVector<Book> books() const;
 private:
+    static QString coverPathFor(const QString &title, const QString &destDir);
     QString generatePlaceholderCover(const QString &title, const QString &destDir) const;
     QString m_libraryDir;
     class BookManager *m_books;
