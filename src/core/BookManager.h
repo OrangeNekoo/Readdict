@@ -15,7 +15,7 @@ public:
     // connection：SQLite 连接名，默认 readdict_main；主程序 importer 内部实例用独立连接名
     explicit BookManager(const QString &dbPath, const QString &connection = "readdict_main", QObject *parent = nullptr);
     qint64 addBook(const Book &book);
-    void removeBook(qint64 id);
+    Q_INVOKABLE void removeBook(qint64 id);
     QVector<Book> books() const;
     Book bookById(qint64 id) const;
     void setProgress(qint64 id, double progress);
@@ -30,6 +30,7 @@ public:
     QVariantList categoriesModel() const;
     Q_INVOKABLE void setSort(int index); // 0 Added 1 Author 2 Publisher 3 Category 4 Recent
     Q_INVOKABLE void setFilter(const QString &category);
+    Q_INVOKABLE void setCategory(qint64 bookId, const QString &category);
     Q_INVOKABLE void doSearch(const QString &query);
 signals:
     void booksChanged();

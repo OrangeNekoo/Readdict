@@ -203,6 +203,14 @@ void BookManager::setFilter(const QString &category) {
     emit booksChanged();
 }
 
+void BookManager::setCategory(qint64 bookId, const QString &category) {
+    QSqlQuery q(m_db);
+    q.prepare("UPDATE books SET category=? WHERE id=?");
+    q.addBindValue(category);
+    q.addBindValue(bookId);
+    if (q.exec()) emit booksChanged();
+}
+
 void BookManager::doSearch(const QString &query) {
     m_searchQuery = query;
     emit booksChanged();
