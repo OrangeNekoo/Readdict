@@ -17,3 +17,28 @@ qt_add_executable(tst_bookimporter tst_bookimporter.cpp ${CMAKE_CURRENT_SOURCE_D
 target_include_directories(tst_bookimporter PRIVATE ../src)
 target_link_libraries(tst_bookimporter PRIVATE Qt6::Test Qt6::Sql Qt6::Gui)
 add_test(NAME tst_bookimporter COMMAND tst_bookimporter)
+
+# QML 冒烟/端到端测试：自定义 main（tst_qmlmain.cpp）注册 Readdict.Backend 单例，
+# 因为单例只在生产 main.cpp 中注册；不依赖 Qt 内部的 QUICK_TEST_SOURCE_DIR 自动 main，
+# 该宏由下方 target_compile_definitions 提供（tests/qml 绝对路径）。
+qt_add_executable(tst_qml
+    qml/tst_qmlmain.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/DatabaseManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/BookManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/SettingsStore.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/BookImporter.cpp
+)
+target_include_directories(tst_qml PRIVATE ../src)
+target_compile_definitions(tst_qml PRIVATE QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml")
+target_link_libraries(tst_qml PRIVATE
+    Qt6::Test Qt6::QuickTest Qt6::Quick Qt6::Qml Qt6::QuickControls2 Qt6::Sql Qt6::Gui
+)
+# 书架页冒烟测试按 qrc 路径加载真实 UI 组件，需把对应 QML 文件以相同前缀编入测试资源
+qt_add_resources(tst_qml "qml_ui"
+    PREFIX "/qt/qml/Readdict/ui/qml"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/qml"
+    FILES
+        ../src/ui/qml/ShelfPage.qml
+        ../src/ui/qml/BookCard.qml
+)
+add_test(NAME tst_qml COMMAND tst_qml)
