@@ -10,7 +10,6 @@ public:
     void save();
     QString filePath() const { return m_path; }
 private:
-    QJsonObject getObject(const QString &dottedKey) const;
     QString m_path;
     QJsonObject m_root;
 };

@@ -25,6 +25,20 @@ private slots:
         SettingsStore s2(path);
         QCOMPARE(s2.value("webdav/port").toInt(), 8080);
     }
+    void deepPathPreservesSiblings() {
+        QTemporaryDir dir;
+        const QString path = dir.path() + "/settings.json";
+        {
+            SettingsStore s(path);
+            s.setValue("a/b/c", 1);
+            s.setValue("a/b/d", 2);
+            QCOMPARE(s.value("a/b/c").toInt(), 1); // 写 d 时不得丢弃同层已写入的 c
+            QCOMPARE(s.value("a/b/d").toInt(), 2);
+        }
+        SettingsStore s2(path);
+        QCOMPARE(s2.value("a/b/c").toInt(), 1);
+        QCOMPARE(s2.value("a/b/d").toInt(), 2);
+    }
 };
 QTEST_MAIN(TestSettings)
 #include "tst_settings.moc"

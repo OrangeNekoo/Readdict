@@ -1,6 +1,20 @@
 #include "SettingsStore.h"
+#include <QDebug>
 #include <QFile>
 #include <QJsonDocument>
+
+// 沿 key 链逐级下钻：每层取现有子对象（保留兄弟键）递归写入，再写回父对象。
+// 等价于"沿 key 链逐级下钻"的引用式写法；QJsonValueRef 是临时值，无法取其地址
+// （&(*cursor)[parts[i]] 是编译错误），故用逐层拷贝回写实现同样的语义。
+static void insertPath(QJsonObject &obj, const QStringList &parts, int idx, const QJsonValue &value) {
+    if (idx == parts.size() - 1) {
+        obj.insert(parts[idx], value);
+        return;
+    }
+    QJsonObject child = obj.value(parts[idx]).toObject(); // 中间层为标量时按简报注视为可接受（toObject 得空对象）
+    insertPath(child, parts, idx + 1, value);
+    obj.insert(parts[idx], child);
+}
 
 SettingsStore::SettingsStore(const QString &path) : m_path(path) {
     QFile f(m_path);
@@ -27,21 +41,17 @@ QJsonValue SettingsStore::value(const QString &dottedKey) const {
 }
 
 void SettingsStore::setValue(const QString &dottedKey, const QJsonValue &value) {
-    const QStringList parts = dottedKey.split('/');
-    // 自底向上重建路径：sub 初始为叶子值，逐层挂回 m_root 中对应父对象（保留该层已有键），
-    // 最后整条路径写回根。避免简报中悬垂引用（&(*cursor)[parts[i]]）导致的丢失修改。
-    QJsonValue sub = value;
-    for (int i = parts.size() - 2; i >= 0; --i) {
-        QJsonObject parent = m_root.value(parts[i]).toObject();
-        parent.insert(parts[i + 1], sub);
-        sub = parent;
-    }
-    m_root.insert(parts.first(), sub);
+    insertPath(m_root, dottedKey.split('/'), 0, value);
     save();
 }
 
 void SettingsStore::save() {
     QFile f(m_path);
-    if (f.open(QIODevice::WriteOnly))
-        f.write(QJsonDocument(m_root).toJson(QJsonDocument::Indented));
+    if (!f.open(QIODevice::WriteOnly)) {
+        qWarning("SettingsStore: 无法写入 %s: %s", qPrintable(m_path), qPrintable(f.errorString()));
+        return;
+    }
+    const QByteArray data = QJsonDocument(m_root).toJson(QJsonDocument::Indented);
+    if (f.write(data) != data.size())
+        qWarning("SettingsStore: 写入 %s 不完整: %s", qPrintable(m_path), qPrintable(f.errorString()));
 }
