@@ -1,33 +1,38 @@
-cmake_minimum_required(VERSION 3.19)
-project(Readdict LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.21)
+project(Readdict VERSION 0.1.0 LANGUAGES CXX)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
+
+find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Sql Network Pdf TextToSpeech Multimedia Test)
 
 qt_standard_project_setup()
 
 qt_add_executable(Readdict
-    WIN32 MACOSX_BUNDLE
-    main.cpp
-    mainwindow.cpp
-    mainwindow.h
-    mainwindow.ui
+    src/main.cpp
+)
+qt_add_qml_module(Readdict
+    URI Readdict
+    VERSION 1.0
+    RESOURCE_PREFIX "/qt/qml"
+    OUTPUT_DIRECTORY ReaddictQml
+    QML_FILES
+        src/ui/qml/Main.qml
+        src/ui/qml/ShelfPage.qml
+        src/ui/qml/BookCard.qml
+        src/ui/qml/SettingsPage.qml
 )
 
-target_link_libraries(Readdict
-    PRIVATE
-        Qt::Core
-        Qt::Widgets
+qt_add_resources(Readdict "app_resources"
+    PREFIX "/"
+    FILES resources.qrc
 )
 
-install(TARGETS Readdict
-    BUNDLE  DESTINATION .
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+target_include_directories(Readdict PRIVATE src)
+target_link_libraries(Readdict PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Sql Qt6::Network
 )
 
-qt_generate_deploy_app_script(
-    TARGET Readdict
-    OUTPUT_SCRIPT deploy_script
-    NO_UNSUPPORTED_PLATFORM_ERROR
-)
-install(SCRIPT ${deploy_script})
+enable_testing()
+add_subdirectory(tests)
