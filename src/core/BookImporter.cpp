@@ -82,11 +82,13 @@ void BookImporter::doImport(const QUrl &url) {
     const QString file = url.toLocalFile();
     if (file.isEmpty()) {
         qWarning() << "doImport: 无法解析本地文件路径:" << url;
+        emit importFailed("无法解析本地文件路径", url.toString());
         return;
     }
     const QString err = importFile(file, true);
     if (!err.isEmpty()) {
         qWarning() << "导入失败:" << err << "(" << file << ")";
+        emit importFailed(err, file);
         return;
     }
     emit imported();

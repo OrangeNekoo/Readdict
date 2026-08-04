@@ -88,16 +88,7 @@ Book BookManager::bookById(qint64 id) const {
 QVector<Book> BookManager::books() const {
     QString filter = m_filter;
     QString where = filter.isEmpty() ? QString() : QString("WHERE category='%1'").arg(filter.replace('\'', "''"));
-    QString order;
-    switch (m_sort) {
-    case SortField::Author: order = "ORDER BY author, title"; break;
-    case SortField::Publisher: order = "ORDER BY publisher, title"; break;
-    case SortField::Category: order = "ORDER BY category, title"; break;
-    case SortField::Recent: order = "ORDER BY last_read_at DESC, id DESC"; break;
-    // 裁定：added_at DESC（最近添加在前），id DESC 兜底保证同毫秒时间戳下排序稳定
-    default: order = "ORDER BY added_at DESC, id DESC"; break;
-    }
-    return selectBooks(where, order);
+    return selectBooks(where, orderSql());
 }
 
 QVector<Book> BookManager::search(const QString &query) const {
@@ -106,9 +97,17 @@ QVector<Book> BookManager::search(const QString &query) const {
     QString term = query;
     term.remove('"');
     if (term.isEmpty()) return books();
+    // 与 books() 相同的排序；叠加分类过滤：books_fts 无 category 列，JOIN books 后在 b.category 上加条件，
+    // 搜索限定在所选分类内进行（排序框/分类高亮与网格结果保持一致）。
+    QString sql = "SELECT b.* FROM books_fts f JOIN books b ON b.id=f.rowid WHERE books_fts MATCH ?";
+    if (!m_filter.isEmpty()) {
+        QString filter = m_filter;
+        sql += " AND b.category='" + filter.replace('\'', "''") + "'";
+    }
+    sql += orderSql("b.");
     QVector<Book> out;
     QSqlQuery q(m_db);
-    q.prepare("SELECT b.* FROM books_fts f JOIN books b ON b.id=f.rowid WHERE books_fts MATCH ?");
+    q.prepare(sql);
     q.addBindValue("\"" + term + "\"*");
     if (!q.exec()) return out;
     while (q.next()) {
@@ -121,6 +120,17 @@ QVector<Book> BookManager::search(const QString &query) const {
         out.append(b);
     }
     return out;
+}
+
+QString BookManager::orderSql(const QString &t) const {
+    switch (m_sort) {
+    case SortField::Author: return " ORDER BY " + t + "author, " + t + "title";
+    case SortField::Publisher: return " ORDER BY " + t + "publisher, " + t + "title";
+    case SortField::Category: return " ORDER BY " + t + "category, " + t + "title";
+    case SortField::Recent: return " ORDER BY " + t + "last_read_at DESC, " + t + "id DESC";
+    // 裁定：added_at DESC（最近添加在前），id DESC 兜底保证同毫秒时间戳下排序稳定
+    default: return " ORDER BY " + t + "added_at DESC, " + t + "id DESC";
+    }
 }
 
 void BookManager::setProgress(qint64 id, double progress) {
@@ -168,10 +178,12 @@ QVariantList BookManager::booksModel() const {
 }
 
 QVariantList BookManager::categoriesModel() const {
-    const QStringList cats = categories();
+    // 分类来源为书籍实际填写的分类值（导入时 category 恒空，A8 补分类编辑入口后生效）；
+    // categories 表是独立维护的字典（addCategory/removeCategory），UI 分类栏以书籍分类为准。
     QVariantList out;
-    out.reserve(cats.size());
-    for (const QString &c : cats) out.append(c);
+    QSqlQuery q(m_db);
+    q.exec("SELECT DISTINCT category FROM books WHERE category != '' ORDER BY category");
+    while (q.next()) out.append(q.value(0).toString());
     return out;
 }
 

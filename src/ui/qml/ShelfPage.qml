@@ -7,6 +7,35 @@ import Readdict.Backend
 
 Page {
     id: shelf
+    property string toastText: ""
+
+    Connections {
+        target: Importer
+        function onImportFailed(message, fileName) {
+            shelf.toastText = message + "：" + fileName
+            toastTimer.restart()
+        }
+    }
+
+    Timer {
+        id: toastTimer
+        interval: 4000
+        onTriggered: shelf.toastText = ""
+    }
+
+    // 导入失败 SnackBar 风格提示（成功导入由书籍网格出现新卡片体现，无需提示）
+    Label {
+        id: toast
+        visible: shelf.toastText.length > 0
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.margins: 24
+        z: 100
+        text: shelf.toastText
+        color: "white"
+        padding: 10
+        background: Rectangle { color: "#E6323232"; radius: 4 }
+    }
 
     ColumnLayout {
         anchors.fill: parent

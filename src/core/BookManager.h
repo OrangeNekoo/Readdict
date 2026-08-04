@@ -35,6 +35,9 @@ signals:
     void booksChanged();
 private:
     QVector<Book> selectBooks(const QString &where, const QString &order) const;
+    // 与 m_sort 对应的 ORDER BY 子句（books/search 共用单一来源）；t 为列名前缀
+    // （search 中 JOIN books_fts 后裸列名歧义，须传 "b."），空串用于 books() 单表查询
+    QString orderSql(const QString &t = QString()) const;
     QSqlDatabase m_db;
     SortField m_sort = SortField::Added;
     QString m_filter;

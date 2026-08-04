@@ -17,10 +17,11 @@ public:
     QVector<Book> books() const;
     // QML 导入入口：本地文件 URL → importFile(file, true)；成功发 imported() 由
     // 主程序连接刷新 Books 单例（本实例内部 BookManager 用独立连接名，booksChanged
-    // 不会到达 UI 绑定的 Books 单例）。
+    // 不会到达 UI 绑定的 Books 单例）；失败发 importFailed(message, fileName) 供 UI 提示。
     Q_INVOKABLE void doImport(const QUrl &url);
 signals:
     void imported();
+    void importFailed(const QString &message, const QString &fileName);
 private:
     static QString coverPathFor(const QString &title, const QString &destDir);
     QString generatePlaceholderCover(const QString &title, const QString &destDir) const;
