@@ -6,8 +6,9 @@
 #include <QDateTime>
 #include <QDebug>
 
-BookManager::BookManager(const QString &dbPath, QObject *parent) : QObject(parent) {
-    DatabaseManager dbm(dbPath);
+BookManager::BookManager(const QString &dbPath, const QString &connection, QObject *parent)
+    : QObject(parent) {
+    DatabaseManager dbm(dbPath, connection);
     m_db = dbm.database();
 }
 
@@ -141,7 +142,59 @@ void BookManager::addReadSeconds(qint64 id, qint64 seconds) {
 
 void BookManager::setSort(SortField field) { m_sort = field; }
 
-void BookManager::setFilter(const QString &category) { m_filter = category; }
+// ---- QML 封装 ----
+
+QVariantList BookManager::booksModel() const {
+    const QVector<Book> list = m_searchQuery.isEmpty() ? books() : search(m_searchQuery);
+    QVariantList out;
+    out.reserve(list.size());
+    for (const Book &b : list) {
+        QVariantMap m;
+        m.insert("id", b.id);
+        m.insert("title", b.title);
+        m.insert("author", b.author);
+        m.insert("publisher", b.publisher);
+        m.insert("category", b.category);
+        m.insert("format", b.format);
+        m.insert("path", b.path);
+        m.insert("cover", b.cover);
+        m.insert("progress", b.progress);
+        m.insert("readSeconds", b.readSeconds);
+        m.insert("lastReadAt", b.lastReadAt);
+        m.insert("addedAt", b.addedAt);
+        out.append(m);
+    }
+    return out;
+}
+
+QVariantList BookManager::categoriesModel() const {
+    const QStringList cats = categories();
+    QVariantList out;
+    out.reserve(cats.size());
+    for (const QString &c : cats) out.append(c);
+    return out;
+}
+
+void BookManager::setSort(int index) {
+    switch (index) {
+    case 0: m_sort = SortField::Added; break;
+    case 1: m_sort = SortField::Author; break;
+    case 2: m_sort = SortField::Publisher; break;
+    case 3: m_sort = SortField::Category; break;
+    default: m_sort = SortField::Recent; break;
+    }
+    emit booksChanged();
+}
+
+void BookManager::setFilter(const QString &category) {
+    m_filter = category;
+    emit booksChanged();
+}
+
+void BookManager::doSearch(const QString &query) {
+    m_searchQuery = query;
+    emit booksChanged();
+}
 
 QStringList BookManager::categories() const {
     QStringList out;

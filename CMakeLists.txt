@@ -11,6 +11,10 @@ qt_standard_project_setup()
 
 qt_add_executable(Readdict
     src/main.cpp
+    src/core/DatabaseManager.cpp
+    src/core/BookManager.cpp
+    src/core/SettingsStore.cpp
+    src/core/BookImporter.cpp
 )
 qt_add_qml_module(Readdict
     URI Readdict

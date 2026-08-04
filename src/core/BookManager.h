@@ -3,12 +3,17 @@
 #include <QObject>
 #include <QSqlDatabase>
 #include <QStringList>
+#include <QVariantList>
+#include <QVariantMap>
 #include <QVector>
 
 class BookManager : public QObject {
     Q_OBJECT
+    Q_PROPERTY(QVariantList booksModel READ booksModel NOTIFY booksChanged)
+    Q_PROPERTY(QVariantList categoriesModel READ categoriesModel NOTIFY booksChanged)
 public:
-    explicit BookManager(const QString &dbPath, QObject *parent = nullptr);
+    // connection：SQLite 连接名，默认 readdict_main；主程序 importer 内部实例用独立连接名
+    explicit BookManager(const QString &dbPath, const QString &connection = "readdict_main", QObject *parent = nullptr);
     qint64 addBook(const Book &book);
     void removeBook(qint64 id);
     QVector<Book> books() const;
@@ -16,11 +21,16 @@ public:
     void setProgress(qint64 id, double progress);
     void addReadSeconds(qint64 id, qint64 seconds);
     void setSort(SortField field);
-    void setFilter(const QString &category);
     QVector<Book> search(const QString &query) const;
     QStringList categories() const;
     void addCategory(const QString &name);
     void removeCategory(const QString &name);
+    // ---- QML 可见封装 ----
+    QVariantList booksModel() const;
+    QVariantList categoriesModel() const;
+    Q_INVOKABLE void setSort(int index); // 0 Added 1 Author 2 Publisher 3 Category 4 Recent
+    Q_INVOKABLE void setFilter(const QString &category);
+    Q_INVOKABLE void doSearch(const QString &query);
 signals:
     void booksChanged();
 private:
@@ -28,4 +38,5 @@ private:
     QSqlDatabase m_db;
     SortField m_sort = SortField::Added;
     QString m_filter;
+    QString m_searchQuery;
 };

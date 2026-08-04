@@ -1,5 +1,6 @@
 #include "BookImporter.h"
 #include "BookManager.h"
+#include <QDebug>
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
@@ -8,8 +9,8 @@
 #include <QPixmap>
 #include <QCryptographicHash>
 
-BookImporter::BookImporter(const QString &libraryDir, const QString &dbPath)
-    : m_libraryDir(libraryDir), m_books(new BookManager(dbPath)) {}
+BookImporter::BookImporter(const QString &libraryDir, const QString &dbPath, QObject *parent)
+    : QObject(parent), m_libraryDir(libraryDir), m_books(new BookManager(dbPath, "readdict_importer")) {}
 
 BookImporter::~BookImporter() {
     delete m_books;
@@ -75,4 +76,18 @@ QString BookImporter::generatePlaceholderCover(const QString &title, const QStri
 
 QVector<Book> BookImporter::books() const {
     return m_books->books();
+}
+
+void BookImporter::doImport(const QUrl &url) {
+    const QString file = url.toLocalFile();
+    if (file.isEmpty()) {
+        qWarning() << "doImport: 无法解析本地文件路径:" << url;
+        return;
+    }
+    const QString err = importFile(file, true);
+    if (!err.isEmpty()) {
+        qWarning() << "导入失败:" << err << "(" << file << ")";
+        return;
+    }
+    emit imported();
 }

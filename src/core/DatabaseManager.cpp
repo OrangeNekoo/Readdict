@@ -4,10 +4,13 @@
 #include <QDebug>
 #include <QVariant>
 
-DatabaseManager::DatabaseManager(const QString &path) { open(path); migrate(); }
+DatabaseManager::DatabaseManager(const QString &path, const QString &connection) {
+    open(path, connection);
+    migrate();
+}
 
-void DatabaseManager::open(const QString &path) {
-    m_db = QSqlDatabase::addDatabase("QSQLITE", "readdict_main");
+void DatabaseManager::open(const QString &path, const QString &connection) {
+    m_db = QSqlDatabase::addDatabase("QSQLITE", connection);
     m_db.setDatabaseName(path);
     if (!m_db.open())
         qFatal("无法打开数据库: %s", qPrintable(m_db.lastError().text()));

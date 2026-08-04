@@ -16,7 +16,7 @@ static void insertPath(QJsonObject &obj, const QStringList &parts, int idx, cons
     obj.insert(parts[idx], child);
 }
 
-SettingsStore::SettingsStore(const QString &path) : m_path(path) {
+SettingsStore::SettingsStore(const QString &path, QObject *parent) : QObject(parent), m_path(path) {
     QFile f(m_path);
     if (f.open(QIODevice::ReadOnly))
         m_root = QJsonDocument::fromJson(f.readAll()).object();
