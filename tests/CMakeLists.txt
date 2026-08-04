@@ -7,3 +7,8 @@ qt_add_executable(tst_bookmanager tst_bookmanager.cpp ${CMAKE_CURRENT_SOURCE_DIR
 target_include_directories(tst_bookmanager PRIVATE ../src)
 target_link_libraries(tst_bookmanager PRIVATE Qt6::Test Qt6::Sql)
 add_test(NAME tst_bookmanager COMMAND tst_bookmanager)
+
+qt_add_executable(tst_settings tst_settings.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/SettingsStore.cpp)
+target_include_directories(tst_settings PRIVATE ../src)
+target_link_libraries(tst_settings PRIVATE Qt6::Test)
+add_test(NAME tst_settings COMMAND tst_settings)
