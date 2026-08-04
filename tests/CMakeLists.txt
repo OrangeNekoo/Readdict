@@ -2,3 +2,8 @@ qt_add_executable(tst_database tst_database.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../s
 target_include_directories(tst_database PRIVATE ../src)
 target_link_libraries(tst_database PRIVATE Qt6::Test Qt6::Sql)
 add_test(NAME tst_database COMMAND tst_database)
+
+qt_add_executable(tst_bookmanager tst_bookmanager.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/DatabaseManager.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/BookManager.cpp)
+target_include_directories(tst_bookmanager PRIVATE ../src)
+target_link_libraries(tst_bookmanager PRIVATE Qt6::Test Qt6::Sql)
+add_test(NAME tst_bookmanager COMMAND tst_bookmanager)
