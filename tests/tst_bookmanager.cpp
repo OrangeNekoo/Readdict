@@ -46,6 +46,12 @@ private slots:
     void deletesBook() {
         m_mgr->removeBook(1);
         QCOMPARE(m_mgr->books().size(), 1);
+        QCOMPARE(m_mgr->search("红楼梦").size(), 0); // FTS 索引同步清理
+    }
+    void searchesTitleContainingQuote() {
+        // 复审修复：MATCH 中未转义的 '"' 会截断字符串导致 exec 失败静默返回空，剔除后仍应命中。
+        m_mgr->addBook(Book{-1, "测试\"引号", "某作者", "其他", "其他", "EPUB", "/tmp/quote.epub", QString(), 0.0});
+        QCOMPARE(m_mgr->search("引号\"").size(), 1);
     }
 private:
     std::unique_ptr<BookManager> m_mgr;
