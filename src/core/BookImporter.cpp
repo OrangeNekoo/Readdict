@@ -39,7 +39,12 @@ QString BookImporter::importFile(const QString &srcPath, bool moveIntoLibrary) {
     Book b;
     b.title = QFileInfo(fileName).completeBaseName();
     b.format = format; b.path = dest; b.cover = cover;
-    m_books->addBook(b);
+    // addBook 返回 -1 表示写入失败（如 path 唯一约束冲突、FTS 索引写入失败），此时回滚文件副作用。
+    if (m_books->addBook(b) < 0) {
+        QFile::remove(dest);
+        if (!cover.isEmpty()) QFile::remove(cover);
+        return "写入数据库失败";
+    }
     return {};
 }
 

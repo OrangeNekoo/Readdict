@@ -22,6 +22,7 @@ private slots:
         BookImporter imp(libDir.path(), ":memory:");
         const QString err = imp.importFile(src.fileName(), true);
         QVERIFY(err.isEmpty());
+        QVERIFY(QFile::exists(src.fileName())); // 复制语义：源文件保留
         QVERIFY(QFile::exists(libDir.path() + "/books/book.txt"));
         QCOMPARE(imp.books().size(), 1);
     }
