@@ -5,7 +5,8 @@
 //      标题/章节/段落/预分句/内联 <b>
 //   2) 伪造"加密"文件（PDB 头 + record0 声明 encryption_type=2，无正文）→
 //      libmobi 识别为加密（mobi_is_encrypted），报"加密"错误、模型为空、不崩溃
-//   3) 64 字节零文件 → 非 MOBI（type 非 BOOK/TEXt），报非空错误、模型为空
+//   3) 64 字节零文件 → 不足 78 字节 PDB 头，libmobi 报 MOBI_DATA_CORRUPT →
+//      非空错误、模型为空
 // 构造细节与 libmobi 校验逻辑对应（见 MobiParser.cpp 顶部注释）。
 #include <QtTest>
 #include "MobiParser.h"
@@ -119,6 +120,7 @@ private slots:
             "<p>第二段 <b>加粗</b> 内容。</p>"
             "<h2>第二章 继续</h2>"
             "<p>第三段。</p>"
+            "<p>第四段<br>换行后。</p>"
             "</body></html>";
         MobiParser p;
         QTemporaryDir dir;
@@ -145,9 +147,13 @@ private slots:
 
         const Chapter &c2 = model.chapters[1];
         QCOMPARE(c2.title, QString("第二章 继续"));
-        QCOMPARE(c2.paragraphs.size(), 2);
+        QCOMPARE(c2.paragraphs.size(), 3);
         QCOMPARE(c2.paragraphs[0].level, 2);
         QCOMPARE(c2.paragraphs[1].text, QString("第三段。"));
+        // <br> 在 html 中保留结构、text 中换行，文本不粘连
+        QCOMPARE(c2.paragraphs[2].text, QString("第四段\n换行后。"));
+        QVERIFY(c2.paragraphs[2].html.contains("<br>"));
+        QCOMPARE(c2.paragraphs[2].sentences.size(), 1);
     }
 };
 

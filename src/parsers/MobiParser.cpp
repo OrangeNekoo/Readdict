@@ -212,9 +212,11 @@ DocumentModel MobiParser::parse(const QString &mobiPath) {
     static const QRegularExpression srcRe(QStringLiteral("src=[\"']?([^\"'\\s>]+)"));
     static const QRegularExpression resNameRe(QStringLiteral("^resource(\\d+)\\."));
 
+    bool sawHtml = false; // 是否处理过任何 HTML part（Print Replica 等为 T_PDF/T_BREAK）
     for (const MOBIPart *part = rawml->markup; part; part = part->next) {
         if (part->type != T_HTML || part->data == nullptr || part->size == 0)
             continue;
+        sawHtml = true;
         const QString html = QString::fromUtf8(
             reinterpret_cast<const char *>(part->data), int(part->size));
         QRegularExpressionMatchIterator it = tagRe.globalMatch(html);
@@ -290,6 +292,14 @@ DocumentModel MobiParser::parse(const QString &mobiPath) {
                 }
                 continue;
             }
+            if (tag == QLatin1String("br")) {
+                // <br>（含 <br/>）在段落内输出换行：html 保留结构、text 供分句
+                if (inBlock) {
+                    curPara.html += QStringLiteral("<br>");
+                    curPara.text += QLatin1Char('\n');
+                }
+                continue;
+            }
             if (inBlock && isInlineTag(tag))
                 curPara.html += '<' + tag + '>';
         }
@@ -303,6 +313,15 @@ DocumentModel MobiParser::parse(const QString &mobiPath) {
     }
     wrapAndAppendPara();
     closeChapter();
+
+    if (!sawHtml) {
+        // Print Replica（AZW4，markup 为 T_PDF）等无 HTML 正文的类型：
+        // 返回空模型并给出明确错误，而非静默成功
+        mobi_free_rawml(rawml);
+        mobi_free(m);
+        m_error = QStringLiteral("未解析到正文（不支持的 MOBI 类型）");
+        return model;
+    }
 
     mobi_free_rawml(rawml);
     mobi_free(m);
