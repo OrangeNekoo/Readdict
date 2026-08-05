@@ -41,7 +41,7 @@ qt_add_executable(tst_bookimporter
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/ParserFactory.cpp
 )
 target_include_directories(tst_bookimporter PRIVATE ../src ../src/parsers ../third_party/libmobi/src)
-target_link_libraries(tst_bookimporter PRIVATE Qt6::Test Qt6::Sql Qt6::Gui MINIZIP::minizipstatic mobi zlibstatic)
+target_link_libraries(tst_bookimporter PRIVATE Qt6::Test Qt6::Sql Qt6::Gui Qt6::Pdf MINIZIP::minizipstatic mobi zlibstatic)
 if(APPLE)
     target_link_libraries(tst_bookimporter PRIVATE iconv)
 endif()
@@ -131,7 +131,7 @@ qt_add_executable(tst_qml
 target_include_directories(tst_qml PRIVATE ../src ../src/parsers ../third_party/libmobi/src)
 target_compile_definitions(tst_qml PRIVATE QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml")
 target_link_libraries(tst_qml PRIVATE
-    Qt6::Test Qt6::QuickTest Qt6::Quick Qt6::Qml Qt6::QuickControls2 Qt6::Sql Qt6::Gui
+    Qt6::Test Qt6::QuickTest Qt6::Quick Qt6::Qml Qt6::QuickControls2 Qt6::Sql Qt6::Gui Qt6::Pdf
     MINIZIP::minizipstatic mobi zlibstatic
 )
 if(APPLE)
@@ -148,5 +148,6 @@ qt_add_resources(tst_qml "qml_ui"
         ../src/ui/qml/ReaderContent.qml
         ../src/ui/qml/ReaderControls.qml
         ../src/ui/qml/ReaderBackground.qml
+        ../src/ui/qml/PdfReaderPage.qml
 )
 add_test(NAME tst_qml COMMAND tst_qml)

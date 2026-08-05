@@ -4,7 +4,9 @@
 
 #include <unzip.h>   // minizip：EPUB 封面条目读取（与 EpubParser 同源）
 
+#include <QPdfDocument>
 #include <QCryptographicHash>
+#include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
 #include <QFile>
@@ -150,6 +152,27 @@ QString opfCoverEntry(const QByteArray &opf, const QString &opfEntry) {
     return {};
 }
 
+// 统一封面归一化：等比放大至填满 300x400 后居中裁剪（书架 3:4 裁切显示，
+// 避免白边，封面顶部标题约 1% 的裁剪可接受）。EPUB 提取与 PDF 首页渲染共用。
+QImage normalizeCover(QImage img) {
+    const QSize target(300, 400);
+    if (img.size() != target) {
+        img = img.scaled(target, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+        const QRect crop((img.width() - target.width()) / 2,
+                         (img.height() - target.height()) / 2,
+                         target.width(), target.height());
+        img = img.copy(crop);
+    }
+    return img;
+}
+
+// 真实封面统一命名：covers/cover_<书文件路径 md5>.png（与占位 <hash6>.png 区分）
+QString realCoverPath(const QString &bookPath, const QString &coverDir) {
+    return coverDir + QStringLiteral("cover_") + QString::fromLatin1(
+        QCryptographicHash::hash(bookPath.toUtf8(), QCryptographicHash::Md5).toHex())
+        + QStringLiteral(".png");
+}
+
 } // namespace
 
 BookImporter::BookImporter(const QString &libraryDir, const QString &dbPath, QObject *parent)
@@ -190,8 +213,18 @@ QString BookImporter::importFile(const QString &srcPath, bool moveIntoLibrary) {
     QString rollbackCover; // 本次新建、入库失败时需删除的封面（真实封面按书文件命名必为新建）
     if (format == "EPUB") {
         // EPUB 提取真实封面（OPF cover 声明 → 解析结果首个内嵌图片）；失败回退占位。
-        // TXT/MD/FB2/MOBI 无内嵌封面保留占位；PDF 封面待 B9（QtPdf 渲染首页）接入。
+        // TXT/MD/FB2/MOBI 无内嵌封面保留占位。
         const QString realCover = extractEpubCover(dest, coverDir);
+        if (!realCover.isEmpty()) {
+            cover = realCover;
+            rollbackCover = realCover;
+        } else {
+            cover = generatePlaceholderCover(title, coverDir);
+            if (!coverExisted) rollbackCover = cover;
+        }
+    } else if (format == "PDF") {
+        // PDF 渲染首页为真实封面（B9）；加载/渲染失败回退占位。
+        const QString realCover = extractPdfCover(dest, coverDir);
         if (!realCover.isEmpty()) {
             cover = realCover;
             rollbackCover = realCover;
@@ -273,22 +306,40 @@ QString BookImporter::extractEpubCover(const QString &epubPath, const QString &c
         qWarning() << "BookImporter: 未找到 EPUB 内嵌封面，保留占位封面" << epubPath;
         return {};
     }
-    // 统一缩放到 300x400：等比放大至填满后居中裁剪（书架 3:4 裁切显示，
-    // 避免白边，封面顶部标题约 1% 的裁剪可接受）
-    const QSize target(300, 400);
-    if (img.size() != target) {
-        img = img.scaled(target, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-        const QRect crop((img.width() - target.width()) / 2,
-                         (img.height() - target.height()) / 2,
-                         target.width(), target.height());
-        img = img.copy(crop);
-    }
+    // 统一缩放到 300x400（normalizeCover：等比放大至填满后居中裁剪）
     QDir(coverDir).mkpath(".");
     // 真实封面按书文件路径 md5 命名（covers/cover_<md5>.png），与占位命名区分
-    const QString path = coverDir + QStringLiteral("cover_") + QString::fromLatin1(
-        QCryptographicHash::hash(epubPath.toUtf8(), QCryptographicHash::Md5).toHex())
-        + QStringLiteral(".png");
-    if (!img.save(path, "PNG")) {
+    const QString path = realCoverPath(epubPath, coverDir);
+    if (!normalizeCover(img).save(path, "PNG")) {
+        m_lastError = QStringLiteral("封面保存失败，保留占位封面");
+        qWarning() << "BookImporter: 封面保存失败" << path;
+        return {};
+    }
+    return path;
+}
+
+QString BookImporter::extractPdfCover(const QString &pdfPath, const QString &coverDir) {
+    QPdfDocument doc;
+    doc.load(pdfPath);
+    // 加载可能异步完成（QPdfDocument::load 返回后 status 为 Loading）：同步轮询等待
+    // Ready/Error，避免首帧即取 status() 误判失败（正常 PDF 首次加载即 Ready）。
+    for (int i = 0; i < 200 && doc.status() == QPdfDocument::Status::Loading; ++i)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+    if (doc.status() != QPdfDocument::Status::Ready) {
+        m_lastError = QStringLiteral("PDF 加载失败，封面回退占位");
+        qWarning() << "BookImporter: PDF 封面提取失败（无法加载），保留占位封面" << pdfPath;
+        return {};
+    }
+    QImage img = doc.render(0, QSize(300, 400));
+    if (img.isNull()) {
+        m_lastError = QStringLiteral("PDF 首页渲染失败，封面回退占位");
+        qWarning() << "BookImporter: PDF 首页渲染失败，保留占位封面" << pdfPath;
+        return {};
+    }
+    QDir(coverDir).mkpath(".");
+    // 真实封面与 EPUB 同命名：covers/cover_<书文件路径 md5>.png
+    const QString path = realCoverPath(pdfPath, coverDir);
+    if (!normalizeCover(img).save(path, "PNG")) {
         m_lastError = QStringLiteral("封面保存失败，保留占位封面");
         qWarning() << "BookImporter: 封面保存失败" << path;
         return {};

@@ -1,6 +1,8 @@
 import QtQuick
+import QtQuick.Pdf
 import QtTest
 import Readdict.Backend
+import Readdict.Test 1.0
 
 // 冒烟测试：真实 UI 组件可在测试进程中加载（Loader + qrc 资源路径，
 // 单例由 tst_qmlmain.cpp 注册）。
@@ -26,6 +28,35 @@ Item {
     Component {
         id: controlsComp
         Loader { source: "qrc:/qt/qml/Readdict/ui/qml/ReaderControls.qml" }
+    }
+    Component {
+        id: pdfReaderComp
+        Loader { source: "qrc:/qt/qml/Readdict/ui/qml/PdfReaderPage.qml" }
+    }
+    TestCase {
+        name: "PdfReaderSmoke"
+        function test_pdfReaderLoads() {
+            var loader = pdfReaderComp.createObject(root)
+            verify(loader.item !== null, "PdfReaderPage 应能加载（QtQuick.Pdf import + PdfScrollablePageView 编译检查）")
+            loader.destroy()
+        }
+        // 真实 PDF 加载验证：TestEnv.pdfSource 为空（未设 READDICT_REAL_PDF）时跳过；
+        // 否则加载真实文件并等待 PdfDocument Ready，确认 QtPdf 渲染管线可用
+        function test_pdfLoadsRealSource() {
+            var src = TestEnv.pdfSource
+            if (src.length === 0)
+                skip("未设置 READDICT_REAL_PDF，跳过真实 PDF 加载验证")
+            var loader = pdfReaderComp.createObject(root)
+            var page = loader.item
+            verify(page !== null, "PdfReaderPage 应能加载")
+            page.book = { id: 999001, title: "真实PDF", path: src }
+            var doc = page.pdfDocument
+            verify(doc !== null, "PdfReaderPage 应暴露 pdfDocument")
+            tryVerify(function () { return doc.status === PdfDocument.Ready }, 15000,
+                      "真实 PDF 应加载为 Ready，实际 " + doc.status)
+            verify(doc.pageCount > 0, "加载的 PDF 应有页数")
+            loader.destroy()
+        }
     }
     TestCase {
         name: "ShelfSmoke"

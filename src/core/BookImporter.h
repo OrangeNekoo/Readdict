@@ -31,6 +31,9 @@ private:
     // 从 EPUB 提取封面（OPF cover 声明优先，其次 DocumentModel 首个内嵌图片），
     // 缩放到 300x400 存为 covers/cover_<书文件 md5>.png；失败返回空串。
     QString extractEpubCover(const QString &epubPath, const QString &coverDir);
+    // 从 PDF 渲染第 1 页为封面（QPdfDocument），缩放到 300x400 存为
+    // covers/cover_<书文件 md5>.png；加载/渲染失败返回空串（回退占位）。
+    QString extractPdfCover(const QString &pdfPath, const QString &coverDir);
     QString m_libraryDir;
     QString m_lastError;
     class BookManager *m_books;

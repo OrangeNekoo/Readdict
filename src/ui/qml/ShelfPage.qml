@@ -115,11 +115,11 @@ Page {
                 model: Books.booksModel
                 delegate: BookCard {
                     book: modelData
-                    // 文本格式进入阅读页；PDF 阅读页在 B9 接入
+                    // 文本格式进入阅读页；PDF 进入 PDF 阅读页（B9，按 format 分流）
                     onClicked: {
                         const fmt = (modelData.format ?? "").toUpperCase()
                         if (fmt === "PDF") {
-                            console.log("PDF 阅读页将在 B9 实现：" + modelData.title)
+                            shelf.StackView.view.push("PdfReaderPage.qml", { book: modelData })
                         } else {
                             shelf.StackView.view.push("ReaderPage.qml", { book: modelData })
                         }

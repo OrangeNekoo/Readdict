@@ -22,6 +22,9 @@
 class TestEnv : public QObject {
     Q_OBJECT
     Q_PROPERTY(QStringList sourceFiles READ sourceFiles CONSTANT)
+    // 真实 PDF 路径（环境变量 READDICT_REAL_PDF，未设置时为空串）：供 PdfReaderPage
+    // 冒烟测试加载真实源文件验证 QtQuick.Pdf 可用（B9）
+    Q_PROPERTY(QString pdfSource READ pdfSource CONSTANT)
 public:
     explicit TestEnv(const QString &workDir, QObject *parent = nullptr) : QObject(parent) {
         QDir srcDir(workDir + "/src");
@@ -40,6 +43,10 @@ public:
         }
     }
     QStringList sourceFiles() const { return m_files; }
+    QString pdfSource() const {
+        const QString p = qEnvironmentVariable("READDICT_REAL_PDF");
+        return QFile::exists(p) ? p : QString();
+    }
 private:
     QStringList m_files;
 };

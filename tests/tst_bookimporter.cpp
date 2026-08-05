@@ -296,6 +296,25 @@ private slots:
         QVERIFY(!img.isNull());
         QCOMPARE(img.size(), QSize(300, 400));
     }
+    // 真实 PDF 验证：设置环境变量 READDICT_REAL_PDF=<pdf 路径> 时执行；
+    // 断言封面为首页缩略图（covers/cover_<md5>.png，300x400，非占位命名）
+    void realPdfCover() {
+        const QString real = qEnvironmentVariable("READDICT_REAL_PDF");
+        if (real.isEmpty() || !QFile::exists(real))
+            QSKIP("未设置 READDICT_REAL_PDF，跳过真实 PDF 封面验证");
+        QTemporaryDir libDir;
+        BookImporter imp(libDir.path(), ":memory:");
+        const QString err = imp.importFile(real, true);
+        QVERIFY(err.isEmpty());
+        QCOMPARE(imp.books().size(), 1);
+        const QString cover = imp.books()[0].cover;
+        QVERIFY(QFileInfo(cover).fileName().startsWith(QStringLiteral("cover_")));
+        QVERIFY(QFile::exists(cover));
+        QImage img(cover);
+        QVERIFY(!img.isNull());
+        QCOMPARE(img.size(), QSize(300, 400));
+        QVERIFY(imp.lastError().isEmpty()); // 真实封面成功，不得记入占位回退原因
+    }
 };
 QTEST_MAIN(TestImporter)
 #include "tst_bookimporter.moc"
