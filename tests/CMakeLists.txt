@@ -18,6 +18,11 @@ target_include_directories(tst_bookimporter PRIVATE ../src)
 target_link_libraries(tst_bookimporter PRIVATE Qt6::Test Qt6::Sql Qt6::Gui)
 add_test(NAME tst_bookimporter COMMAND tst_bookimporter)
 
+qt_add_executable(tst_sentencesplitter tst_sentencesplitter.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/SentenceSplitter.cpp)
+target_include_directories(tst_sentencesplitter PRIVATE ../src ../src/parsers)
+target_link_libraries(tst_sentencesplitter PRIVATE Qt6::Test)
+add_test(NAME tst_sentencesplitter COMMAND tst_sentencesplitter)
+
 # QML 冒烟/端到端测试：自定义 main（tst_qmlmain.cpp）注册 Readdict.Backend 单例，
 # 因为单例只在生产 main.cpp 中注册；不依赖 Qt 内部的 QUICK_TEST_SOURCE_DIR 自动 main，
 # 该宏由下方 target_compile_definitions 提供（tests/qml 绝对路径）。
