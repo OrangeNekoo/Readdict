@@ -35,6 +35,12 @@ qt_add_executable(Readdict
     src/core/BookManager.cpp
     src/core/SettingsStore.cpp
     src/core/BookImporter.cpp
+    src/parsers/SentenceSplitter.cpp
+    src/parsers/TextParser.cpp
+    src/parsers/EpubParser.cpp
+    src/parsers/Fb2Parser.cpp
+    src/parsers/MobiParser.cpp
+    src/parsers/ParserFactory.cpp
 )
 qt_add_qml_module(Readdict
     URI Readdict
@@ -53,10 +59,15 @@ qt_add_resources(Readdict "app_resources"
     FILES resources.qrc
 )
 
-target_include_directories(Readdict PRIVATE src)
+target_include_directories(Readdict PRIVATE src third_party/libmobi/src)
 target_link_libraries(Readdict PRIVATE
     Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Sql Qt6::Network
+    MINIZIP::minizipstatic mobi zlibstatic
 )
+# TextParser 的 GB18030 解码走系统 iconv；macOS 的 iconv 在 libiconv.dylib 中需显式链接
+if(APPLE)
+    target_link_libraries(Readdict PRIVATE iconv)
+endif()
 
 enable_testing()
 add_subdirectory(tests)

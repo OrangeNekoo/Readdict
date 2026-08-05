@@ -1,13 +1,145 @@
 #include "BookImporter.h"
 #include "BookManager.h"
+#include "parsers/ParserFactory.h"
+
+#include <unzip.h>   // minizip：EPUB 封面条目读取（与 EpubParser 同源）
+
+#include <QCryptographicHash>
 #include <QDebug>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QDir>
-#include <QPainter>
 #include <QFont>
+#include <QImage>
+#include <QPainter>
 #include <QPixmap>
-#include <QCryptographicHash>
+#include <QRegularExpression>
+#include <QUrl>
+#include <QXmlStreamReader>
+#include <utility>
+
+namespace {
+
+// 单条 zip 条目大小上限（与 EpubParser 一致，防恶意/损坏压缩包撑爆内存）
+constexpr qint64 kMaxZipEntrySize = 64LL * 1024 * 1024;
+
+QByteArray readZipEntry(const QString &zipPath, const QString &entry) {
+    unzFile zip = unzOpen64(zipPath.toUtf8().constData());
+    if (!zip) return {};
+    QByteArray out;
+    // 先精确匹配，再大小写不敏感兜底（真实书条目名大小写偶有出入）
+    int rc = unzLocateFile(zip, entry.toUtf8().constData(), 1);
+    if (rc != UNZ_OK) rc = unzLocateFile(zip, entry.toUtf8().constData(), 2);
+    if (rc == UNZ_OK && unzOpenCurrentFile(zip) == UNZ_OK) {
+        char buf[4096];
+        int n;
+        while ((n = unzReadCurrentFile(zip, buf, sizeof(buf))) > 0) {
+            out.append(buf, n);
+            if (out.size() > kMaxZipEntrySize) {
+                qWarning("BookImporter: 条目 %s 超过 %lld MB，跳过",
+                         qUtf8Printable(entry),
+                         static_cast<long long>(kMaxZipEntrySize / (1024 * 1024)));
+                out.clear();
+                break;
+            }
+        }
+        unzCloseCurrentFile(zip);
+    }
+    unzClose(zip);
+    return out;
+}
+
+// 解析 zip 内相对路径（href 相对条目所在目录），支持 ./ 与 ../；href 可能含
+// 百分号编码、#fragment、?query。与 EpubParser 的 resolveEntry 同一语义。
+QString resolveZipEntry(const QString &href, const QString &baseEntry) {
+    QString rel = href;
+    const int frag = rel.indexOf('#');
+    if (frag >= 0) rel.truncate(frag);
+    const int query = rel.indexOf('?');
+    if (query >= 0) rel.truncate(query);
+    rel = QUrl::fromPercentEncoding(rel.toUtf8());
+    rel.replace('\\', '/');
+    if (rel.isEmpty() || rel.contains("://") || rel.startsWith("data:"))
+        return {};
+    if (rel.startsWith('/')) rel.remove(0, 1); // 以 / 开头视为相对 zip 根
+    QString base = baseEntry;
+    const int slash = base.lastIndexOf('/');
+    if (slash >= 0) base.truncate(slash + 1); // 保留目录部分（含尾部 '/'）
+    QStringList parts = (base + rel).split('/');
+    QStringList out;
+    for (const QString &p : std::as_const(parts)) {
+        if (p.isEmpty() || p == ".")
+            continue;
+        if (p == "..") {
+            if (!out.isEmpty()) out.removeLast();
+            continue;
+        }
+        out.append(p);
+    }
+    return out.join('/');
+}
+
+// 解析 container.xml，取 rootfile full-path（优先 media-type 为 oebps-package+xml 者）
+QString containerRootfile(const QByteArray &xml) {
+    QXmlStreamReader r(xml);
+    QString fallback;
+    while (!r.atEnd()) {
+        r.readNext();
+        if (!r.isStartElement() || r.name().toString() != QLatin1String("rootfile"))
+            continue;
+        const QString full = r.attributes().value("full-path").toString();
+        const QString mt = r.attributes().value("media-type").toString();
+        if (full.isEmpty())
+            continue;
+        if (mt == QLatin1String("application/oebps-package+xml"))
+            return full;
+        if (fallback.isEmpty())
+            fallback = full;
+    }
+    return fallback;
+}
+
+// 从 content.opf 解析封面条目：EPUB2 <meta name="cover" content="id">、
+// EPUB3 <meta property="cover-image"> / <item properties="cover-image">；
+// 均未声明时兜底取 manifest 中第一个图片条目。返回 zip 内条目路径。
+QString opfCoverEntry(const QByteArray &opf, const QString &opfEntry) {
+    QXmlStreamReader r(opf);
+    QString coverId;
+    QHash<QString, QPair<QString, QString>> itemById; // id → (href, media-type)
+    while (!r.atEnd()) {
+        r.readNext();
+        if (!r.isStartElement()) continue;
+        QString tag = r.name().toString();
+        const int colon = tag.indexOf(':');
+        if (colon >= 0) tag.remove(0, colon + 1);
+        if (tag == QLatin1String("meta")) {
+            const QString name = r.attributes().value("name").toString();
+            const QString prop = r.attributes().value("property").toString();
+            if (name == QLatin1String("cover") || prop == QLatin1String("cover-image"))
+                coverId = r.attributes().value("content").toString();
+        } else if (tag == QLatin1String("item")) {
+            const QString id = r.attributes().value("id").toString();
+            const QString href = r.attributes().value("href").toString();
+            const QString mt = r.attributes().value("media-type").toString();
+            if (r.attributes().value("properties").toString()
+                    .split(' ').contains(QLatin1String("cover-image")))
+                coverId = id;
+            if (!id.isEmpty() && !href.isEmpty())
+                itemById.insert(id, qMakePair(href, mt));
+        }
+    }
+    if (!coverId.isEmpty()) {
+        const auto it = itemById.constFind(coverId);
+        if (it != itemById.constEnd())
+            return resolveZipEntry(it.value().first, opfEntry);
+    }
+    for (auto it = itemById.constBegin(); it != itemById.constEnd(); ++it)
+        if (it.value().second.startsWith("image/"))
+            return resolveZipEntry(it.value().first, opfEntry);
+    return {};
+}
+
+} // namespace
 
 BookImporter::BookImporter(const QString &libraryDir, const QString &dbPath, QObject *parent)
     : QObject(parent), m_libraryDir(libraryDir), m_books(new BookManager(dbPath, "readdict_importer")) {}
@@ -40,16 +172,33 @@ QString BookImporter::importFile(const QString &srcPath, bool moveIntoLibrary) {
     const QString title = QFileInfo(fileName).completeBaseName();
     // 封面由 MD5(标题) 前 6 位命名，同标题书籍共享同一封面文件：
     // 记录生成前是否已存在，回滚时不得删除仍被健康记录引用的封面。
-    const QString coverPath = coverPathFor(title, coverDir);
-    const bool coverExisted = QFile::exists(coverPath);
-    const QString cover = generatePlaceholderCover(title, coverDir);
+    const QString placeholderPath = coverPathFor(title, coverDir);
+    const bool coverExisted = QFile::exists(placeholderPath);
+    m_lastError.clear();
+    QString cover;
+    QString rollbackCover; // 本次新建、入库失败时需删除的封面（真实封面按书文件命名必为新建）
+    if (format == "EPUB") {
+        // EPUB 提取真实封面（OPF cover 声明 → 解析结果首个内嵌图片）；失败回退占位。
+        // TXT/MD/FB2/MOBI 无内嵌封面保留占位；PDF 封面待 B9（QtPdf 渲染首页）接入。
+        const QString realCover = extractEpubCover(dest, coverDir);
+        if (!realCover.isEmpty()) {
+            cover = realCover;
+            rollbackCover = realCover;
+        } else {
+            cover = generatePlaceholderCover(title, coverDir);
+            if (!coverExisted) rollbackCover = cover;
+        }
+    } else {
+        cover = generatePlaceholderCover(title, coverDir);
+        if (!coverExisted) rollbackCover = cover;
+    }
     Book b;
     b.title = title;
     b.format = format; b.path = dest; b.cover = cover;
     // addBook 返回 -1 表示写入失败（如 path 唯一约束冲突、FTS 索引写入失败），此时回滚文件副作用。
     if (m_books->addBook(b) < 0) {
         QFile::remove(dest);
-        if (!coverExisted) QFile::remove(cover);
+        if (!rollbackCover.isEmpty()) QFile::remove(rollbackCover);
         return "写入数据库失败";
     }
     return {};
@@ -71,6 +220,65 @@ QString BookImporter::generatePlaceholderCover(const QString &title, const QStri
     p.drawText(pm.rect(), Qt::AlignCenter, QString(ch));
     p.end();
     pm.save(path, "PNG");
+    return path;
+}
+
+QString BookImporter::extractEpubCover(const QString &epubPath, const QString &coverDir) {
+    QImage img;
+    // 候选 1：OPF 声明的封面（EPUB2 <meta name="cover"> / EPUB3 cover-image），
+    // 直接读 zip 条目。优先于解析结果：SVG 包裹的封面页（<image> 而非 <img>）
+    // 不会被 EpubParser 提取，但 OPF 声明对这类书仍然可靠。
+    const QByteArray container = readZipEntry(epubPath, "META-INF/container.xml");
+    const QString opfEntry = containerRootfile(container);
+    if (!opfEntry.isEmpty()) {
+        const QByteArray opf = readZipEntry(epubPath, opfEntry);
+        const QString entry = opfCoverEntry(opf, opfEntry);
+        if (!entry.isEmpty()) {
+            const QByteArray data = readZipEntry(epubPath, entry);
+            if (!data.isEmpty()) img.loadFromData(data);
+        }
+    }
+    // 候选 2：解析 DocumentModel 后取首个内嵌图片（无封面声明的书，封面多为
+    // 首图）。解析失败不影响入库：封面回退占位，原因记入 lastError。
+    if (img.isNull()) {
+        const DocumentModel model = ParserFactory::parse(epubPath, "EPUB");
+        if (model.empty()) {
+            m_lastError = QStringLiteral("EPUB 解析失败，封面回退占位");
+            qWarning() << "BookImporter: 封面提取失败（EPUB 解析为空），保留占位封面" << epubPath;
+            return {};
+        }
+        for (const Chapter &c : model.chapters)
+            for (const Paragraph &p : c.paragraphs)
+                if (!p.imagePath.isEmpty()) {
+                    img.load(p.imagePath);
+                    if (!img.isNull()) break;
+                }
+    }
+    if (img.isNull()) {
+        m_lastError = QStringLiteral("未找到内嵌封面，保留占位封面");
+        qWarning() << "BookImporter: 未找到 EPUB 内嵌封面，保留占位封面" << epubPath;
+        return {};
+    }
+    // 统一缩放到 300x400：等比放大至填满后居中裁剪（书架 3:4 裁切显示，
+    // 避免白边，封面顶部标题约 1% 的裁剪可接受）
+    const QSize target(300, 400);
+    if (img.size() != target) {
+        img = img.scaled(target, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+        const QRect crop((img.width() - target.width()) / 2,
+                         (img.height() - target.height()) / 2,
+                         target.width(), target.height());
+        img = img.copy(crop);
+    }
+    QDir(coverDir).mkpath(".");
+    // 真实封面按书文件路径 md5 命名（covers/cover_<md5>.png），与占位命名区分
+    const QString path = coverDir + QStringLiteral("cover_") + QString::fromLatin1(
+        QCryptographicHash::hash(epubPath.toUtf8(), QCryptographicHash::Md5).toHex())
+        + QStringLiteral(".png");
+    if (!img.save(path, "PNG")) {
+        m_lastError = QStringLiteral("封面保存失败，保留占位封面");
+        qWarning() << "BookImporter: 封面保存失败" << path;
+        return {};
+    }
     return path;
 }
 

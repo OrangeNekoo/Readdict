@@ -15,6 +15,9 @@ public:
     // moveIntoLibrary：当前恒为复制语义（QFile::copy），参数保留供后续启用移动语义
     QString importFile(const QString &srcPath, bool moveIntoLibrary);
     QVector<Book> books() const;
+    // 最近一次导入的非致命错误（如 EPUB 解析失败导致封面回退占位）；成功或
+    // 无错误时为空串。致命错误仍由 importFile 的返回值表达。
+    QString lastError() const { return m_lastError; }
     // QML 导入入口：本地文件 URL → importFile(file, true)；成功发 imported() 由
     // 主程序连接刷新 Books 单例（本实例内部 BookManager 用独立连接名，booksChanged
     // 不会到达 UI 绑定的 Books 单例）；失败发 importFailed(message, fileName) 供 UI 提示。
@@ -25,6 +28,10 @@ signals:
 private:
     static QString coverPathFor(const QString &title, const QString &destDir);
     QString generatePlaceholderCover(const QString &title, const QString &destDir) const;
+    // 从 EPUB 提取封面（OPF cover 声明优先，其次 DocumentModel 首个内嵌图片），
+    // 缩放到 300x400 存为 covers/cover_<书文件 md5>.png；失败返回空串。
+    QString extractEpubCover(const QString &epubPath, const QString &coverDir);
     QString m_libraryDir;
+    QString m_lastError;
     class BookManager *m_books;
 };
