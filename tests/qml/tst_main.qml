@@ -85,12 +85,28 @@ Item {
                 { text: "前文 图 后文", html: "<p>前文 <img src=\"/nonexistent/b8.png\"> 后文</p>", level: 0, imagePath: "/nonexistent/b8.png" },
                 { text: "标题", html: "<h2>标题</h2>", level: 2, imagePath: "" }
             ]}
-            wait(100) // 等隐式尺寸布局（polish）完成
-            verify(c.contentHeight > 0, "内容高度应随段落增长，实际 " + c.contentHeight)
+            wait(50)
+            // Flickable 会把声明子项重挂到 contentItem；Repeater 在 positioner（Column）内
+            // 又会把委托重挂到 Column，故 col.children[0..3] 依次是 4 个段落委托
+            var col = c.contentItem.children[0]        // Column
+            var dPure = col.children[1]                // 纯图段委托
+            var dMixed = col.children[2]               // 混合段委托
+            verify(dPure !== undefined && dPure.pureImage === true,
+                   "纯图段应走 Image 分支（pureImage=true）")
+            verify(dMixed !== undefined && dMixed.pureImage === false,
+                   "混合段应走 Text 分支（html 含 img 之外的正文）")
+            var mixedTxt = dMixed.children[0]          // 委托内 Text
+            verify(mixedTxt.text.indexOf("前文") >= 0 && mixedTxt.text.indexOf("<img") >= 0
+                   && mixedTxt.text.indexOf("file://") >= 0,
+                   "混合段 Text 应保留正文、行内图且 src 补 file://，实际 " + mixedTxt.text)
+            // 隐式高度依赖布局 polish，轮询等待而非一次性 wait
+            tryVerify(function () { return c.contentHeight > 0 }, 2000,
+                      "内容高度应随段落增长，实际 " + c.contentHeight)
             // 页宽三档 + 对齐切换应无运行时错误且宽度变化生效
             c.typography = { fontFamily: "Source Han Sans VF", fontSize: 20, lineHeight: 1.8,
                              align: "center", pageWidth: "wide" }
-            compare(c.contentHeight > 0, true)
+            tryVerify(function () { return c.contentHeight > 0 }, 2000,
+                      "切换排版后内容高度仍应大于 0")
             loader.destroy()
         }
     }

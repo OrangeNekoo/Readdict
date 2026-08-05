@@ -28,13 +28,19 @@ Flickable {
                 // 走 Text(RichText)——html 内 img src 为本地绝对路径，Qt 富文本可直接渲染。
                 readonly property bool pureImage: !!modelData.imagePath
                     && (modelData.html ?? "").replace(/<img[^>]*>/gi, "").trim().length === 0
+                // 解析器输出的行内图 src 为无 scheme 的本地绝对路径；QQuickText 会按文档 URL
+                // （qrc 模块地址）解析导致加载失败，统一补 file:// 前缀（已有 scheme 的保持原样）
+                readonly property string mixedHtml: para.pureImage ? "" : (modelData.html ?? "")
+                    .replace(/src="([^"]*)"/g, function (m, p) {
+                        return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(p) ? m : 'src="file://' + p + '"'
+                    })
                 implicitHeight: para.pureImage ? imgPara.height : txt.implicitHeight
                 Text {
                     id: txt
                     visible: !para.pureImage
                     width: parent.width
                     textFormat: Text.RichText
-                    text: modelData.html ?? modelData.text ?? ""
+                    text: para.mixedHtml.length > 0 ? para.mixedHtml : (modelData.text ?? "")
                     font.family: flick.typography.fontFamily ?? "思源黑体 VF"
                     font.pixelSize: flick.typography.fontSize ?? 18
                     lineHeight: flick.typography.lineHeight ?? 1.6
