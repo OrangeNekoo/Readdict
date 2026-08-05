@@ -117,6 +117,17 @@ target_include_directories(tst_ttsengine PRIVATE ../src ../src/tts)
 target_link_libraries(tst_ttsengine PRIVATE Qt6::Test Qt6::Network Qt6::Multimedia)
 add_test(NAME tst_ttsengine COMMAND tst_ttsengine)
 
+qt_add_executable(tst_ttscontroller
+    tst_ttscontroller.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/TtsController.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/TtsController.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/TTSEngine.h
+)
+target_include_directories(tst_ttscontroller PRIVATE ../src ../src/tts)
+# TtsController 只依赖 TTSEngine 抽象（头文件），无需 Network/Multimedia
+target_link_libraries(tst_ttscontroller PRIVATE Qt6::Test)
+add_test(NAME tst_ttscontroller COMMAND tst_ttscontroller)
+
 qt_add_executable(tst_parserfactory
     tst_parserfactory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/SentenceSplitter.cpp
