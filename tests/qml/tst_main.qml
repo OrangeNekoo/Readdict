@@ -23,6 +23,10 @@ Item {
         id: contentComp
         Loader { source: "qrc:/qt/qml/Readdict/ui/qml/ReaderContent.qml" }
     }
+    Component {
+        id: controlsComp
+        Loader { source: "qrc:/qt/qml/Readdict/ui/qml/ReaderControls.qml" }
+    }
     TestCase {
         name: "ShelfSmoke"
         function test_shelfLoads() {
@@ -78,6 +82,7 @@ Item {
             c.chapter = { title: "测试章", paragraphs: [
                 { text: "正文段", html: "<p>正文段</p>", level: 0, imagePath: "" },
                 { text: "", html: "", level: 0, imagePath: "/nonexistent/b8.png" },
+                { text: "前文 图 后文", html: "<p>前文 <img src=\"/nonexistent/b8.png\"> 后文</p>", level: 0, imagePath: "/nonexistent/b8.png" },
                 { text: "标题", html: "<h2>标题</h2>", level: 2, imagePath: "" }
             ]}
             wait(100) // 等隐式尺寸布局（polish）完成
@@ -86,6 +91,26 @@ Item {
             c.typography = { fontFamily: "Source Han Sans VF", fontSize: 20, lineHeight: 1.8,
                              align: "center", pageWidth: "wide" }
             compare(c.contentHeight > 0, true)
+            loader.destroy()
+        }
+    }
+    TestCase {
+        name: "ControlsSmoke"
+        // 锁定字号按钮接线（回归：A+ 曾误调 fontSize 属性的自动变更信号导致只减不增）
+        function test_fontButtons() {
+            var loader = controlsComp.createObject(root)
+            var ctl = loader.item
+            verify(ctl !== null, "ReaderControls 应能加载")
+            ctl.fontSize = 18
+            var got = -1
+            ctl.changeFontSize.connect(function (s) { got = s })
+            // RowLayout 子项顺序：0上一章 1目录 2spacer 3A− 4字号label 5A+ 6背景 7对齐 8页宽 9下一章
+            var layout = ctl.children[1]
+            var btnAplus = layout.children[5]
+            btnAplus.clicked()
+            compare(got, 19, "A+ 应发 changeFontSize(fontSize+1)")
+            layout.children[3].clicked()
+            compare(got, 17, "A− 应发 changeFontSize(fontSize-1)")
             loader.destroy()
         }
     }

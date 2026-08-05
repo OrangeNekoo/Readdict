@@ -54,7 +54,7 @@ Rectangle {
             Layout.preferredWidth: 30
             horizontalAlignment: Text.AlignHCenter
         }
-        CtlBtn { lbl: "A+"; onClicked: controls.fontSizeChanged(controls.fontSize + 1) }
+        CtlBtn { lbl: "A+"; onClicked: controls.changeFontSize(controls.fontSize + 1) }
         CtlBtn { lbl: qsTr("背景"); onClicked: controls.toggleBackground() }
         CtlBtn { lbl: qsTr("对齐"); onClicked: controls.toggleAlign() }
         CtlBtn { lbl: qsTr("页宽"); onClicked: controls.togglePageWidth() }

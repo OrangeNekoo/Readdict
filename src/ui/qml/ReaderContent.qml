@@ -21,11 +21,17 @@ Flickable {
         Repeater {
             model: flick.chapter.paragraphs ?? []
             delegate: Item {
+                id: para
                 width: col.width
-                implicitHeight: imgPara.visible ? imgPara.height : txt.implicitHeight
+                // 纯图片段（html 去掉 img 标签后无其他内容）走 Image 分支等比缩放；
+                // 混合段（如 "文本 <img> 文本"，EpubParser 对段内行内图同时填 html 与 imagePath）
+                // 走 Text(RichText)——html 内 img src 为本地绝对路径，Qt 富文本可直接渲染。
+                readonly property bool pureImage: !!modelData.imagePath
+                    && (modelData.html ?? "").replace(/<img[^>]*>/gi, "").trim().length === 0
+                implicitHeight: para.pureImage ? imgPara.height : txt.implicitHeight
                 Text {
                     id: txt
-                    visible: !imgPara.visible
+                    visible: !para.pureImage
                     width: parent.width
                     textFormat: Text.RichText
                     text: modelData.html ?? modelData.text ?? ""
@@ -38,7 +44,7 @@ Flickable {
                 }
                 Image {
                     id: imgPara
-                    visible: !!modelData.imagePath
+                    visible: para.pureImage
                     width: parent.width
                     // 按源图宽高比换算高度（implicit 尺寸即源尺寸）
                     height: imgPara.implicitWidth > 0 ? parent.width * imgPara.implicitHeight / imgPara.implicitWidth : 0

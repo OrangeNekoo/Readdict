@@ -18,9 +18,8 @@
 // 兜底应用包 Resources/fronts（D7 打包完善）；失败仅告警不崩溃。
 static void loadBundledFonts() {
     const QStringList baseDirs = {
-        QDir::currentPath() + "/fronts",
-        QCoreApplication::applicationDirPath() + "/../Resources/fronts",
-        QStringLiteral("/Users/orangeneko/Documents/GitHub/Readdict/fronts"), // 开发期绝对路径兜底
+        QDir::currentPath() + "/fronts",                                 // 从仓库根启动（开发）
+        QCoreApplication::applicationDirPath() + "/../Resources/fronts", // .app bundle（D7 打包）
     };
     const QStringList rels = {
         QStringLiteral("02_SourceHanSans-VF/02_SourceHanSans-VF/Variable/SourceHanSans-VF.otf.ttc"),
@@ -45,7 +44,11 @@ static void loadBundledFonts() {
             ++loaded;
         }
     }
-    qInfo() << "字体加载完成，共" << loaded << "个字体文件";
+    if (loaded == 0)
+        qWarning() << "未找到任何 bundled 字体，检查路径:" << baseDirs
+                   << "（开发期从仓库根运行 ./build/Readdict 以命中 CWD 下的 fronts/）";
+    else
+        qInfo() << "字体加载完成，共" << loaded << "个字体文件";
 }
 
 int main(int argc, char *argv[]) {
