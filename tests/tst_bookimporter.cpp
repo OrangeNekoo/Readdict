@@ -35,15 +35,11 @@ static bool writeZipFile(const QString &zipPath,
     return zipClose(zf, nullptr) == ZIP_OK;
 }
 
-// 生成一张确定的封面 PNG（850x1214，模拟常见 EPUB 封面比例）
-static QByteArray makeCoverPng() {
+// 生成一张纯色 PNG（850x1214，模拟常见 EPUB 封面比例）：纯色保证缩放/裁剪后
+// 任意像素颜色不变，可用中心像素判别封面来源。
+static QByteArray makeCoverPng(const QColor &color) {
     QImage img(850, 1214, QImage::Format_RGB32);
-    img.fill(QColor("#123456"));
-    QPainter p(&img);
-    p.setPen(Qt::white);
-    p.setFont(QFont(QStringLiteral("Helvetica"), 48, QFont::Bold));
-    p.drawText(img.rect(), Qt::AlignCenter, QStringLiteral("COVER"));
-    p.end();
+    img.fill(color);
     QByteArray out;
     QBuffer buf(&out);
     buf.open(QIODevice::WriteOnly);
@@ -51,7 +47,8 @@ static QByteArray makeCoverPng() {
     return out;
 }
 
-// 构造带封面（OPF <meta name="cover"> + cover.xhtml <img>）的最小 EPUB
+// 构造带封面的最小 EPUB：OPF 声明指向图 A（红色），正文首图为图 B（绿色），
+// 两图不同——用于锁定「OPF cover 声明优先于解析首图」的提取顺序。
 static QString makeCoverEpub(const QString &path) {
     const QString container =
         QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
@@ -67,19 +64,21 @@ static QString makeCoverEpub(const QString &path) {
                        "</metadata>"
                        "<manifest>"
                        "<item href=\"Text/cover.xhtml\" id=\"cover.xhtml\" media-type=\"application/xhtml+xml\"/>"
-                       "<item href=\"Images/cover.png\" id=\"cover-img\" media-type=\"image/png\"/>"
+                       "<item href=\"Images/coverA.png\" id=\"cover-img\" media-type=\"image/png\"/>"
+                       "<item href=\"Images/coverB.png\" id=\"imgB\" media-type=\"image/png\"/>"
                        "</manifest>"
                        "<spine toc=\"ncx\"><itemref idref=\"cover.xhtml\"/></spine>"
                        "</package>");
     const QString coverXhtml =
         QStringLiteral("<?xml version=\"1.0\" encoding=\"utf-8\"?>"
                        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>Cover</title></head>"
-                       "<body><p style=\"text-align:center\"><img src=\"../Images/cover.png\"/></p></body></html>");
+                       "<body><p style=\"text-align:center\"><img src=\"../Images/coverB.png\"/></p></body></html>");
     const QList<QPair<QString, QByteArray>> entries = {
         {QStringLiteral("META-INF/container.xml"), container.toUtf8()},
         {QStringLiteral("OEBPS/content.opf"), opf.toUtf8()},
         {QStringLiteral("OEBPS/Text/cover.xhtml"), coverXhtml.toUtf8()},
-        {QStringLiteral("OEBPS/Images/cover.png"), makeCoverPng()},
+        {QStringLiteral("OEBPS/Images/coverA.png"), makeCoverPng(QColor("#E00000"))},
+        {QStringLiteral("OEBPS/Images/coverB.png"), makeCoverPng(QColor("#00C000"))},
     };
     return writeZipFile(path, entries) ? path : QString();
 }
@@ -151,6 +150,10 @@ private slots:
         QImage img(cover);
         QVERIFY(!img.isNull());
         QCOMPARE(img.size(), QSize(300, 400));
+        // OPF cover 声明优先：fixture 的 OPF 指向图 A（红），正文首图为图 B（绿），
+        // 缩放裁剪后整体仍为纯色，取中心像素即可判别来源
+        QCOMPARE(img.pixelColor(150, 200), QColor("#E00000"));
+        QVERIFY(img.pixelColor(150, 200) != QColor("#00C000"));
     }
     void epubParseFailureKeepsPlaceholder() {
         QTemporaryDir libDir;

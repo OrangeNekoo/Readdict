@@ -132,6 +132,12 @@ QString opfCoverEntry(const QByteArray &opf, const QString &opfEntry) {
         const auto it = itemById.constFind(coverId);
         if (it != itemById.constEnd())
             return resolveZipEntry(it.value().first, opfEntry);
+        // EPUB3 的 cover-image 声明 content 也可能是相对 IRI（如 "Images/cover.jpg"）
+        // 而非 manifest item id：直接相对 OPF 目录解析（绝对 URL/data URI 会解析失败，
+        // 落入下方兜底）。item 查找（QHash 无序）先于兜底，保证确定性。
+        const QString direct = resolveZipEntry(coverId, opfEntry);
+        if (!direct.isEmpty())
+            return direct;
     }
     for (auto it = itemById.constBegin(); it != itemById.constEnd(); ++it)
         if (it.value().second.startsWith("image/"))
