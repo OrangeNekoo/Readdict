@@ -103,12 +103,24 @@ Item {
                       "真实 PDF 应加载为 Ready")
             tryVerify(function () { return page.pdfView.status === Image.Ready }, 15000,
                       "初始页应渲染完成")
-            page.pdfView.goToPage(5) // 触发新页渲染
-            wait(100)                // 让渲染进入在途状态
-            page.requestClose()      // 渲染在途时请求关闭
+            // 触发重渲染并立即请求关闭：渲染进入在途（Loading）的瞬间调用 requestClose，
+            // 锁定轮询等待真实生效——closePollCount 增长 + 渲染稳定前页面不被销毁。
+            // 注：30MB PDF 单页渲染在本机 <100ms，先 goToPage 再在同一事件循环内调
+            // requestClose 可稳定命中 Loading 窗口（status 非 Ready 即进入轮询分支）。
+            page.pdfView.goToPage(5)
+            page.pdfView.renderScale = 6 // 高倍率重渲染，加大 Loading 窗口
+            var loadingAtClose = page.pdfView.status !== Image.Ready
+            page.requestClose()
             verify(page.closing === true, "requestClose 应置 closing 防重入")
+            if (loadingAtClose) {
+                // 锁定等待逻辑真实生效：closePoll 轮询计数增长 + 渲染稳定前页面不被销毁
+                tryVerify(function () { return page.closePollCount > 0 }, 5000,
+                          "渲染在途时 requestClose 应启动轮询（closePollCount="
+                          + page.closePollCount + "）")
+                verify(stack.currentItem === page, "渲染稳定前页面应仍在栈顶（未被提前销毁）")
+            }
             // 渲染稳定前页面（含 QPdfDocument）不得被销毁——这是竞态防护的核心不变量
-            tryVerify(function () { return page.pdfView.status === Image.Ready }, 15000,
+            tryVerify(function () { return page.pdfView.status === Image.Ready }, 20000,
                       "渲染应最终稳定，实际 " + page.pdfView.status)
             verify(page.pdfView !== undefined && page.pdfView.currentPage === 5,
                    "渲染稳定后页面仍应存活（未被提前销毁）")
@@ -287,6 +299,10 @@ Item {
             var page = loader.item
             tryVerify(function () { return page.contentView.contentHeight > 2000 }, 5000,
                       "长文本书内容高度应远大于视口")
+            page.contentView.contentY = 400
+            // 恢复应用走 200ms 高度收敛定时器：先耗尽窗口（避免其覆盖手动滚动），
+            // 再重设并读取实际生效值——保证 onDestruction 保存的是 400
+            wait(350)
             page.contentView.contentY = 400
             var savedY = page.contentView.contentY
             verify(savedY > 300, "滚动值应生效，实际 " + savedY)

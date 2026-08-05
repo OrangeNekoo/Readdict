@@ -9,9 +9,13 @@ Flickable {
     id: flick
     property var chapter: ({})
     property var typography: ({})
-    // B10：滚动位置恢复——ReaderPage 打开时赋保存的 scrollY（>=0），内容高度就绪后应用一次；
+    // B10：滚动位置恢复——ReaderPage 打开时赋保存的 scrollY（>=0），内容高度就绪后应用；
     // 默认 -1 表示"本次打开无需恢复"，避免内容高度变化时反复设置。
+    // 应用时机：内容高度**收敛**（200ms 无变化）后——含图片段章节的首趟高度在图片
+    // 异步加载完成前就绪，若首趟高度变化即应用会把保存位置钳制偏低；高度每次变化
+    // 都重置收敛计时，图片全部加载完、高度稳定后再一次性应用。
     property double restoreScrollY: -1
+    property bool restorePending: false
     property bool restoreApplied: false
     clip: true
     contentWidth: width
@@ -22,16 +26,30 @@ Flickable {
 
     onRestoreScrollYChanged: {
         if (flick.restoreScrollY >= 0) {
+            flick.restorePending = true
             flick.restoreApplied = false
-            flick.applyRestoreScroll()
+            flick.scheduleRestore()
         }
     }
-    onContentHeightChanged: flick.applyRestoreScroll()
+    onContentHeightChanged: flick.scheduleRestore()
 
-    function applyRestoreScroll() {
-        if (flick.restoreScrollY < 0 || flick.restoreApplied || flick.contentHeight <= 0) return
+    Timer {
+        id: restoreTimer
+        interval: 200
+        repeat: false
+        onTriggered: flick.applyRestore()
+    }
+
+    function scheduleRestore() {
+        if (!flick.restorePending || flick.restoreApplied || flick.contentHeight <= 0) return
+        restoreTimer.restart() // 高度仍在变化 → 推迟应用，直到收敛
+    }
+
+    function applyRestore() {
+        if (!flick.restorePending || flick.restoreApplied || flick.contentHeight <= 0) return
         flick.restoreApplied = true
-        // 章节高度可能因排版参数变化而变化，钳制到实际最大滚动值
+        flick.restorePending = false
+        // 章节高度可能因排版参数/图片加载变化，钳制到实际最大滚动值
         flick.contentY = Math.min(flick.restoreScrollY, Math.max(0, flick.contentHeight - flick.height))
     }
 

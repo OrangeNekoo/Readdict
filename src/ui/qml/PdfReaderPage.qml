@@ -24,7 +24,8 @@ Page {
     property bool restoreDone: false
     // B10：关闭竞态防护——QPdfDocument 销毁（FPDF_DestroyLibrary）若撞上
     // QQuickPixmapReader 在途渲染（QPdfIOHandler 持文档指针）会 use-after-free 崩溃
-    //（30MB 大 PDF 实测复现）。返回键先等渲染稳定（无在途读取）再 pop，超时兜底。
+    //（30MB 大 PDF 实测复现）。返回键先等渲染稳定（无在途读取）再 pop，
+    // 慢渲染仅告警不强制销毁（强制销毁即复现该 UAF）。
     property bool closing: false
     property int closePollCount: 0
 
@@ -114,8 +115,10 @@ Page {
         return s === Image.Ready || s === Image.Error || s === Image.Null
     }
 
-    // 关闭阅读页：等渲染线程空闲再 pop（文档销毁撞在途渲染 = UAF 崩溃）；
-    // 5 秒（100×50ms）兜底强制关闭，防止渲染异常时返回键失效
+    // 关闭阅读页：等渲染线程空闲再 pop（文档销毁撞在途渲染 = UAF 崩溃）。
+    // 渲染在途时持续轮询等待，**绝不**在渲染未稳定时强制销毁文档——慢渲染
+    //（大 PDF 高倍率重渲染可达数秒）超时强制 pop 会把 UAF 换一种方式放回来；
+    // 超长渲染（>60s）仅告警，保持等待直到稳定（Ready 文档的渲染必然完成）。
     function requestClose() {
         if (page.closing) return
         page.closing = true
@@ -133,10 +136,13 @@ Page {
         repeat: true
         onTriggered: {
             ++page.closePollCount
-            if (page.renderSettled() || page.closePollCount > 100) {
+            if (page.renderSettled()) {
                 closePoll.stop()
                 page.StackView.view.pop()
+                return
             }
+            if (page.closePollCount === 1200) // 60s：仅告警，不强制销毁
+                console.warn("PdfReaderPage: 渲染 60 秒未稳定，继续等待（书: " + page.book.title + "）")
         }
     }
 
