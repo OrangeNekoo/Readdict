@@ -55,6 +55,16 @@ target_compile_definitions(tst_fb2parser PRIVATE FB2_FIXTURES_DIR="${CMAKE_CURRE
 target_link_libraries(tst_fb2parser PRIVATE Qt6::Test)
 add_test(NAME tst_fb2parser COMMAND tst_fb2parser)
 
+qt_add_executable(tst_mobiparser
+    tst_mobiparser.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/SentenceSplitter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/MobiParser.cpp
+)
+target_include_directories(tst_mobiparser PRIVATE ../src ../src/parsers ../third_party/libmobi/src)
+# libmobi：静态库 mobi（PUBLIC 传递 zlib），include 路径由 src/CMakeLists 传递
+target_link_libraries(tst_mobiparser PRIVATE Qt6::Test mobi zlibstatic)
+add_test(NAME tst_mobiparser COMMAND tst_mobiparser)
+
 # QML 冒烟/端到端测试：自定义 main（tst_qmlmain.cpp）注册 Readdict.Backend 单例，
 # 因为单例只在生产 main.cpp 中注册；不依赖 Qt 内部的 QUICK_TEST_SOURCE_DIR 自动 main，
 # 该宏由下方 target_compile_definitions 提供（tests/qml 绝对路径）。
