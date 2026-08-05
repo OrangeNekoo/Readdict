@@ -41,6 +41,9 @@ qt_add_executable(Readdict
     src/parsers/Fb2Parser.cpp
     src/parsers/MobiParser.cpp
     src/parsers/ParserFactory.cpp
+    src/tts/SystemTTSEngine.cpp
+    src/tts/SystemTTSEngine.h
+    src/tts/TTSEngine.h
 )
 qt_add_qml_module(Readdict
     URI Readdict
@@ -66,7 +69,7 @@ qt_add_resources(Readdict "app_resources"
 
 target_include_directories(Readdict PRIVATE src third_party/libmobi/src)
 target_link_libraries(Readdict PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Sql Qt6::Network Qt6::Pdf
+    Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Sql Qt6::Network Qt6::Pdf Qt6::TextToSpeech
     MINIZIP::minizipstatic mobi zlibstatic
 )
 # TextParser 的 GB18030 解码走系统 iconv；macOS 的 iconv 在 libiconv.dylib 中需显式链接
