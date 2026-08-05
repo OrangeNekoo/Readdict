@@ -69,8 +69,8 @@ private slots:
                  QStringLiteral("这是第一段内容。"));
     }
     void handlesNamedEntities() {
-        // &nbsp;/&mdash;/&hellip; 等未声明实体：QXmlStreamReader 需实体解析器，
-        // 否则解析报错、实体之后正文静默截断
+        // 已映射实体（&nbsp;/&mdash;/&hellip;/&Auml;）解析为对应码点；未映射实体
+        // （&frac13;）按字面保留——两种情况都不能让解析截断
         EpubParser p;
         DocumentModel m = p.parse(QStringLiteral(EPUB_FIXTURES_DIR) + "/sample.epub");
         bool found = false;
@@ -82,10 +82,35 @@ private slots:
                 QVERIFY(pp.text.contains(QChar(0x00A0)));     // &nbsp;
                 QVERIFY(pp.text.contains(QChar(0x2014)));     // &mdash;
                 QVERIFY(pp.text.contains(QChar(0x2026)));     // &hellip;
+                QVERIFY(pp.text.contains(QChar(0x00C4)));     // &Auml; → Ä（大写 Latin-1 映射）
+                QVERIFY(pp.text.contains(QStringLiteral("&frac13;"))); // 未映射：字面保留
                 QVERIFY(pp.text.endsWith(QStringLiteral("完。"))); // 实体后正文不截断
             }
         }
         QVERIFY(found);
+    }
+    void reusesImageCacheOnRepeatedParse() {
+        // 二次解析同一书：同一图片条目复用同一缓存文件，不新增/不重写副本。
+        // 拷贝到 QTemporaryDir 保证图片缓存目录（键为 epub 路径 md5）全新
+        QTemporaryDir tmp;
+        const QString path = tmp.path() + "/copy.epub";
+        QVERIFY(QFile::copy(QStringLiteral(EPUB_FIXTURES_DIR) + "/sample.epub", path));
+        EpubParser p;
+        const DocumentModel m1 = p.parse(path);
+        QString imgPath;
+        for (const Chapter &c : m1.chapters)
+            for (const Paragraph &pp : c.paragraphs)
+                if (!pp.imagePath.isEmpty()) { imgPath = pp.imagePath; break; }
+        QVERIFY(!imgPath.isEmpty());
+        const QDir dir(QFileInfo(imgPath).absolutePath());
+        QCOMPARE(dir.entryList(QDir::Files).size(), 1); // 一次解析只产生一个图片文件
+        const DocumentModel m2 = p.parse(path);
+        QCOMPARE(dir.entryList(QDir::Files).size(), 1); // 二次解析不新增/不重写
+        QString p2;
+        for (const Chapter &c : m2.chapters)
+            for (const Paragraph &pp : c.paragraphs)
+                if (!pp.imagePath.isEmpty()) { p2 = pp.imagePath; break; }
+        QCOMPARE(p2, imgPath); // 同一条目仍指向同一文件
     }
 };
 QTEST_MAIN(TestEpubParser)

@@ -2,6 +2,7 @@
 #include "DocumentModel.h"
 #include <QDir>
 #include <QHash>
+#include <QSet>
 #include <QString>
 
 // EPUB 解析器：minizip 解包 + container.xml/OPF 解析 + XHTML 归一化。
@@ -17,12 +18,15 @@ public:
 private:
     QByteArray readZipEntry(const QString &zipPath, const QString &entry) const;
     QString normalizeXhtml(const QByteArray &xhtml, QString *title) const;
-    // 从 zip 解出图片条目并缓存到 dir，按条目路径去重；返回本地文件路径
+    // 从 zip 解出图片条目并缓存到 dir，按条目路径去重；命名与磁盘状态无关
+    // （同名冲突加条目 md5 前缀），已存在的目标文件直接复用；返回本地文件路径
     QString extractImage(const QString &zipPath, const QString &entry,
-                         const QDir &dir, QHash<QString, QString> *cache) const;
+                         const QDir &dir, QHash<QString, QString> *cache,
+                         QSet<QString> *seenNames) const;
     // 归一化 html → 段落（<img> 顺带解出到 imgDir）
     void splitParagraphs(const QString &html, const QString &zipPath,
                          const QString &chapterEntry, const QDir &imgDir,
                          QHash<QString, QString> *imgCache,
+                         QSet<QString> *imgNames,
                          QVector<Paragraph> *out) const;
 };

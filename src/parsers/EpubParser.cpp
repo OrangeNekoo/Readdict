@@ -12,6 +12,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QSet>
 #include <QCryptographicHash>
 #include <QRegularExpression>
 #include <QUrl>
@@ -140,72 +141,135 @@ bool isEmptyParagraph(const Paragraph &p) {
 constexpr qint64 kMaxZipEntrySize = 64LL * 1024 * 1024;
 
 // HTML 命名实体解析器：XML 只预定义 amp/lt/gt/quot/apos，XHTML 里常见的
-// &nbsp;/&mdash;/&hellip; 等未声明实体若不解析，QXmlStreamReader 直接报错、
-// 实体之后正文静默截断。映射常见 HTML 4 命名实体为对应码点。
+// &nbsp;/&mdash;/&hellip;/&Auml; 等未声明实体若不解析，QXmlStreamReader 直接报错、
+// 实体之后正文静默截断。映射完整 Latin-1 与常用排版实体；未映射实体返回字面
+// "&name;" 文本——显示层不完美，但保证解析继续、正文绝不截断。
 class HtmlEntityResolver : public QXmlStreamEntityResolver {
 public:
     QString resolveUndeclaredEntity(const QString &name) override {
-        static const QHash<QString, QChar> kEntities = {
-            {QStringLiteral("nbsp"), QChar(0x00A0)},
-            {QStringLiteral("mdash"), QChar(0x2014)},
-            {QStringLiteral("ndash"), QChar(0x2013)},
-            {QStringLiteral("hellip"), QChar(0x2026)},
-            {QStringLiteral("lsquo"), QChar(0x2018)},
-            {QStringLiteral("rsquo"), QChar(0x2019)},
-            {QStringLiteral("ldquo"), QChar(0x201C)},
-            {QStringLiteral("rdquo"), QChar(0x201D)},
-            {QStringLiteral("sbquo"), QChar(0x201A)},
-            {QStringLiteral("bdquo"), QChar(0x201E)},
-            {QStringLiteral("copy"), QChar(0x00A9)},
-            {QStringLiteral("reg"), QChar(0x00AE)},
-            {QStringLiteral("trade"), QChar(0x2122)},
-            {QStringLiteral("middot"), QChar(0x00B7)},
-            {QStringLiteral("bull"), QChar(0x2022)},
-            {QStringLiteral("laquo"), QChar(0x00AB)},
-            {QStringLiteral("raquo"), QChar(0x00BB)},
-            {QStringLiteral("times"), QChar(0x00D7)},
-            {QStringLiteral("divide"), QChar(0x00F7)},
-            {QStringLiteral("plusmn"), QChar(0x00B1)},
-            {QStringLiteral("deg"), QChar(0x00B0)},
-            {QStringLiteral("pound"), QChar(0x00A3)},
-            {QStringLiteral("yen"), QChar(0x00A5)},
-            {QStringLiteral("euro"), QChar(0x20AC)},
-            {QStringLiteral("frac12"), QChar(0x00BD)},
-            {QStringLiteral("frac14"), QChar(0x00BC)},
-            {QStringLiteral("frac34"), QChar(0x00BE)},
-            {QStringLiteral("dagger"), QChar(0x2020)},
-            {QStringLiteral("permil"), QChar(0x2030)},
-            // Latin-1 补充常见重音字符
-            {QStringLiteral("agrave"), QChar(0x00E0)},
-            {QStringLiteral("aacute"), QChar(0x00E1)},
-            {QStringLiteral("acirc"), QChar(0x00E2)},
-            {QStringLiteral("atilde"), QChar(0x00E3)},
-            {QStringLiteral("auml"), QChar(0x00E4)},
-            {QStringLiteral("aring"), QChar(0x00E5)},
-            {QStringLiteral("ccedil"), QChar(0x00E7)},
-            {QStringLiteral("egrave"), QChar(0x00E8)},
-            {QStringLiteral("eacute"), QChar(0x00E9)},
-            {QStringLiteral("ecirc"), QChar(0x00EA)},
-            {QStringLiteral("euml"), QChar(0x00EB)},
-            {QStringLiteral("igrave"), QChar(0x00EC)},
-            {QStringLiteral("iacute"), QChar(0x00ED)},
-            {QStringLiteral("icirc"), QChar(0x00EE)},
-            {QStringLiteral("iuml"), QChar(0x00EF)},
-            {QStringLiteral("ntilde"), QChar(0x00F1)},
-            {QStringLiteral("ograve"), QChar(0x00F2)},
-            {QStringLiteral("oacute"), QChar(0x00F3)},
-            {QStringLiteral("ocirc"), QChar(0x00F4)},
-            {QStringLiteral("otilde"), QChar(0x00F5)},
-            {QStringLiteral("ouml"), QChar(0x00F6)},
-            {QStringLiteral("ugrave"), QChar(0x00F9)},
-            {QStringLiteral("uacute"), QChar(0x00FA)},
-            {QStringLiteral("ucirc"), QChar(0x00FB)},
-            {QStringLiteral("uuml"), QChar(0x00FC)},
-            {QStringLiteral("yacute"), QChar(0x00FD)},
-            {QStringLiteral("yuml"), QChar(0x00FF)},
-        };
-        const auto it = kEntities.constFind(name);
-        return it != kEntities.constEnd() ? QString(it.value()) : QString();
+        const auto it = entityMap().constFind(name);
+        if (it != entityMap().constEnd())
+            return QString(it.value());
+        // 未映射实体：按字面 "&name;" 保留。返回文本会被 XML 扫描器重新解析，
+        // 直接返回 "&name;" 会再次触发实体解析造成死循环，故返回转义形式
+        // "&amp;name;"（&amp; 为预定义实体，解析后即得字面 "&name;"）。
+        static QSet<QString> warned;
+        if (!warned.contains(name)) {
+            warned.insert(name);
+            qWarning("EpubParser: 未映射 HTML 实体 &%s;，按字面文本保留",
+                     qUtf8Printable(name));
+        }
+        return QLatin1String("&amp;") + name + QLatin1Char(';');
+    }
+
+private:
+    static const QHash<QString, QChar> &entityMap() {
+        static const QHash<QString, QChar> kMap = [] {
+            QHash<QString, QChar> m = {
+                // Latin-1 补充：标点/符号
+                {QStringLiteral("nbsp"), QChar(0x00A0)},
+                {QStringLiteral("iexcl"), QChar(0x00A1)},
+                {QStringLiteral("cent"), QChar(0x00A2)},
+                {QStringLiteral("pound"), QChar(0x00A3)},
+                {QStringLiteral("curren"), QChar(0x00A4)},
+                {QStringLiteral("yen"), QChar(0x00A5)},
+                {QStringLiteral("brvbar"), QChar(0x00A6)},
+                {QStringLiteral("sect"), QChar(0x00A7)},
+                {QStringLiteral("uml"), QChar(0x00A8)},
+                {QStringLiteral("copy"), QChar(0x00A9)},
+                {QStringLiteral("ordf"), QChar(0x00AA)},
+                {QStringLiteral("laquo"), QChar(0x00AB)},
+                {QStringLiteral("not"), QChar(0x00AC)},
+                {QStringLiteral("shy"), QChar(0x00AD)},
+                {QStringLiteral("reg"), QChar(0x00AE)},
+                {QStringLiteral("macr"), QChar(0x00AF)},
+                {QStringLiteral("deg"), QChar(0x00B0)},
+                {QStringLiteral("plusmn"), QChar(0x00B1)},
+                {QStringLiteral("sup2"), QChar(0x00B2)},
+                {QStringLiteral("sup3"), QChar(0x00B3)},
+                {QStringLiteral("acute"), QChar(0x00B4)},
+                {QStringLiteral("micro"), QChar(0x00B5)},
+                {QStringLiteral("para"), QChar(0x00B6)},
+                {QStringLiteral("middot"), QChar(0x00B7)},
+                {QStringLiteral("cedil"), QChar(0x00B8)},
+                {QStringLiteral("sup1"), QChar(0x00B9)},
+                {QStringLiteral("ordm"), QChar(0x00BA)},
+                {QStringLiteral("raquo"), QChar(0x00BB)},
+                {QStringLiteral("frac14"), QChar(0x00BC)},
+                {QStringLiteral("frac12"), QChar(0x00BD)},
+                {QStringLiteral("frac34"), QChar(0x00BE)},
+                {QStringLiteral("iquest"), QChar(0x00BF)},
+                {QStringLiteral("times"), QChar(0x00D7)},
+                {QStringLiteral("divide"), QChar(0x00F7)},
+                // Latin-1 字母（无大小写对）
+                {QStringLiteral("AElig"), QChar(0x00C6)},
+                {QStringLiteral("aelig"), QChar(0x00E6)},
+                {QStringLiteral("ETH"), QChar(0x00D0)},
+                {QStringLiteral("eth"), QChar(0x00F0)},
+                {QStringLiteral("THORN"), QChar(0x00DE)},
+                {QStringLiteral("thorn"), QChar(0x00FE)},
+                {QStringLiteral("Oslash"), QChar(0x00D8)},
+                {QStringLiteral("oslash"), QChar(0x00F8)},
+                {QStringLiteral("szlig"), QChar(0x00DF)},
+                // 常用排版实体
+                {QStringLiteral("mdash"), QChar(0x2014)},
+                {QStringLiteral("ndash"), QChar(0x2013)},
+                {QStringLiteral("hellip"), QChar(0x2026)},
+                {QStringLiteral("lsquo"), QChar(0x2018)},
+                {QStringLiteral("rsquo"), QChar(0x2019)},
+                {QStringLiteral("ldquo"), QChar(0x201C)},
+                {QStringLiteral("rdquo"), QChar(0x201D)},
+                {QStringLiteral("sbquo"), QChar(0x201A)},
+                {QStringLiteral("bdquo"), QChar(0x201E)},
+                {QStringLiteral("trade"), QChar(0x2122)},
+                {QStringLiteral("bull"), QChar(0x2022)},
+                {QStringLiteral("dagger"), QChar(0x2020)},
+                {QStringLiteral("permil"), QChar(0x2030)},
+                {QStringLiteral("euro"), QChar(0x20AC)},
+            };
+            // Latin-1 重音字符：26 对小写/大写（大写码点 = 小写 - 0x20；Yuml 例外为 Ÿ）
+            const QHash<QString, QChar> kAccented = {
+                {QStringLiteral("agrave"), QChar(0x00E0)},
+                {QStringLiteral("aacute"), QChar(0x00E1)},
+                {QStringLiteral("acirc"), QChar(0x00E2)},
+                {QStringLiteral("atilde"), QChar(0x00E3)},
+                {QStringLiteral("auml"), QChar(0x00E4)},
+                {QStringLiteral("aring"), QChar(0x00E5)},
+                {QStringLiteral("ccedil"), QChar(0x00E7)},
+                {QStringLiteral("egrave"), QChar(0x00E8)},
+                {QStringLiteral("eacute"), QChar(0x00E9)},
+                {QStringLiteral("ecirc"), QChar(0x00EA)},
+                {QStringLiteral("euml"), QChar(0x00EB)},
+                {QStringLiteral("igrave"), QChar(0x00EC)},
+                {QStringLiteral("iacute"), QChar(0x00ED)},
+                {QStringLiteral("icirc"), QChar(0x00EE)},
+                {QStringLiteral("iuml"), QChar(0x00EF)},
+                {QStringLiteral("ntilde"), QChar(0x00F1)},
+                {QStringLiteral("ograve"), QChar(0x00F2)},
+                {QStringLiteral("oacute"), QChar(0x00F3)},
+                {QStringLiteral("ocirc"), QChar(0x00F4)},
+                {QStringLiteral("otilde"), QChar(0x00F5)},
+                {QStringLiteral("ouml"), QChar(0x00F6)},
+                {QStringLiteral("ugrave"), QChar(0x00F9)},
+                {QStringLiteral("uacute"), QChar(0x00FA)},
+                {QStringLiteral("ucirc"), QChar(0x00FB)},
+                {QStringLiteral("uuml"), QChar(0x00FC)},
+                {QStringLiteral("yacute"), QChar(0x00FD)},
+                {QStringLiteral("yuml"), QChar(0x00FF)},
+            };
+            for (auto it = kAccented.constBegin(); it != kAccented.constEnd(); ++it) {
+                m.insert(it.key(), it.value());
+                if (it.key() == QLatin1String("yuml")) {
+                    m.insert(QStringLiteral("Yuml"), QChar(0x0178)); // Ÿ
+                } else {
+                    QString upper = it.key();
+                    upper[0] = upper.at(0).toUpper();
+                    m.insert(upper, QChar(it.value().unicode() - 0x20));
+                }
+            }
+            return m;
+        }();
+        return kMap;
     }
 };
 
@@ -293,30 +357,36 @@ QString EpubParser::normalizeXhtml(const QByteArray &xhtml, QString *title) cons
 }
 
 QString EpubParser::extractImage(const QString &zipPath, const QString &entry,
-                                 const QDir &dir, QHash<QString, QString> *cache) const {
+                                 const QDir &dir, QHash<QString, QString> *cache,
+                                 QSet<QString> *seenNames) const {
     const auto it = cache->constFind(entry);
     if (it != cache->constEnd())
         return it.value();
     const QByteArray data = readZipEntry(zipPath, entry);
     if (data.isEmpty())
         return {};
+    // 命名仅依赖条目路径（同名冲突加条目 md5 前缀），与磁盘/解析次序无关，
+    // 保证多次解析同一书得到相同文件名
     QString name = entry.mid(entry.lastIndexOf('/') + 1);
     if (name.isEmpty()) name = QStringLiteral("img");
-    if (dir.exists(name)) {
-        // 与其他条目同名冲突（不同目录同名图片）：加条目路径 md5 前缀，确定性命名
+    if (seenNames->contains(name)) {
         const QString digest = QString::fromLatin1(
             QCryptographicHash::hash(entry.toUtf8(), QCryptographicHash::Md5)
                 .toHex().left(8));
         name = digest + QLatin1Char('_') + name;
+    } else {
+        seenNames->insert(name);
     }
-    QFile f(dir.filePath(name));
-    if (!f.open(QIODevice::WriteOnly)) {
-        qWarning("EpubParser: 写入图片缓存失败 %s", qUtf8Printable(dir.filePath(name)));
-        return {};
-    }
-    f.write(data);
-    f.close();
     const QString path = dir.filePath(name);
+    if (!QFile::exists(path)) { // 本条目图片已解出过（同书重复解析）则直接复用
+        QFile f(path);
+        if (!f.open(QIODevice::WriteOnly)) {
+            qWarning("EpubParser: 写入图片缓存失败 %s", qUtf8Printable(path));
+            return {};
+        }
+        f.write(data);
+        f.close();
+    }
     cache->insert(entry, path);
     return path;
 }
@@ -326,6 +396,7 @@ QString EpubParser::extractImage(const QString &zipPath, const QString &entry,
 void EpubParser::splitParagraphs(const QString &html, const QString &zipPath,
                                  const QString &chapterEntry, const QDir &imgDir,
                                  QHash<QString, QString> *imgCache,
+                                 QSet<QString> *imgNames,
                                  QVector<Paragraph> *out) const {
     Paragraph cur;
     bool inBlock = false; // 处于 <p>/<h*>/<li> 之内
@@ -376,7 +447,7 @@ void EpubParser::splitParagraphs(const QString &html, const QString &zipPath,
                 qWarning("EpubParser: 无法解析图片引用 %s", qUtf8Printable(sm.captured(1)));
                 continue;
             }
-            const QString local = extractImage(zipPath, entry, imgDir, imgCache);
+            const QString local = extractImage(zipPath, entry, imgDir, imgCache, imgNames);
             if (local.isEmpty()) {
                 qWarning("EpubParser: 图片解出失败 %s（zip 内无此条目）", qUtf8Printable(entry));
                 continue;
@@ -428,6 +499,7 @@ DocumentModel EpubParser::parse(const QString &epubPath) {
             .toHex().left(16))));
     imgDir.mkpath(".");
     QHash<QString, QString> imgCache;
+    QSet<QString> imgNames;
     int chapterNo = 0;
     for (const QString &idref : std::as_const(info.spineIds)) {
         const auto it = info.itemById.constFind(idref);
@@ -451,7 +523,7 @@ DocumentModel EpubParser::parse(const QString &epubPath) {
         if (chTitle.isEmpty()) chTitle = QStringLiteral("第%1章").arg(chapterNo + 1);
         Chapter ch;
         ch.title = chTitle;
-        splitParagraphs(html, epubPath, entry, imgDir, &imgCache, &ch.paragraphs);
+        splitParagraphs(html, epubPath, entry, imgDir, &imgCache, &imgNames, &ch.paragraphs);
         if (ch.paragraphs.isEmpty()) continue; // 封面等空章节跳过
         m.chapters.append(ch);
         ++chapterNo;
