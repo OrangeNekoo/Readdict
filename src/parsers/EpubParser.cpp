@@ -36,16 +36,18 @@ QString stripTags(QString s) {
 }
 
 // 解析 zip 内相对路径（href 相对条目所在目录），支持 ./ 与 ../；href 可能含
-// 百分号编码、#fragment、?query。返回 zip 内条目路径；无法解析时返回空。
+// 百分号编码、#fragment、?query。先按编码态剥离 #/?（%23/%3F 是字面量，不算
+// 分隔符），再百分号解码。返回 zip 内条目路径；无法解析时返回空。
 QString resolveEntry(const QString &href, const QString &baseEntry) {
-    QString rel = QUrl::fromPercentEncoding(href.toUtf8());
-    rel.replace('\\', '/');
-    if (rel.isEmpty() || rel.contains("://") || rel.startsWith("data:"))
-        return {};
+    QString rel = href; // 编码态处理，见上
     const int frag = rel.indexOf('#');
     if (frag >= 0) rel.truncate(frag);
     const int query = rel.indexOf('?');
     if (query >= 0) rel.truncate(query);
+    rel = QUrl::fromPercentEncoding(rel.toUtf8());
+    rel.replace('\\', '/');
+    if (rel.isEmpty() || rel.contains("://") || rel.startsWith("data:"))
+        return {};
     if (rel.startsWith('/')) rel.remove(0, 1); // 以 / 开头视为相对 zip 根
     QString base = baseEntry;
     const int slash = base.lastIndexOf('/');
@@ -133,6 +135,80 @@ bool isEmptyParagraph(const Paragraph &p) {
     return p.imagePath.isEmpty() && p.text.trimmed().isEmpty();
 }
 
+// 单条 zip 条目大小上限（章节/图片均远小于此；与 TextParser 的读取取舍一致，
+// 防恶意/损坏压缩包撑爆内存）
+constexpr qint64 kMaxZipEntrySize = 64LL * 1024 * 1024;
+
+// HTML 命名实体解析器：XML 只预定义 amp/lt/gt/quot/apos，XHTML 里常见的
+// &nbsp;/&mdash;/&hellip; 等未声明实体若不解析，QXmlStreamReader 直接报错、
+// 实体之后正文静默截断。映射常见 HTML 4 命名实体为对应码点。
+class HtmlEntityResolver : public QXmlStreamEntityResolver {
+public:
+    QString resolveUndeclaredEntity(const QString &name) override {
+        static const QHash<QString, QChar> kEntities = {
+            {QStringLiteral("nbsp"), QChar(0x00A0)},
+            {QStringLiteral("mdash"), QChar(0x2014)},
+            {QStringLiteral("ndash"), QChar(0x2013)},
+            {QStringLiteral("hellip"), QChar(0x2026)},
+            {QStringLiteral("lsquo"), QChar(0x2018)},
+            {QStringLiteral("rsquo"), QChar(0x2019)},
+            {QStringLiteral("ldquo"), QChar(0x201C)},
+            {QStringLiteral("rdquo"), QChar(0x201D)},
+            {QStringLiteral("sbquo"), QChar(0x201A)},
+            {QStringLiteral("bdquo"), QChar(0x201E)},
+            {QStringLiteral("copy"), QChar(0x00A9)},
+            {QStringLiteral("reg"), QChar(0x00AE)},
+            {QStringLiteral("trade"), QChar(0x2122)},
+            {QStringLiteral("middot"), QChar(0x00B7)},
+            {QStringLiteral("bull"), QChar(0x2022)},
+            {QStringLiteral("laquo"), QChar(0x00AB)},
+            {QStringLiteral("raquo"), QChar(0x00BB)},
+            {QStringLiteral("times"), QChar(0x00D7)},
+            {QStringLiteral("divide"), QChar(0x00F7)},
+            {QStringLiteral("plusmn"), QChar(0x00B1)},
+            {QStringLiteral("deg"), QChar(0x00B0)},
+            {QStringLiteral("pound"), QChar(0x00A3)},
+            {QStringLiteral("yen"), QChar(0x00A5)},
+            {QStringLiteral("euro"), QChar(0x20AC)},
+            {QStringLiteral("frac12"), QChar(0x00BD)},
+            {QStringLiteral("frac14"), QChar(0x00BC)},
+            {QStringLiteral("frac34"), QChar(0x00BE)},
+            {QStringLiteral("dagger"), QChar(0x2020)},
+            {QStringLiteral("permil"), QChar(0x2030)},
+            // Latin-1 补充常见重音字符
+            {QStringLiteral("agrave"), QChar(0x00E0)},
+            {QStringLiteral("aacute"), QChar(0x00E1)},
+            {QStringLiteral("acirc"), QChar(0x00E2)},
+            {QStringLiteral("atilde"), QChar(0x00E3)},
+            {QStringLiteral("auml"), QChar(0x00E4)},
+            {QStringLiteral("aring"), QChar(0x00E5)},
+            {QStringLiteral("ccedil"), QChar(0x00E7)},
+            {QStringLiteral("egrave"), QChar(0x00E8)},
+            {QStringLiteral("eacute"), QChar(0x00E9)},
+            {QStringLiteral("ecirc"), QChar(0x00EA)},
+            {QStringLiteral("euml"), QChar(0x00EB)},
+            {QStringLiteral("igrave"), QChar(0x00EC)},
+            {QStringLiteral("iacute"), QChar(0x00ED)},
+            {QStringLiteral("icirc"), QChar(0x00EE)},
+            {QStringLiteral("iuml"), QChar(0x00EF)},
+            {QStringLiteral("ntilde"), QChar(0x00F1)},
+            {QStringLiteral("ograve"), QChar(0x00F2)},
+            {QStringLiteral("oacute"), QChar(0x00F3)},
+            {QStringLiteral("ocirc"), QChar(0x00F4)},
+            {QStringLiteral("otilde"), QChar(0x00F5)},
+            {QStringLiteral("ouml"), QChar(0x00F6)},
+            {QStringLiteral("ugrave"), QChar(0x00F9)},
+            {QStringLiteral("uacute"), QChar(0x00FA)},
+            {QStringLiteral("ucirc"), QChar(0x00FB)},
+            {QStringLiteral("uuml"), QChar(0x00FC)},
+            {QStringLiteral("yacute"), QChar(0x00FD)},
+            {QStringLiteral("yuml"), QChar(0x00FF)},
+        };
+        const auto it = kEntities.constFind(name);
+        return it != kEntities.constEnd() ? QString(it.value()) : QString();
+    }
+};
+
 } // namespace
 
 // ---- EpubParser ----
@@ -148,8 +224,16 @@ QByteArray EpubParser::readZipEntry(const QString &zipPath, const QString &entry
         if (unzOpenCurrentFile(zip) == UNZ_OK) {
             char buf[4096];
             int n;
-            while ((n = unzReadCurrentFile(zip, buf, sizeof(buf))) > 0)
+            while ((n = unzReadCurrentFile(zip, buf, sizeof(buf))) > 0) {
                 out.append(buf, n);
+                if (out.size() > kMaxZipEntrySize) {
+                    qWarning("EpubParser: 条目 %s 超过 %lld MB，跳过",
+                             qUtf8Printable(entry),
+                             static_cast<long long>(kMaxZipEntrySize / (1024 * 1024)));
+                    out.clear();
+                    break;
+                }
+            }
             unzCloseCurrentFile(zip);
         }
     }
@@ -159,7 +243,9 @@ QByteArray EpubParser::readZipEntry(const QString &zipPath, const QString &entry
 
 QString EpubParser::normalizeXhtml(const QByteArray &xhtml, QString *title) const {
     QString html;
+    HtmlEntityResolver resolver;
     QXmlStreamReader r(xhtml);
+    r.setEntityResolver(&resolver);
     bool inBody = false;
     const auto keepOpen = [](const QString &tag) {
         return tag == QLatin1String("p") || tag == QLatin1String("h1")
@@ -197,6 +283,11 @@ QString EpubParser::normalizeXhtml(const QByteArray &xhtml, QString *title) cons
         } else if (r.isCharacters() && inBody) {
             html += r.text().toString().toHtmlEscaped();
         }
+    }
+    if (r.hasError()) {
+        qWarning("EpubParser: XHTML 解析错误（第 %lld 字符处中断，已解析部分保留）: %s",
+                 static_cast<long long>(r.characterOffset()),
+                 qUtf8Printable(r.errorString()));
     }
     return html;
 }
@@ -279,7 +370,8 @@ void EpubParser::splitParagraphs(const QString &html, const QString &zipPath,
             static const QRegularExpression srcRe("src=\"([^\"]*)\"");
             const QRegularExpressionMatch sm = srcRe.match(m.captured(3));
             if (!sm.hasMatch()) continue;
-            const QString entry = resolveEntry(sm.captured(1), chapterEntry);
+            // normalize 时 src 被 toHtmlEscaped 二次转义，先还原再解析条目
+            const QString entry = resolveEntry(decodeEntities(sm.captured(1)), chapterEntry);
             if (entry.isEmpty()) {
                 qWarning("EpubParser: 无法解析图片引用 %s", qUtf8Printable(sm.captured(1)));
                 continue;

@@ -21,8 +21,8 @@ private slots:
         QCOMPARE(m.author, QStringLiteral("作者甲"));
         QCOMPARE(m.chapters.size(), 2);
         QCOMPARE(m.chapters[0].title, QStringLiteral("第一章"));
-        // 段落按 <p>/<h*> 切分：h1 + 3 个 p
-        QCOMPARE(m.chapters[0].paragraphs.size(), 4);
+        // 段落按 <p>/<h*> 切分：h1 + 4 个 p（含实体段）
+        QCOMPARE(m.chapters[0].paragraphs.size(), 5);
         QCOMPARE(m.chapters[0].paragraphs[0].level, 1);
         QVERIFY(m.chapters[0].paragraphs[1].html.contains("<b>第一段</b>"));
         // 段落纯文本与 html 分离
@@ -67,6 +67,25 @@ private slots:
         QCOMPARE(m.chapters[0].paragraphs[1].sentences.size(), 1);
         QCOMPARE(m.chapters[0].paragraphs[1].sentences[0],
                  QStringLiteral("这是第一段内容。"));
+    }
+    void handlesNamedEntities() {
+        // &nbsp;/&mdash;/&hellip; 等未声明实体：QXmlStreamReader 需实体解析器，
+        // 否则解析报错、实体之后正文静默截断
+        EpubParser p;
+        DocumentModel m = p.parse(QStringLiteral(EPUB_FIXTURES_DIR) + "/sample.epub");
+        bool found = false;
+        for (const Chapter &c : m.chapters) {
+            for (const Paragraph &pp : c.paragraphs) {
+                if (!pp.text.contains(QStringLiteral("实体")) || !pp.text.contains(QStringLiteral("完。")))
+                    continue;
+                found = true;
+                QVERIFY(pp.text.contains(QChar(0x00A0)));     // &nbsp;
+                QVERIFY(pp.text.contains(QChar(0x2014)));     // &mdash;
+                QVERIFY(pp.text.contains(QChar(0x2026)));     // &hellip;
+                QVERIFY(pp.text.endsWith(QStringLiteral("完。"))); // 实体后正文不截断
+            }
+        }
+        QVERIFY(found);
     }
 };
 QTEST_MAIN(TestEpubParser)
