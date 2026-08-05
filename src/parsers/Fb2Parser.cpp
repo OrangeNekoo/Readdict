@@ -33,11 +33,21 @@ bool isInlineTag(const QString &tag) {
         || tag == QLatin1String("strong") || tag == QLatin1String("em");
 }
 
+// binary content-type → 解出图片文件的扩展名（未知类型不补扩展名）
+QString extensionForType(const QString &contentType) {
+    if (contentType == QLatin1String("image/png")) return QStringLiteral(".png");
+    if (contentType == QLatin1String("image/jpeg")) return QStringLiteral(".jpg");
+    if (contentType == QLatin1String("image/gif")) return QStringLiteral(".gif");
+    if (contentType == QLatin1String("image/svg+xml")) return QStringLiteral(".svg");
+    return QString();
+}
+
 } // namespace
 
 DocumentModel Fb2Parser::parse(const QString &fb2Path) {
     DocumentModel m;
     m_binaries.clear();
+    m_binaryTypes.clear();
     m_imgNames.clear();
     QFile f(fb2Path);
     if (!f.open(QIODevice::ReadOnly)) return m;
@@ -58,6 +68,9 @@ DocumentModel Fb2Parser::parse(const QString &fb2Path) {
         } else if (tag == QLatin1String("binary")) {
             const QString id = meta.attributes().value("id").toString();
             if (!id.isEmpty()) {
+                // content-type 用于给解出的图片文件补扩展名
+                m_binaryTypes.insert(id,
+                    meta.attributes().value("content-type").toString());
                 const QByteArray b64 = meta.readElementText().toUtf8();
                 if (!b64.isEmpty() && b64.size() <= kMaxBinarySize)
                     m_binaries.insert(id, b64);
@@ -70,7 +83,9 @@ DocumentModel Fb2Parser::parse(const QString &fb2Path) {
     if (meta.hasError()) {
         qWarning("Fb2Parser: %s 的 XML 解析失败：%s",
                  qUtf8Printable(fb2Path), qUtf8Printable(meta.errorString()));
-        return m;
+        // 出错必须返回完全空的模型：DocumentModel::empty() 只查 chapters，
+        // 若此时 title/author 已填充会与"出错返回空模型"语义矛盾
+        return DocumentModel{};
     }
     if (m.title.isEmpty()) m.title = QFileInfo(fb2Path).completeBaseName();
 
@@ -219,6 +234,15 @@ void Fb2Parser::parseParagraph(QXmlStreamReader &r, Paragraph &p) {
                     continue;
                 }
                 const QString id = href.mid(1);
+                // 防路径穿越：binary id 直接用作缓存文件名，QDir::filePath 不
+                // 去除 .. 与路径分隔符，恶意 id（如 "../../evil"）会把 base64
+                // 写到缓存目录之外。拒绝含 /、\、.. 的 id，整体跳过该图片
+                if (id.isEmpty() || id.contains(QLatin1Char('/'))
+                    || id.contains(QLatin1Char('\\'))
+                    || id.contains(QStringLiteral(".."))) {
+                    qWarning("Fb2Parser: 非法图片引用 #%s，跳过", qUtf8Printable(id));
+                    continue;
+                }
                 const auto it = m_binaries.constFind(id);
                 if (it == m_binaries.constEnd()) {
                     qWarning("Fb2Parser: 图片引用无对应 binary #%s",
@@ -230,9 +254,13 @@ void Fb2Parser::parseParagraph(QXmlStreamReader &r, Paragraph &p) {
                     qWarning("Fb2Parser: binary #%s base64 解码为空", qUtf8Printable(id));
                     continue;
                 }
-                // 命名依赖 binary id（同名冲突加 id md5 前缀），与解析次序无关，
-                // 保证多次解析同一书得到相同文件名；已存在的文件直接复用
+                // 命名依赖 binary id + content-type 扩展名（同名冲突加 id md5
+                // 前缀），与解析次序无关，保证多次解析同一书得到相同文件名；
+                // 已存在的文件直接复用
                 QString name = id;
+                const auto t = m_binaryTypes.constFind(id);
+                if (t != m_binaryTypes.constEnd())
+                    name += extensionForType(t.value());
                 if (name.isEmpty()) name = QStringLiteral("img");
                 if (m_imgNames.contains(name)) {
                     const QString digest = QString::fromLatin1(

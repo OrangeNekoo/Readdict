@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">
+  <description><title-info>
+    <book-title>多章书</book-title>
+  </title-info></description>
+  <body>
+    <section><title><p>第一章</p></title>
+      <p>斜体<i>重点</i>与<strong>粗体</strong>及<em>强调</em>。</p>
+    </section>
+    <section><title><p>第二章</p></title>
+      <p>第二段正文。</p>
+    </section>
+  </body>
+</FictionBook>

@@ -32,6 +32,7 @@ private:
     static void skipElement(QXmlStreamReader &r);
 
     QHash<QString, QByteArray> m_binaries; // binary id → base64 原文
+    QHash<QString, QString> m_binaryTypes; // binary id → content-type（补扩展名用）
     QDir m_imgDir;                         // 图片缓存目录（按书唯一）
     QSet<QString> m_imgNames;              // 已用图片文件名（去重）
 };
