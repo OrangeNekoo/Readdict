@@ -1,7 +1,9 @@
 #pragma once
 #include "TTSEngine.h"
-#include <QNetworkAccessManager>
+#include <QAudioOutput>
+#include <QBuffer>
 #include <QMediaPlayer>
+#include <QNetworkAccessManager>
 #include <QUrl>
 
 class OpenAITTSEngine : public TTSEngine {
@@ -9,6 +11,8 @@ class OpenAITTSEngine : public TTSEngine {
 public:
     explicit OpenAITTSEngine(QObject *parent = nullptr);
     static QString speechUrl(const QString &baseUrl);   // 规范化
+    QByteArray buildPayload(const QString &text, const QString &model,
+                            const QString &voice, double speed) const;
     void configure(const QString &baseUrl, const QString &apiKey,
                    const QString &model, const QString &voice, double speed);
     bool available() const override { return !m_apiKey.isEmpty(); }
@@ -19,4 +23,6 @@ private:
     double m_speed = 1.0;
     QNetworkAccessManager m_net;
     QMediaPlayer m_player;
+    QAudioOutput m_audioOutput;
+    QBuffer m_audioBuffer;      // 内存音频源（每次 speak 复用）
 };
