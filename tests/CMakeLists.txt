@@ -3,9 +3,23 @@ target_include_directories(tst_database PRIVATE ../src)
 target_link_libraries(tst_database PRIVATE Qt6::Test Qt6::Sql)
 add_test(NAME tst_database COMMAND tst_database)
 
-qt_add_executable(tst_bookmanager tst_bookmanager.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/DatabaseManager.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/BookManager.cpp)
-target_include_directories(tst_bookmanager PRIVATE ../src)
-target_link_libraries(tst_bookmanager PRIVATE Qt6::Test Qt6::Sql)
+qt_add_executable(tst_bookmanager
+    tst_bookmanager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/DatabaseManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/BookManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/SettingsStore.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/SentenceSplitter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/TextParser.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/EpubParser.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/Fb2Parser.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/MobiParser.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/ParserFactory.cpp
+)
+target_include_directories(tst_bookmanager PRIVATE ../src ../src/parsers ../third_party/libmobi/src)
+target_link_libraries(tst_bookmanager PRIVATE Qt6::Test Qt6::Sql Qt6::Gui MINIZIP::minizipstatic mobi zlibstatic)
+if(APPLE)
+    target_link_libraries(tst_bookmanager PRIVATE iconv)
+endif()
 add_test(NAME tst_bookmanager COMMAND tst_bookmanager)
 
 qt_add_executable(tst_settings tst_settings.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/SettingsStore.cpp)
@@ -17,6 +31,7 @@ qt_add_executable(tst_bookimporter
     tst_bookimporter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/DatabaseManager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/BookManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/SettingsStore.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/BookImporter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/SentenceSplitter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/TextParser.cpp
@@ -129,5 +144,9 @@ qt_add_resources(tst_qml "qml_ui"
     FILES
         ../src/ui/qml/ShelfPage.qml
         ../src/ui/qml/BookCard.qml
+        ../src/ui/qml/ReaderPage.qml
+        ../src/ui/qml/ReaderContent.qml
+        ../src/ui/qml/ReaderControls.qml
+        ../src/ui/qml/ReaderBackground.qml
 )
 add_test(NAME tst_qml COMMAND tst_qml)

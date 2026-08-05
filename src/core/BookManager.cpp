@@ -1,10 +1,14 @@
 #include "BookManager.h"
 #include "DatabaseManager.h"
+#include "parsers/ParserFactory.h"
+#include "SettingsStore.h"
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QVariant>
 #include <QDateTime>
 #include <QDebug>
+#include <QFontDatabase>
+#include <QJsonValue>
 
 BookManager::BookManager(const QString &dbPath, const QString &connection, QObject *parent)
     : QObject(parent) {
@@ -48,6 +52,7 @@ void BookManager::removeBook(qint64 id) {
     f.addBindValue(id);
     if (!f.exec())
         qWarning() << "removeBook: books_fts 索引清理失败:" << f.lastError().text();
+    m_docCache.remove(id); // 阅读器文档缓存一并失效
     emit booksChanged();
 }
 
@@ -236,4 +241,81 @@ void BookManager::removeCategory(const QString &name) {
     q.prepare("DELETE FROM categories WHERE name=?");
     q.addBindValue(name);
     if (q.exec()) emit booksChanged();
+}
+
+// ---- 阅读器接口（B8）----
+
+void BookManager::setSettingsStore(SettingsStore *settings) { m_settings = settings; }
+
+DocumentModel BookManager::documentFor(qint64 bookId) {
+    const auto it = m_docCache.constFind(bookId);
+    if (it != m_docCache.constEnd()) return it.value();
+    DocumentModel doc;
+    const Book b = bookById(bookId);
+    if (!b.path.isEmpty())
+        doc = ParserFactory::parse(b.path, b.format);
+    m_docCache.insert(bookId, doc);
+    return doc;
+}
+
+QVariantMap BookManager::paragraphToVariant(const Paragraph &p) {
+    QVariantMap m;
+    m.insert("text", p.text);
+    m.insert("html", p.html);
+    m.insert("level", p.level);
+    m.insert("imagePath", p.imagePath);
+    return m;
+}
+
+QVariantList BookManager::chapterTitles(qint64 bookId) {
+    m_activeBookId = bookId;
+    QVariantList out;
+    const DocumentModel doc = documentFor(bookId);
+    out.reserve(doc.chapters.size());
+    for (const Chapter &c : doc.chapters) out.append(c.title);
+    return out;
+}
+
+QVariant BookManager::loadChapter(qint64 bookId, int index) {
+    m_activeBookId = bookId;
+    const DocumentModel doc = documentFor(bookId);
+    QVariantMap out;
+    if (index < 0 || index >= doc.chapters.size()) return out;
+    const Chapter &c = doc.chapters.at(index);
+    out.insert("title", c.title);
+    QVariantList paras;
+    paras.reserve(c.paragraphs.size());
+    for (const Paragraph &p : c.paragraphs) paras.append(paragraphToVariant(p));
+    out.insert("paragraphs", paras);
+    return out;
+}
+
+int BookManager::lastChapter(qint64 bookId) {
+    if (!m_settings) return 0;
+    return m_settings->value(QStringLiteral("progress/%1").arg(bookId)).toInt();
+}
+
+int BookManager::currentChapter() const { return m_currentChapter; }
+
+void BookManager::setCurrentChapter(int index) {
+    if (m_currentChapter == index) return;
+    m_currentChapter = index;
+    emit currentChapterChanged();
+    if (m_settings && m_activeBookId)
+        m_settings->setValue(QStringLiteral("progress/%1").arg(m_activeBookId), index);
+}
+
+QString BookManager::resolveFontFamily(const QString &preferred) const {
+    if (preferred.isEmpty() || QFontDatabase::hasFamily(preferred)) return preferred;
+    // 思源 VF 字族在 CoreText 下可能只暴露英文族名（name 表含 "Source Han Sans VF" 等），
+    // 按优先级回退到已安装族；全部未命中则返回首选值交给 Qt 系统字体兜底。
+    const QStringList fallbacks = {
+        QStringLiteral("Source Han Sans VF"),
+        QStringLiteral("Source Han Sans SC VF"),
+        QStringLiteral("Source Han Sans SC"),
+        QStringLiteral("思源黑体 VF"),
+    };
+    for (const QString &f : fallbacks)
+        if (QFontDatabase::hasFamily(f)) return f;
+    return preferred;
 }
