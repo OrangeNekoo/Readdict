@@ -22,6 +22,18 @@ private slots:
         const auto s = SentenceSplitter::split("第一行\n第二行\n\n第三段。");
         QCOMPARE(s.size(), 2); // 段落边界合入前一句，不单独成句
     }
+    void handlesCrlfParagraphs() {
+        const auto s = SentenceSplitter::split("第一段\r\n\r\n第二段。");
+        QCOMPARE(s.size(), 2); // CRLF 段落边界同样识别（TXT 导入常见）
+    }
+    void handlesConsecutivePunctuation() {
+        QCOMPARE(SentenceSplitter::split("你好..").size(), 1);    // 连续句点视为省略号，不断句
+        QCOMPARE(SentenceSplitter::split("真的吗？！").size(), 1); // ？！ 组合只断一次
+    }
+    void abbreviationWhitelistOnly() {
+        const auto s = SentenceSplitter::split("Wait for me. I'll go.");
+        QCOMPARE(s.size(), 2); // me. 不在缩写白名单，应正常断句
+    }
 };
 QTEST_MAIN(TestSentence)
 #include "tst_sentencesplitter.moc"
