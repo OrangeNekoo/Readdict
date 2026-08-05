@@ -115,8 +115,15 @@ Page {
                 model: Books.booksModel
                 delegate: BookCard {
                     book: modelData
-                    // 阅读页 ReaderPage 属计划 B；当前点击仅记录日志，避免跳转到不存在的页面
-                    onClicked: console.log("书架: 点击书籍 id=" + modelData.id + " 标题=" + modelData.title + "（阅读页将在计划 B 接入）")
+                    // 文本格式进入阅读页；PDF 阅读页在 B9 接入
+                    onClicked: {
+                        const fmt = (modelData.format ?? "").toUpperCase()
+                        if (fmt === "PDF") {
+                            console.log("PDF 阅读页将在 B9 实现：" + modelData.title)
+                        } else {
+                            shelf.StackView.view.push("ReaderPage.qml", { book: modelData })
+                        }
+                    }
                 }
                 ScrollBar.vertical: ScrollBar {}
             }
