@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Pdf
 import QtTest
 import Readdict.Backend
@@ -80,6 +81,38 @@ Item {
             tryVerify(function () { return page.pdfView.status === Image.Ready }, 15000,
                       "恢复页渲染应完成再销毁，实际 " + page.pdfView.status)
             loader.destroy()
+        }
+        // B10：关闭竞态防护——真实 StackView 内 push PdfReaderPage，翻页后立即请求关闭：
+        // requestClose 应只等渲染稳定（image.status Ready）后由 StackView 销毁页面，
+        // 不撞在途渲染线程（QPdfDocument 销毁 vs QQuickPixmapReader 的 use-after-free）。
+        // 注：quicktest harness 不推进 StackView 过渡动画（对普通 Rectangle push/pop 亦然），
+        // depth 归零无法断言；此处断言可观测的安全属性——渲染稳定前页面必须存活。
+        function test_pdfCloseWaitsRender() {
+            var src = TestEnv.pdfSource
+            if (src.length === 0)
+                skip("未设置 READDICT_REAL_PDF，跳过关闭竞态验证")
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            verify(stack !== null, "测试 StackView 应能创建")
+            var id = 999003
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/PdfReaderPage.qml",
+                       { book: { id: id, title: "真实PDF", path: src } })
+            var page = stack.currentItem
+            verify(page !== null, "PdfReaderPage 应被 push 进 StackView")
+            tryVerify(function () { return page.pdfDocument.status === PdfDocument.Ready }, 15000,
+                      "真实 PDF 应加载为 Ready")
+            tryVerify(function () { return page.pdfView.status === Image.Ready }, 15000,
+                      "初始页应渲染完成")
+            page.pdfView.goToPage(5) // 触发新页渲染
+            wait(100)                // 让渲染进入在途状态
+            page.requestClose()      // 渲染在途时请求关闭
+            verify(page.closing === true, "requestClose 应置 closing 防重入")
+            // 渲染稳定前页面（含 QPdfDocument）不得被销毁——这是竞态防护的核心不变量
+            tryVerify(function () { return page.pdfView.status === Image.Ready }, 15000,
+                      "渲染应最终稳定，实际 " + page.pdfView.status)
+            verify(page.pdfView !== undefined && page.pdfView.currentPage === 5,
+                   "渲染稳定后页面仍应存活（未被提前销毁）")
+            stack.destroy()
         }
     }
     TestCase {

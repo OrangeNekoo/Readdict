@@ -22,6 +22,11 @@ Page {
     property alias pdfView: pdfView
     // B10：恢复完成前不写进度——Ready 后首次 currentPageChanged(0) 不得覆盖保存值
     property bool restoreDone: false
+    // B10：关闭竞态防护——QPdfDocument 销毁（FPDF_DestroyLibrary）若撞上
+    // QQuickPixmapReader 在途渲染（QPdfIOHandler 持文档指针）会 use-after-free 崩溃
+    //（30MB 大 PDF 实测复现）。返回键先等渲染稳定（无在途读取）再 pop，超时兜底。
+    property bool closing: false
+    property int closePollCount: 0
 
     PdfDocument {
         id: pdfDoc
@@ -76,7 +81,7 @@ Page {
             spacing: 8
             ToolButton {
                 text: qsTr("返回")
-                onClicked: page.StackView.view.pop()
+                onClicked: page.requestClose()
             }
             Label {
                 Layout.fillWidth: true
@@ -101,6 +106,38 @@ Page {
         if (!page.book.id || pdfDoc.status !== PdfDocument.Ready || pdfDoc.pageCount <= 0) return
         Settings.setValue("progress/pdf_" + page.book.id, pdfView.currentPage)
         Books.setProgress(page.book.id, (pdfView.currentPage + 1) / pdfDoc.pageCount)
+    }
+
+    // 无在途渲染：image.status 为 Ready（渲染完成）/ Error / Null（无渲染任务）时安全
+    function renderSettled() {
+        const s = pdfView.status
+        return s === Image.Ready || s === Image.Error || s === Image.Null
+    }
+
+    // 关闭阅读页：等渲染线程空闲再 pop（文档销毁撞在途渲染 = UAF 崩溃）；
+    // 5 秒（100×50ms）兜底强制关闭，防止渲染异常时返回键失效
+    function requestClose() {
+        if (page.closing) return
+        page.closing = true
+        page.closePollCount = 0
+        if (page.renderSettled()) {
+            page.StackView.view.pop()
+            return
+        }
+        closePoll.start()
+    }
+
+    Timer {
+        id: closePoll
+        interval: 50
+        repeat: true
+        onTriggered: {
+            ++page.closePollCount
+            if (page.renderSettled() || page.closePollCount > 100) {
+                closePoll.stop()
+                page.StackView.view.pop()
+            }
+        }
     }
 
     Component.onCompleted: {
