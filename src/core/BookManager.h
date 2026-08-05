@@ -1,6 +1,7 @@
 #pragma once
 #include "Book.h"
 #include "parsers/DocumentModel.h"
+#include <QElapsedTimer>
 #include <QHash>
 #include <QObject>
 #include <QSqlDatabase>
@@ -24,8 +25,16 @@ public:
     Q_INVOKABLE void removeBook(qint64 id);
     QVector<Book> books() const;
     Book bookById(qint64 id) const;
-    void setProgress(qint64 id, double progress);
+    Q_INVOKABLE void setProgress(qint64 id, double progress);
     void addReadSeconds(qint64 id, qint64 seconds);
+    // 阅读页写入进度：章节索引 + 章内滚动偏移（settings.json 的 progress/<bookId> 与 progress/scroll_<bookId>）
+    Q_INVOKABLE void savePosition(qint64 bookId, int chapter, double scrollY);
+    // 阅读页恢复滚动偏移（无记录返回 0）
+    Q_INVOKABLE double lastScrollY(qint64 bookId) const;
+    // 阅读计时（B10）：进入阅读页 startTracking，离开/退出 stopTracking 时把
+    // 会话内已读秒数累加到 books.read_seconds（QElapsedTimer 实测，不依赖 QML 定时器）。
+    Q_INVOKABLE void startTracking(qint64 bookId);
+    Q_INVOKABLE void stopTracking();
     void setSort(SortField field);
     QVector<Book> search(const QString &query) const;
     QStringList categories() const;
@@ -66,4 +75,6 @@ private:
     QHash<qint64, DocumentModel> m_docCache;
     qint64 m_activeBookId = 0;   // 最近打开的阅读书（currentChapter 持久化目标）
     int m_currentChapter = 0;
+    QElapsedTimer m_trackTimer;  // 阅读计时：startTracking 启动，stopTracking 结算
+    qint64 m_trackBookId = 0;    // 正在计时的书（0 = 未在计时）
 };

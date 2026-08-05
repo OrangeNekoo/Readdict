@@ -55,6 +55,30 @@ Item {
             tryVerify(function () { return doc.status === PdfDocument.Ready }, 15000,
                       "真实 PDF 应加载为 Ready，实际 " + doc.status)
             verify(doc.pageCount > 0, "加载的 PDF 应有页数")
+            // 30MB 大 PDF 首帧渲染可能仍在进行：等渲染完成再销毁，避免 QtPdfQuick 拆除竞态崩溃
+            tryVerify(function () { return page.pdfView.status === Image.Ready }, 15000,
+                      "首页渲染应完成，实际 " + page.pdfView.status)
+            loader.destroy()
+        }
+        // B10：PDF 进度恢复——Ready 后应先 goToPage(保存页)，且 Ready 时的
+        // 首次 currentPageChanged(0) 不得覆盖保存值（restoreDone 标志门控写入）
+        function test_pdfRestoresPage() {
+            var src = TestEnv.pdfSource
+            if (src.length === 0)
+                skip("未设置 READDICT_REAL_PDF，跳过 PDF 进度恢复验证")
+            var id = 999002 // 独立 bookId，避免与 test_pdfLoadsRealSource 的 999001 互相污染
+            Settings.setValue("progress/pdf_" + id, 3)
+            var loader = pdfReaderComp.createObject(root)
+            var page = loader.item
+            page.book = { id: id, title: "真实PDF", path: src }
+            tryVerify(function () { return page.pdfDocument.status === PdfDocument.Ready }, 15000,
+                      "真实 PDF 应加载为 Ready")
+            tryVerify(function () { return page.pdfView.currentPage === 3 }, 5000,
+                      "恢复后应定位到保存页 3，实际 " + page.pdfView.currentPage)
+            compare(Number(Settings.value("progress/pdf_" + id)), 3,
+                    "恢复页不应被 Ready 时的初始页 0 覆盖")
+            tryVerify(function () { return page.pdfView.status === Image.Ready }, 15000,
+                      "恢复页渲染应完成再销毁，实际 " + page.pdfView.status)
             loader.destroy()
         }
     }
@@ -82,14 +106,18 @@ Item {
             verify(loader.item !== null, "ReaderPage 应能加载（含控制栏/目录 Dialog 编译检查）")
             loader.destroy()
         }
-        // 本文件在 tst_e2e.qml 之后执行（文件名字典序），此时书库已有导入的 TXT 书
+        // 本文件在 tst_e2e.qml 之后执行（文件名字典序），此时书库已有导入的 TXT 书；
+        // B10 新增的 EPUB/长文本书导入会改变 booksModel 首位，故按 format 显式找 TXT
         function test_loadChapter() {
-            if (Books.booksModel.length === 0)
-                skip("书库为空，跳过章节加载验证")
+            var book = null
+            for (let b of Books.booksModel)
+                if ((b.format || "").toUpperCase() === "TXT") { book = b; break }
+            if (!book)
+                skip("书库无 TXT 书，跳过章节加载验证")
             var loader = readerComp.createObject(root)
             var page = loader.item
             verify(page !== null, "ReaderPage 应能加载")
-            page.book = Books.booksModel[0]
+            page.book = book
             page.loadChapter(0)
             verify(page.chapter !== null && page.chapter.paragraphs !== undefined,
                    "loadChapter 应返回带 paragraphs 的章节对象")
@@ -159,6 +187,121 @@ Item {
             layout.children[3].clicked()
             compare(got, 17, "A− 应发 changeFontSize(fontSize-1)")
             loader.destroy()
+        }
+    }
+    TestCase {
+        name: "ReaderRestore"
+        // B10：进度恢复与阅读计时端到端冒烟——真实 ReaderPage 组件生命周期
+        // （onCompleted 恢复章节/滚动/计时，onDestruction 保存滚动/结算计时）。
+        // 多章节 EPUB fixture（sample.epub，2 章）验证章节恢复；长文本书验证滚动恢复。
+        function initTestCase() {
+            if (TestEnv.epubFixture.length > 0)
+                Importer.doImport(TestEnv.epubFixture)
+            if (TestEnv.longSource.length > 0)
+                Importer.doImport(TestEnv.longSource)
+        }
+        function findBook(fmt, titlePart) {
+            for (let b of Books.booksModel)
+                if ((b.format || "").toUpperCase() === fmt && (titlePart === "" || b.title.indexOf(titlePart) >= 0))
+                    return b
+            return null
+        }
+        // 打开阅读页（模拟生产 StackView.push(…, {book})）：setSource 初始属性在
+        // onCompleted 前应用，保证章节加载/滚动恢复/计时都在 book 就绪后执行
+        function openReader(book) {
+            var loader = readerComp.createObject(root)
+            loader.setSource("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: book })
+            var page = loader.item
+            verify(page !== null, "ReaderPage 应能加载")
+            return loader
+        }
+        function test_chapterRestore() {
+            var book = findBook("EPUB", "")
+            if (!book) skip("未导入 EPUB fixture")
+            // 打开 → 翻到第 2 章 → 销毁（模拟退出）→ 重开应恢复到第 2 章
+            var loader = openReader(book)
+            var page = loader.item
+            tryVerify(function () { return page.chapter.paragraphs && page.chapter.paragraphs.length > 0 }, 5000,
+                      "打开应加载章节")
+            page.loadChapter(1)
+            compare(page.chapter.title, "第二章", "翻到第二章")
+            loader.destroy()
+            wait(100) // QML destroy() 延迟到事件循环：等 onDestruction 的保存先落地
+            var loader2 = openReader(book)
+            var page2 = loader2.item
+            tryVerify(function () { return page2.chapter.paragraphs && page2.chapter.paragraphs.length > 0 }, 5000,
+                      "重开应加载章节")
+            compare(page2.chapter.title, "第二章", "重开应恢复到第二章")
+            loader2.destroy()
+        }
+        // 书架进度百分比联动：loadChapter 换章后 books.progress = 章节数/总章节数
+        function test_progressPercent() {
+            var book = findBook("EPUB", "")
+            if (!book) skip("未导入 EPUB fixture")
+            Books.loadChapter(book.id, 1)
+            var cur = findBook("EPUB", "")
+            verify(cur !== null && Math.abs(cur.progress - 1.0) < 0.01,
+                   "第 2 章 / 共 2 章 进度应为 1.0，实际 " + (cur ? cur.progress : "?"))
+            Books.loadChapter(book.id, 0)
+            cur = findBook("EPUB", "")
+            verify(cur !== null && Math.abs(cur.progress - 0.5) < 0.01,
+                   "第 1 章 / 共 2 章 进度应为 0.5，实际 " + (cur ? cur.progress : "?"))
+        }
+        function test_scrollRestore() {
+            var book = findBook("TXT", "longbook")
+            if (!book) skip("未导入长文本书")
+            var loader = openReader(book)
+            var page = loader.item
+            tryVerify(function () { return page.contentView.contentHeight > 2000 }, 5000,
+                      "长文本书内容高度应远大于视口")
+            page.contentView.contentY = 400
+            var savedY = page.contentView.contentY
+            verify(savedY > 300, "滚动值应生效，实际 " + savedY)
+            loader.destroy() // onDestruction 保存 scroll_<bookId>
+            wait(100) // 等延迟销毁完成、滚动位置写入 settings.json
+            var loader2 = openReader(book)
+            var page2 = loader2.item
+            tryVerify(function () {
+                return Math.abs(page2.contentView.contentY - savedY) < 1
+            }, 5000, "重开应恢复到保存的滚动位置 " + savedY + "，实际 " + page2.contentView.contentY)
+            loader2.destroy()
+        }
+        // 阅读计时：打开页面 mock 阅读 1.2 秒，销毁后 read_seconds 应增加（后端 QElapsedTimer 实测）
+        function test_readSeconds() {
+            var book = findBook("TXT", "longbook")
+            if (!book) skip("未导入长文本书")
+            var before = book.readSeconds
+            var loader = openReader(book)
+            wait(1200)
+            loader.destroy() // onDestruction → stopTracking 结算
+            wait(100) // 等延迟销毁完成、read_seconds 写入数据库
+            var after = 0
+            for (let b of Books.booksModel)
+                if (b.id === book.id) { after = b.readSeconds; break }
+            verify(after >= before + 1, "阅读 1.2 秒后 read_seconds 应至少 +1，实际增加 " + (after - before))
+        }
+        // 真实书验证（READDICT_REAL_EPUB 门控，未设置跳过）：导入 → 翻到第 3 章 → 重开断言恢复
+        function test_realEpubChapterRestore() {
+            var src = TestEnv.realEpubSource
+            if (src.length === 0)
+                skip("未设置 READDICT_REAL_EPUB，跳过真实书恢复验证")
+            Importer.doImport(src)
+            var book = findBook("EPUB", "从零")
+            if (!book) skip("真实 EPUB 未导入")
+            var loader = openReader(book)
+            var page = loader.item
+            tryVerify(function () { return page.chapter.paragraphs && page.chapter.paragraphs.length > 0 }, 8000,
+                      "真实 EPUB 应能打开并加载章节")
+            page.loadChapter(2) // 第 3 章（索引 2）
+            var t3 = page.chapter.title
+            verify(t3.length > 0, "第 3 章应有标题")
+            loader.destroy()
+            var loader2 = openReader(book)
+            var page2 = loader2.item
+            tryVerify(function () { return page2.chapter.paragraphs && page2.chapter.paragraphs.length > 0 }, 8000,
+                      "重开应加载章节")
+            compare(page2.chapter.title, t3, "重开应恢复到第 3 章（" + t3 + "）")
+            loader2.destroy()
         }
     }
 }

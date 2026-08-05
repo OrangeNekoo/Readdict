@@ -83,6 +83,9 @@ int main(int argc, char *argv[]) {
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Settings", settings);
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Books", books);
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Importer", importer);
+    // B10：应用退出时结算阅读计时（页面 onDestruction 只在正常退出 QML 引擎销毁时触发，
+    // 直接退进程/崩溃时兜底由这里结算，保证已读秒数不丢失）。
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, books, &BookManager::stopTracking);
 
     QQmlApplicationEngine engine;
     engine.loadFromModule("Readdict", "Main");

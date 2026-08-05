@@ -13,6 +13,8 @@ Page {
     property var typography: ({})
     property string bgMode: "light"
     property var tocTitles: []
+    // B10：暴露内容视图（滚动恢复冒烟测试经此读写 contentY/contentHeight）
+    property alias contentView: content
 
     ReaderBackground {
         anchors.fill: parent
@@ -62,6 +64,16 @@ Page {
         anchors.bottom: controls.top
         chapter: page.chapter
         typography: page.typography
+    }
+
+    // B10：滚动位置每 5 秒写一次 settings.json（章节索引 + 章内偏移），
+    // 离开页面时 onDestruction 再补写一次，崩溃窗口不超过 5 秒。
+    Timer {
+        id: scrollSaveTimer
+        interval: 5000
+        repeat: true
+        running: true
+        onTriggered: page.saveScroll()
     }
 
     ReaderControls {
@@ -155,10 +167,26 @@ Page {
         Settings.setValue("reader/background", page.bgMode)
     }
 
+    // B10：滚动偏移持久化（章节 + contentY 原子写入，恢复时先 loadChapter 再设 scrollY）
+    function saveScroll() {
+        if (!page.book || !page.book.id) return
+        Books.savePosition(page.book.id, Books.currentChapter, content.contentY)
+    }
+
     Component.onCompleted: {
         page.typography = page.typographyFromSettings()
         const bg = Settings.value("reader/background")
         page.bgMode = (bg === "light" || bg === "paper" || bg === "dark") ? bg : "light"
+        // 恢复：定位到保存的章节（progress/<bookId>），滚动偏移交给 ReaderContent
+        // 在内容高度就绪后设置（progress/scroll_<bookId>）
         page.loadChapter(Books.lastChapter(page.book.id))
+        content.restoreScrollY = Books.lastScrollY(page.book.id)
+        if (page.book && page.book.id)
+            Books.startTracking(page.book.id)  // 阅读计时开始
+    }
+
+    Component.onDestruction: {
+        page.saveScroll()          // 离开页面补写滚动位置
+        Books.stopTracking()       // 结算阅读秒数
     }
 }

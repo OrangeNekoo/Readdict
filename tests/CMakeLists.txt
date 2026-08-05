@@ -16,6 +16,8 @@ qt_add_executable(tst_bookmanager
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/ParserFactory.cpp
 )
 target_include_directories(tst_bookmanager PRIVATE ../src ../src/parsers ../third_party/libmobi/src)
+# B10：loadChapter 进度百分比用例需解析 sample.epub fixture（绝对路径注入，同 tst_epubparser 模式）
+target_compile_definitions(tst_bookmanager PRIVATE EPUB_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 target_link_libraries(tst_bookmanager PRIVATE Qt6::Test Qt6::Sql Qt6::Gui MINIZIP::minizipstatic mobi zlibstatic)
 if(APPLE)
     target_link_libraries(tst_bookmanager PRIVATE iconv)
@@ -130,6 +132,9 @@ qt_add_executable(tst_qml
 )
 target_include_directories(tst_qml PRIVATE ../src ../src/parsers ../third_party/libmobi/src)
 target_compile_definitions(tst_qml PRIVATE QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml")
+# B10：QML 冒烟需要导入多章节 EPUB fixture（sample.epub）与长文本书（滚动恢复用例），
+# 绝对路径注入经 TestEnv 暴露为 file:// URL（与 tst_epubparser 的 fixtures 注入同模式）
+target_compile_definitions(tst_qml PRIVATE TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 target_link_libraries(tst_qml PRIVATE
     Qt6::Test Qt6::QuickTest Qt6::Quick Qt6::Qml Qt6::QuickControls2 Qt6::Sql Qt6::Gui Qt6::Pdf
     MINIZIP::minizipstatic mobi zlibstatic

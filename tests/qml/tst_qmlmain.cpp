@@ -25,6 +25,12 @@ class TestEnv : public QObject {
     // 真实 PDF 路径（环境变量 READDICT_REAL_PDF，未设置时为空串）：供 PdfReaderPage
     // 冒烟测试加载真实源文件验证 QtQuick.Pdf 可用（B9）
     Q_PROPERTY(QString pdfSource READ pdfSource CONSTANT)
+    // 真实 EPUB 路径（环境变量 READDICT_REAL_EPUB，未设置时为空串）：真实书进度恢复验证（B10）
+    Q_PROPERTY(QString realEpubSource READ realEpubSource CONSTANT)
+    // 多章节 EPUB fixture（sample.epub，2 章）：章节恢复冒烟（B10）
+    Q_PROPERTY(QString epubFixture READ epubFixture CONSTANT)
+    // 长文本书（300 段，单章）：滚动恢复冒烟（内容高度远大于视口，滚动值可区分）（B10）
+    Q_PROPERTY(QString longSource READ longSource CONSTANT)
 public:
     explicit TestEnv(const QString &workDir, QObject *parent = nullptr) : QObject(parent) {
         QDir srcDir(workDir + "/src");
@@ -41,14 +47,34 @@ public:
             // 直接给 file:// URL（QML 无 QUrl::fromLocalFile 等价物）
             m_files.append(QUrl::fromLocalFile(path).toString());
         }
+        // 长文本书：300 段正文，保证滚动恢复用例中 contentHeight 远大于视口
+        const QString longPath = srcDir.filePath("longbook.txt");
+        QFile lf(longPath);
+        if (lf.open(QIODevice::WriteOnly)) {
+            for (int k = 0; k < 300; ++k)
+                lf.write(QStringLiteral("这是长文本书的第 %1 段内容，用于滚动位置恢复验证。\n\n").arg(k + 1).toUtf8());
+            lf.close();
+        }
+        m_longSource = QUrl::fromLocalFile(longPath).toString();
     }
     QStringList sourceFiles() const { return m_files; }
     QString pdfSource() const {
         const QString p = qEnvironmentVariable("READDICT_REAL_PDF");
         return QFile::exists(p) ? p : QString();
     }
+    QString realEpubSource() const {
+        // doImport 期望 file:// URL（同 sourceFiles/epubFixture），裸路径会被 QUrl 解析失败
+        const QString p = qEnvironmentVariable("READDICT_REAL_EPUB");
+        return QFile::exists(p) ? QUrl::fromLocalFile(p).toString() : QString();
+    }
+    QString epubFixture() const {
+        const QString p = QStringLiteral(TEST_FIXTURES_DIR) + "/sample.epub";
+        return QFile::exists(p) ? QUrl::fromLocalFile(p).toString() : QString();
+    }
+    QString longSource() const { return m_longSource; }
 private:
     QStringList m_files;
+    QString m_longSource;
 };
 
 int main(int argc, char *argv[]) {
@@ -61,6 +87,8 @@ int main(int argc, char *argv[]) {
     const QString appData = tmpDir.path();
     auto *books = new BookManager(appData + "/t.db");
     auto *settings = new SettingsStore(appData + "/settings.json");
+    // B10：与生产 main.cpp 对齐——阅读进度（progress/<bookId>、scroll_<bookId>）读写 settings.json
+    books->setSettingsStore(settings);
     // importer 内部 BookManager 固定用连接名 readdict_importer（见 BookImporter.cpp），
     // 与 Books 单例的 readdict_main 不冲突；指向同一 db 文件，行为与生产一致。
     auto *importer = new BookImporter(appData, appData + "/t.db");

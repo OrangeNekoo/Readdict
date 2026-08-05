@@ -148,11 +148,36 @@ void BookManager::setProgress(qint64 id, double progress) {
 }
 
 void BookManager::addReadSeconds(qint64 id, qint64 seconds) {
+    if (seconds <= 0) return;
     QSqlQuery q(m_db);
     q.prepare("UPDATE books SET read_seconds=read_seconds+? WHERE id=?");
     q.addBindValue(seconds);
     q.addBindValue(id);
     if (q.exec()) emit booksChanged();
+}
+
+void BookManager::savePosition(qint64 bookId, int chapter, double scrollY) {
+    if (!m_settings) return;
+    m_settings->setValue(QStringLiteral("progress/%1").arg(bookId), chapter);
+    m_settings->setValue(QStringLiteral("progress/scroll_%1").arg(bookId), scrollY);
+}
+
+double BookManager::lastScrollY(qint64 bookId) const {
+    if (!m_settings) return 0;
+    return m_settings->value(QStringLiteral("progress/scroll_%1").arg(bookId)).toDouble();
+}
+
+void BookManager::startTracking(qint64 bookId) {
+    if (m_trackBookId && m_trackBookId != bookId)
+        stopTracking(); // 切换阅读书：先结算上一本
+    m_trackBookId = bookId;
+    m_trackTimer.restart();
+}
+
+void BookManager::stopTracking() {
+    if (!m_trackBookId) return;
+    addReadSeconds(m_trackBookId, m_trackTimer.elapsed() / 1000);
+    m_trackBookId = 0;
 }
 
 void BookManager::setSort(SortField field) { m_sort = field; }
@@ -287,6 +312,8 @@ QVariant BookManager::loadChapter(qint64 bookId, int index) {
     paras.reserve(c.paragraphs.size());
     for (const Paragraph &p : c.paragraphs) paras.append(paragraphToVariant(p));
     out.insert("paragraphs", paras);
+    // B10：换章/开书即更新书架进度百分比（章节数/总章节数，首章=1/n）与最近阅读时间
+    setProgress(bookId, double(index + 1) / doc.chapters.size());
     return out;
 }
 

@@ -9,9 +9,31 @@ Flickable {
     id: flick
     property var chapter: ({})
     property var typography: ({})
+    // B10：滚动位置恢复——ReaderPage 打开时赋保存的 scrollY（>=0），内容高度就绪后应用一次；
+    // 默认 -1 表示"本次打开无需恢复"，避免内容高度变化时反复设置。
+    property double restoreScrollY: -1
+    property bool restoreApplied: false
     clip: true
     contentWidth: width
     contentHeight: col.implicitHeight
+
+    // 翻章回到顶部：不继承上一章的滚动偏移（否则新章内容矮时被 Flickable 钳制到中间）
+    onChapterChanged: flick.contentY = 0
+
+    onRestoreScrollYChanged: {
+        if (flick.restoreScrollY >= 0) {
+            flick.restoreApplied = false
+            flick.applyRestoreScroll()
+        }
+    }
+    onContentHeightChanged: flick.applyRestoreScroll()
+
+    function applyRestoreScroll() {
+        if (flick.restoreScrollY < 0 || flick.restoreApplied || flick.contentHeight <= 0) return
+        flick.restoreApplied = true
+        // 章节高度可能因排版参数变化而变化，钳制到实际最大滚动值
+        flick.contentY = Math.min(flick.restoreScrollY, Math.max(0, flick.contentHeight - flick.height))
+    }
 
     Column {
         id: col
