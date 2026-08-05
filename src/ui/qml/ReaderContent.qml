@@ -21,8 +21,16 @@ Flickable {
     contentWidth: width
     contentHeight: col.implicitHeight
 
-    // 翻章回到顶部：不继承上一章的滚动偏移（否则新章内容矮时被 Flickable 钳制到中间）
-    onChapterChanged: flick.contentY = 0
+    // 翻章回到顶部：不继承上一章的滚动偏移（否则新章内容矮时被 Flickable 钳制到中间）；
+    // 同时取消未应用的恢复——restoreScrollY 属于打开时的章节，收敛窗口内翻章时若继续
+    // 等待会把新章节拽到旧偏移，必须作废（重开恢复不受影响：ReaderPage.onCompleted 在
+    // loadChapter 之后才赋 restoreScrollY，届时本 handler 已把 pending 清空）
+    onChapterChanged: {
+        flick.contentY = 0
+        restoreTimer.stop()
+        flick.restorePending = false
+        flick.restoreApplied = false
+    }
 
     onRestoreScrollYChanged: {
         if (flick.restoreScrollY >= 0) {

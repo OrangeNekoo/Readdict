@@ -170,6 +170,9 @@ Page {
     // B10：滚动偏移持久化（章节 + contentY 原子写入，恢复时先 loadChapter 再设 scrollY）
     function saveScroll() {
         if (!page.book || !page.book.id) return
+        // 恢复未应用前 contentY 仍是 0：此刻写入会把已保存位置覆盖为 0
+        //（含图章章节的收敛窗口内退出即丢位置），跳过本次保存
+        if (content.restorePending) return
         Books.savePosition(page.book.id, Books.currentChapter, content.contentY)
     }
 

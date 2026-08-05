@@ -109,16 +109,17 @@ Item {
             // requestClose 可稳定命中 Loading 窗口（status 非 Ready 即进入轮询分支）。
             page.pdfView.goToPage(5)
             page.pdfView.renderScale = 6 // 高倍率重渲染，加大 Loading 窗口
-            var loadingAtClose = page.pdfView.status !== Image.Ready
+            // Loading 窗口在 goToPage 同一事件循环内同步进入（实测稳定命中 status=Loading）；
+            // 若渲染太快已 Ready 则测试失败而非跳过——轮询锁定必须是必然路径
+            verify(page.pdfView.status !== Image.Ready,
+                   "goToPage 后应立即进入 Loading 渲染窗口（status=" + page.pdfView.status + "）")
             page.requestClose()
             verify(page.closing === true, "requestClose 应置 closing 防重入")
-            if (loadingAtClose) {
-                // 锁定等待逻辑真实生效：closePoll 轮询计数增长 + 渲染稳定前页面不被销毁
-                tryVerify(function () { return page.closePollCount > 0 }, 5000,
-                          "渲染在途时 requestClose 应启动轮询（closePollCount="
-                          + page.closePollCount + "）")
-                verify(stack.currentItem === page, "渲染稳定前页面应仍在栈顶（未被提前销毁）")
-            }
+            // 锁定等待逻辑真实生效：closePoll 轮询计数增长 + 渲染稳定前页面不被销毁
+            tryVerify(function () { return page.closePollCount > 0 }, 5000,
+                      "渲染在途时 requestClose 应启动轮询（closePollCount="
+                      + page.closePollCount + "）")
+            verify(stack.currentItem === page, "渲染稳定前页面应仍在栈顶（未被提前销毁）")
             // 渲染稳定前页面（含 QPdfDocument）不得被销毁——这是竞态防护的核心不变量
             tryVerify(function () { return page.pdfView.status === Image.Ready }, 20000,
                       "渲染应最终稳定，实际 " + page.pdfView.status)
