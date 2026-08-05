@@ -24,6 +24,7 @@ private:
     QNetworkAccessManager m_net;
     QNetworkReply *m_activeReply = nullptr;   // 在途请求（新一轮 speak / stop 时 abort）
     quint64 m_reqSeq = 0;                     // 请求序号：过期响应按序号丢弃
+    bool m_hasSource = false;                 // 已设置过播放源（InvalidMedia 才据此报错）
     QMediaPlayer m_player;
     QAudioOutput m_audioOutput;
     QBuffer m_audioBuffer;      // 内存音频源（每次 speak 复用）

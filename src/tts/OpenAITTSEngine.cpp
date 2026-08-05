@@ -7,11 +7,16 @@ OpenAITTSEngine::OpenAITTSEngine(QObject *parent)
     : TTSEngine(parent)
 {
     m_player.setAudioOutput(&m_audioOutput);
-    // 自然播放到末尾（EndOfMedia）→ finished；手动 stop 不触发
+    // 自然播放到末尾（EndOfMedia）→ finished；手动 stop 不触发。
+    // InvalidMedia（200 但 body 不可解码，如代理返回错误页）→ error，避免调用方悬挂；
+    // 不用 NoMedia：它在正常换源/自然结束后 stop() 时也会出现，会误报。
     connect(&m_player, &QMediaPlayer::mediaStatusChanged, this,
             [this](QMediaPlayer::MediaStatus status) {
-                if (status == QMediaPlayer::EndOfMedia)
+                if (status == QMediaPlayer::EndOfMedia) {
                     emit finished();
+                } else if (status == QMediaPlayer::InvalidMedia && m_hasSource) {
+                    emit error(QStringLiteral("音频解码失败（服务端可能返回了非音频内容）"));
+                }
             });
 }
 
@@ -86,6 +91,7 @@ void OpenAITTSEngine::speak(const QString &text) {
         m_audioBuffer.setData(audio);
         m_audioBuffer.open(QIODevice::ReadOnly);
         m_player.setSourceDevice(&m_audioBuffer, QUrl(QStringLiteral("speech.mp3")));
+        m_hasSource = true;
         m_player.play();
     });
 }
