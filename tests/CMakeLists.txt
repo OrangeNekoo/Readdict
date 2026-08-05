@@ -96,6 +96,17 @@ target_include_directories(tst_mobiparser PRIVATE ../src ../src/parsers ../third
 target_link_libraries(tst_mobiparser PRIVATE Qt6::Test mobi zlibstatic)
 add_test(NAME tst_mobiparser COMMAND tst_mobiparser)
 
+qt_add_executable(tst_ttsurl
+    tst_ttsurl.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/OpenAITTSEngine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/OpenAITTSEngine.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/TTSEngine.h
+)
+target_include_directories(tst_ttsurl PRIVATE ../src ../src/tts)
+# OpenAITTSEngine 声明含 QNetworkAccessManager/QMediaPlayer 成员，需 Network/Multimedia 模块
+target_link_libraries(tst_ttsurl PRIVATE Qt6::Test Qt6::Network Qt6::Multimedia)
+add_test(NAME tst_ttsurl COMMAND tst_ttsurl)
+
 qt_add_executable(tst_parserfactory
     tst_parserfactory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/SentenceSplitter.cpp
