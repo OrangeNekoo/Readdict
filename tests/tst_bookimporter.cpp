@@ -6,7 +6,6 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
-#include <QPainter>
 #include <QTemporaryDir>
 
 #include <zip.h>   // minizip 写端（构造测试 EPUB）
@@ -78,6 +77,82 @@ static QString makeCoverEpub(const QString &path) {
         {QStringLiteral("OEBPS/content.opf"), opf.toUtf8()},
         {QStringLiteral("OEBPS/Text/cover.xhtml"), coverXhtml.toUtf8()},
         {QStringLiteral("OEBPS/Images/coverA.png"), makeCoverPng(QColor("#E00000"))},
+        {QStringLiteral("OEBPS/Images/coverB.png"), makeCoverPng(QColor("#00C000"))},
+    };
+    return writeZipFile(path, entries) ? path : QString();
+}
+
+// 无 OPF 封面声明的 EPUB：两章各含一张不同图（红/绿），manifest 不含图片条目
+// （锁定「解析首图」回退路径，排除 manifest 兜底干扰）。
+static QString makeNoCoverMetaEpub(const QString &path) {
+    const QString container =
+        QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                       "<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">"
+                       "<rootfiles><rootfile full-path=\"OEBPS/content.opf\" "
+                       "media-type=\"application/oebps-package+xml\"/></rootfiles></container>");
+    const QString opf =
+        QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                       "<package xmlns=\"http://www.idpf.org/2007/opf\" unique-identifier=\"id\" version=\"2.0\">"
+                       "<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">"
+                       "<dc:title>无封面声明书</dc:title>"
+                       "</metadata>"
+                       "<manifest>"
+                       "<item href=\"Text/ch1.xhtml\" id=\"ch1\" media-type=\"application/xhtml+xml\"/>"
+                       "<item href=\"Text/ch2.xhtml\" id=\"ch2\" media-type=\"application/xhtml+xml\"/>"
+                       "</manifest>"
+                       "<spine toc=\"ncx\"><itemref idref=\"ch1\"/><itemref idref=\"ch2\"/></spine>"
+                       "</package>");
+    const QString ch1 =
+        QStringLiteral("<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+                       "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>Ch1</title></head>"
+                       "<body><p><img src=\"../Images/img1.png\"/></p><p>第一章文本。</p></body></html>");
+    const QString ch2 =
+        QStringLiteral("<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+                       "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>Ch2</title></head>"
+                       "<body><p><img src=\"../Images/img2.png\"/></p><p>第二章文本。</p></body></html>");
+    const QList<QPair<QString, QByteArray>> entries = {
+        {QStringLiteral("META-INF/container.xml"), container.toUtf8()},
+        {QStringLiteral("OEBPS/content.opf"), opf.toUtf8()},
+        {QStringLiteral("OEBPS/Text/ch1.xhtml"), ch1.toUtf8()},
+        {QStringLiteral("OEBPS/Text/ch2.xhtml"), ch2.toUtf8()},
+        {QStringLiteral("OEBPS/Images/img1.png"), makeCoverPng(QColor("#E00000"))},
+        {QStringLiteral("OEBPS/Images/img2.png"), makeCoverPng(QColor("#00C000"))},
+    };
+    return writeZipFile(path, entries) ? path : QString();
+}
+
+// EPUB3 风格封面声明：<meta property="cover-image" content="Images/coverB.png">
+// content 为相对 IRI 而非 manifest item id；manifest 文档序首个图片条目是另一张
+// 图（红 imgA）——断言最终封面为 IRI 命中的绿图，锁定 resolveZipEntry 兜底分支。
+static QString makeIriCoverEpub(const QString &path) {
+    const QString container =
+        QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                       "<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">"
+                       "<rootfiles><rootfile full-path=\"OEBPS/content.opf\" "
+                       "media-type=\"application/oebps-package+xml\"/></rootfiles></container>");
+    const QString opf =
+        QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                       "<package xmlns=\"http://www.idpf.org/2007/opf\" unique-identifier=\"id\" version=\"2.0\">"
+                       "<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">"
+                       "<dc:title>IRI封面书</dc:title>"
+                       "<meta property=\"cover-image\" content=\"Images/coverB.png\"/>"
+                       "</metadata>"
+                       "<manifest>"
+                       "<item href=\"Text/cover.xhtml\" id=\"cover.xhtml\" media-type=\"application/xhtml+xml\"/>"
+                       "<item href=\"Images/imgA.png\" id=\"imgA\" media-type=\"image/png\"/>"
+                       "<item href=\"Images/coverB.png\" id=\"imgB\" media-type=\"image/png\"/>"
+                       "</manifest>"
+                       "<spine toc=\"ncx\"><itemref idref=\"cover.xhtml\"/></spine>"
+                       "</package>");
+    const QString coverXhtml =
+        QStringLiteral("<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+                       "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>Cover</title></head>"
+                       "<body><p><img src=\"../Images/imgA.png\"/></p></body></html>");
+    const QList<QPair<QString, QByteArray>> entries = {
+        {QStringLiteral("META-INF/container.xml"), container.toUtf8()},
+        {QStringLiteral("OEBPS/content.opf"), opf.toUtf8()},
+        {QStringLiteral("OEBPS/Text/cover.xhtml"), coverXhtml.toUtf8()},
+        {QStringLiteral("OEBPS/Images/imgA.png"), makeCoverPng(QColor("#E00000"))},
         {QStringLiteral("OEBPS/Images/coverB.png"), makeCoverPng(QColor("#00C000"))},
     };
     return writeZipFile(path, entries) ? path : QString();
@@ -169,6 +244,39 @@ private slots:
         QVERIFY(QFile::exists(cover));
         QVERIFY(!QFileInfo(cover).fileName().startsWith(QStringLiteral("cover_"))); // 仍是占位
         QVERIFY(!imp.lastError().isEmpty()); // 失败原因记入 lastError
+    }
+    void epubFirstImageFallback() {
+        // 无 OPF 封面声明：回退「解析首图」，须取第一章首图（红），
+        // 不得被后续章节图片覆盖（锁定嵌套循环 break 修复）
+        QTemporaryDir libDir;
+        QTemporaryDir srcDir;
+        const QString epubPath = makeNoCoverMetaEpub(srcDir.path() + "/twoc.epub");
+        QVERIFY(!epubPath.isEmpty());
+        BookImporter imp(libDir.path(), ":memory:");
+        QVERIFY(imp.importFile(epubPath, true).isEmpty());
+        const QString cover = imp.books()[0].cover;
+        QVERIFY(QFileInfo(cover).fileName().startsWith(QStringLiteral("cover_")));
+        QImage img(cover);
+        QVERIFY(!img.isNull());
+        QCOMPARE(img.size(), QSize(300, 400));
+        QCOMPARE(img.pixelColor(150, 200), QColor("#E00000")); // 第一章图（红）
+        QVERIFY(img.pixelColor(150, 200) != QColor("#00C000")); // 非第二章图（绿）
+    }
+    void epubIriCoverExtraction() {
+        // EPUB3 <meta property="cover-image" content="相对IRI">：content 非 item id，
+        // 直接相对 OPF 目录解析命中（绿图），而非 manifest 文档序首图（红图）
+        QTemporaryDir libDir;
+        QTemporaryDir srcDir;
+        const QString epubPath = makeIriCoverEpub(srcDir.path() + "/iri.epub");
+        QVERIFY(!epubPath.isEmpty());
+        BookImporter imp(libDir.path(), ":memory:");
+        QVERIFY(imp.importFile(epubPath, true).isEmpty());
+        const QString cover = imp.books()[0].cover;
+        QVERIFY(QFileInfo(cover).fileName().startsWith(QStringLiteral("cover_")));
+        QImage img(cover);
+        QVERIFY(!img.isNull());
+        QCOMPARE(img.pixelColor(150, 200), QColor("#00C000")); // IRI 命中的绿图
+        QVERIFY(img.pixelColor(150, 200) != QColor("#E00000")); // 非 manifest 首图（红）
     }
     // 真实书验证：设置环境变量 READDICT_REAL_EPUB=<epub 路径> 时执行
     // （本机真实书文件，CI 环境未设置则跳过）

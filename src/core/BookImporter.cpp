@@ -101,11 +101,13 @@ QString containerRootfile(const QByteArray &xml) {
 
 // 从 content.opf 解析封面条目：EPUB2 <meta name="cover" content="id">、
 // EPUB3 <meta property="cover-image"> / <item properties="cover-image">；
-// 均未声明时兜底取 manifest 中第一个图片条目。返回 zip 内条目路径。
+// 均未声明时兜底取 manifest 中第一个图片条目（按文档序，QHash 迭代序
+// 随进程随机化不可用）。返回 zip 内条目路径。
 QString opfCoverEntry(const QByteArray &opf, const QString &opfEntry) {
     QXmlStreamReader r(opf);
     QString coverId;
     QHash<QString, QPair<QString, QString>> itemById; // id → (href, media-type)
+    QVector<QPair<QString, QString>> imageItems;      // manifest 文档序的图片条目
     while (!r.atEnd()) {
         r.readNext();
         if (!r.isStartElement()) continue;
@@ -124,8 +126,11 @@ QString opfCoverEntry(const QByteArray &opf, const QString &opfEntry) {
             if (r.attributes().value("properties").toString()
                     .split(' ').contains(QLatin1String("cover-image")))
                 coverId = id;
-            if (!id.isEmpty() && !href.isEmpty())
+            if (!id.isEmpty() && !href.isEmpty()) {
                 itemById.insert(id, qMakePair(href, mt));
+                if (mt.startsWith("image/"))
+                    imageItems.append(qMakePair(href, mt));
+            }
         }
     }
     if (!coverId.isEmpty()) {
@@ -134,14 +139,14 @@ QString opfCoverEntry(const QByteArray &opf, const QString &opfEntry) {
             return resolveZipEntry(it.value().first, opfEntry);
         // EPUB3 的 cover-image 声明 content 也可能是相对 IRI（如 "Images/cover.jpg"）
         // 而非 manifest item id：直接相对 OPF 目录解析（绝对 URL/data URI 会解析失败，
-        // 落入下方兜底）。item 查找（QHash 无序）先于兜底，保证确定性。
+        // 落入下方兜底）。item 查找与文档序兜底均确定，不依赖 QHash 无序迭代。
         const QString direct = resolveZipEntry(coverId, opfEntry);
         if (!direct.isEmpty())
             return direct;
     }
-    for (auto it = itemById.constBegin(); it != itemById.constEnd(); ++it)
-        if (it.value().second.startsWith("image/"))
-            return resolveZipEntry(it.value().first, opfEntry);
+    // 兜底：manifest 文档序第一个图片条目
+    if (!imageItems.isEmpty())
+        return resolveZipEntry(imageItems.first().first, opfEntry);
     return {};
 }
 
@@ -253,12 +258,15 @@ QString BookImporter::extractEpubCover(const QString &epubPath, const QString &c
             qWarning() << "BookImporter: 封面提取失败（EPUB 解析为空），保留占位封面" << epubPath;
             return {};
         }
-        for (const Chapter &c : model.chapters)
-            for (const Paragraph &p : c.paragraphs)
+        for (const Chapter &c : model.chapters) {
+            for (const Paragraph &p : c.paragraphs) {
                 if (!p.imagePath.isEmpty()) {
                     img.load(p.imagePath);
                     if (!img.isNull()) break;
                 }
+            }
+            if (!img.isNull()) break; // 锁定首章首图：外层循环不得覆盖已加载图片
+        }
     }
     if (img.isNull()) {
         m_lastError = QStringLiteral("未找到内嵌封面，保留占位封面");
