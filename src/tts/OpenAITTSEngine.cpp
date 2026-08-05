@@ -58,9 +58,15 @@ void OpenAITTSEngine::speak(const QString &text) {
     QNetworkRequest req(endpointUrl);
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     req.setRawHeader("Authorization", "Bearer " + m_apiKey.toUtf8());
+    // 新一轮 speak：使在途请求作废并中止，避免旧响应乱序到达覆盖新音频
+    const quint64 seq = ++m_reqSeq;
+    if (m_activeReply) m_activeReply->abort();
     QNetworkReply *reply = m_net.post(req, buildPayload(text, m_model, m_voice, m_speed));
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+    m_activeReply = reply;
+    connect(reply, &QNetworkReply::finished, this, [this, reply, seq] {
+        if (m_activeReply == reply) m_activeReply = nullptr;
         reply->deleteLater();
+        if (seq != m_reqSeq) return;   // 过期响应（新一轮 speak / stop 已作废）→ 丢弃
         if (reply->error() != QNetworkReply::NoError) {
             emit error(QStringLiteral("TTS 请求失败：%1").arg(reply->errorString()));
             return;
@@ -70,9 +76,14 @@ void OpenAITTSEngine::speak(const QString &text) {
             emit error(QStringLiteral("TTS 服务返回错误（HTTP %1）").arg(status));
             return;
         }
-        // 播放内存音频：复用成员 QBuffer，先停掉旧播放再换源
+        const QByteArray audio = reply->readAll();
+        if (audio.isEmpty()) {
+            emit error(QStringLiteral("TTS 服务返回空音频"));
+            return;
+        }
+        // 播放内存音频：先停掉旧播放（后端停止读取）再改写成员 QBuffer，避免读改写竞态
         m_player.stop();
-        m_audioBuffer.setData(reply->readAll());
+        m_audioBuffer.setData(audio);
         m_audioBuffer.open(QIODevice::ReadOnly);
         m_player.setSourceDevice(&m_audioBuffer, QUrl(QStringLiteral("speech.mp3")));
         m_player.play();
@@ -90,5 +101,11 @@ void OpenAITTSEngine::resume() {
 }
 
 void OpenAITTSEngine::stop() {
+    // 使在途请求作废并中止：响应到达后不再触发播放
+    ++m_reqSeq;
+    if (m_activeReply) {
+        m_activeReply->abort();
+        m_activeReply = nullptr;
+    }
     m_player.stop();
 }
