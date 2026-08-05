@@ -86,17 +86,20 @@ QVector<QString> SentenceSplitter::split(const QString &text) {
             continue;
         }
         if (c == '\n' || c == '\r') {
-            // 单个换行（含 \r\n）并入当前句；连续换行为段落边界，并入前一句后断句，不单独成句
+            // 单个换行（含 \r\n）并入当前句；连续换行（含仅空格/制表符的空白行）为段落边界，
+            // 并入前一句后断句，不单独成句
             const int unit = (c == '\r' && i + 1 < n && data[i + 1] == '\n') ? 2 : 1;
-            const int next = i + unit;
-            if (next < n && (data[next] == '\n' || data[next] == '\r')) {
-                while (i < n && (data[i] == '\n' || data[i] == '\r')) {
-                    if (data[i] == '\r' && i + 1 < n && data[i + 1] == '\n') {
-                        cur.append(data[i]);
-                        cur.append(data[i + 1]);
-                        i += 2;
+            int probe = i + unit;
+            while (probe < n && (data[probe] == ' ' || data[probe] == '\t'))
+                ++probe; // 空白行的空格/制表符填充不算内容
+            if (probe < n && (data[probe] == '\n' || data[probe] == '\r')) {
+                while (i < n) {
+                    const QChar ch = data[i];
+                    if (ch == '\n' || ch == '\r' || ch == ' ' || ch == '\t') {
+                        cur.append(ch);
+                        ++i;
                     } else {
-                        cur.append(data[i++]);
+                        break;
                     }
                 }
                 --i;

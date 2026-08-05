@@ -26,6 +26,10 @@ private slots:
         const auto s = SentenceSplitter::split("第一段\r\n\r\n第二段。");
         QCOMPARE(s.size(), 2); // CRLF 段落边界同样识别（TXT 导入常见）
     }
+    void handlesWhitespaceOnlyBlankLines() {
+        const auto s = SentenceSplitter::split("第一段\n \n第二段。");
+        QCOMPARE(s.size(), 2); // 仅含空格/制表符的空白行也是段落边界
+    }
     void handlesConsecutivePunctuation() {
         QCOMPARE(SentenceSplitter::split("你好..").size(), 1);    // 连续句点视为省略号，不断句
         QCOMPARE(SentenceSplitter::split("真的吗？！").size(), 1); // ？！ 组合只断一次
