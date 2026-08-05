@@ -44,6 +44,17 @@ target_compile_definitions(tst_epubparser PRIVATE EPUB_FIXTURES_DIR="${CMAKE_CUR
 target_link_libraries(tst_epubparser PRIVATE Qt6::Test MINIZIP::minizipstatic zlibstatic)
 add_test(NAME tst_epubparser COMMAND tst_epubparser)
 
+qt_add_executable(tst_fb2parser
+    tst_fb2parser.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/SentenceSplitter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/Fb2Parser.cpp
+)
+target_include_directories(tst_fb2parser PRIVATE ../src ../src/parsers)
+# fixture 目录绝对路径注入（见 tst_fb2parser.cpp 顶部说明）
+target_compile_definitions(tst_fb2parser PRIVATE FB2_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+target_link_libraries(tst_fb2parser PRIVATE Qt6::Test)
+add_test(NAME tst_fb2parser COMMAND tst_fb2parser)
+
 # QML 冒烟/端到端测试：自定义 main（tst_qmlmain.cpp）注册 Readdict.Backend 单例，
 # 因为单例只在生产 main.cpp 中注册；不依赖 Qt 内部的 QUICK_TEST_SOURCE_DIR 自动 main，
 # 该宏由下方 target_compile_definitions 提供（tests/qml 绝对路径）。

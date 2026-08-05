@@ -1,0 +1,100 @@
+#include <QtTest>
+#include "Fb2Parser.h"
+
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QTemporaryDir>
+
+// 编译期注入 fixture 目录（构建目录与源码目录不同，ctest 工作目录为 build/tests）
+#ifndef FB2_FIXTURES_DIR
+#  define FB2_FIXTURES_DIR "tests/fixtures"
+#endif
+
+class TestFb2Parser : public QObject {
+    Q_OBJECT
+private slots:
+    void parsesStructure() {
+        Fb2Parser p;
+        DocumentModel m = p.parse(QStringLiteral(FB2_FIXTURES_DIR) + "/sample.fb2");
+        QCOMPARE(m.title, QStringLiteral("测试书"));
+        QCOMPARE(m.author, QStringLiteral("作者甲"));
+        QCOMPARE(m.chapters.size(), 1);
+        QCOMPARE(m.chapters[0].title, QStringLiteral("第一章"));
+        // 章标题只进 Chapter.title，不入段落列表；段落 0=第一段，1=第二段（含 <b>）
+        QCOMPARE(m.chapters[0].paragraphs.size(), 2);
+        QCOMPARE(m.chapters[0].paragraphs[0].text, QStringLiteral("第一段。"));
+        QVERIFY(m.chapters[0].paragraphs[1].html.contains("<b>段</b>"));
+        // 纯文本与 html 分离
+        QCOMPARE(m.chapters[0].paragraphs[1].text, QStringLiteral("第二段。"));
+    }
+    void missingFileReturnsEmpty() {
+        Fb2Parser p;
+        QVERIFY(p.parse(QStringLiteral(FB2_FIXTURES_DIR) + "/nope.fb2").empty());
+    }
+    void invalidXmlReturnsEmpty() {
+        QTemporaryDir dir;
+        QFile f(dir.path() + "/bad.fb2");
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("<?xml version=\"1.0\"?><FictionBook><body><section><p>未闭合</section></body></FictionBook>");
+        f.close();
+        Fb2Parser p;
+        QVERIFY(p.parse(f.fileName()).empty());
+    }
+    void extractsImagesToTemp() {
+        // 自带一张 1x1 PNG（base64）的临时 FB2：<image l:href> 引用 <binary>，
+        // 解出到临时目录并写入 Paragraph.imagePath；二进制置于 body 之后
+        // （FB2 规范位置），验证两遍解析的收集顺序
+        QTemporaryDir tmp;
+        const QString path = tmp.path() + "/img.fb2";
+        QFile f(path);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(QStringLiteral(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            "<FictionBook xmlns=\"http://www.gribuser.ru/xml/fictionbook/2.0\""
+            " xmlns:l=\"http://www.w3.org/1999/xlink\">"
+            "  <description><title-info><book-title>图</book-title></title-info></description>"
+            "  <body><section><title><p>章</p></title>"
+            "    <p>前文。<image l:href=\"#pic1\"/>后文。</p>"
+            "    <section><title><p>小节</p></title><p>嵌套段。</p></section>"
+            "  </section></body>"
+            "  <binary id=\"pic1\" content-type=\"image/png\">"
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+            "</binary>"
+            "</FictionBook>").toUtf8());
+        f.close();
+        Fb2Parser p;
+        DocumentModel m = p.parse(path);
+        QCOMPARE(m.chapters.size(), 1); // 嵌套小节并入本章
+        // 嵌套小节标题成为 level=1 标题段落（html 带 <h1> 包裹）
+        QCOMPARE(m.chapters[0].paragraphs.size(), 3);
+        QCOMPARE(m.chapters[0].paragraphs[1].level, 1);
+        QCOMPARE(m.chapters[0].paragraphs[1].html, QStringLiteral("<h1>小节</h1>"));
+        QCOMPARE(m.chapters[0].paragraphs[2].text, QStringLiteral("嵌套段。"));
+        const Paragraph *imgPara = nullptr;
+        for (const Chapter &c : m.chapters)
+            for (const Paragraph &pp : c.paragraphs)
+                if (!pp.imagePath.isEmpty()) imgPara = &pp;
+        QVERIFY(imgPara);
+        QFileInfo fi(imgPara->imagePath);
+        QVERIFY(fi.exists());
+        QVERIFY(fi.size() > 0);
+        QVERIFY(imgPara->imagePath.startsWith(QDir::tempPath()));
+        // html 中保留 img 标签并指向本地解出文件
+        QVERIFY(imgPara->html.contains("<img src="));
+        QVERIFY(imgPara->html.contains(fi.fileName()));
+        // 图片前后文本都在（base64 解码不干扰正文）
+        QVERIFY(imgPara->text.contains(QStringLiteral("前文")));
+        QVERIFY(imgPara->text.contains(QStringLiteral("后文")));
+    }
+    void presplitsSentences() {
+        Fb2Parser p;
+        DocumentModel m = p.parse(QStringLiteral(FB2_FIXTURES_DIR) + "/sample.fb2");
+        // 正文段 "第一段。" 预分句为 1 句
+        QCOMPARE(m.chapters[0].paragraphs[0].sentences.size(), 1);
+        QCOMPARE(m.chapters[0].paragraphs[0].sentences[0],
+                 QStringLiteral("第一段。"));
+    }
+};
+QTEST_MAIN(TestFb2Parser)
+#include "tst_fb2parser.moc"
