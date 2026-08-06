@@ -149,6 +149,9 @@ void SearchEngine::indexBook(qint64 bookId, const QString &chapterTitle,
     }
     if (inTx && !m_db.commit()) {
         qWarning() << "SearchEngine::indexBook: 提交失败:" << m_db.lastError().text();
+        // 提交失败时事务仍激活：必须回滚释放，否则下一次 transaction() 返回 false，
+        // 后续 DELETE/INSERT 都落在未提交事务里永不落盘（契约"失败可重试"失效）
+        m_db.rollback();
         return;
     }
     // 提交成功后才推进游标（回滚则槽位不变，重试仍写同一槽位）；
@@ -163,6 +166,51 @@ void SearchEngine::removeBook(qint64 bookId) {
     if (!q.exec())
         qWarning() << "SearchEngine::removeBook: 清理索引失败:" << q.lastError().text();
     m_chapterCursor.remove(bookId);  // 复位章节游标，重索引用新 id 从第 0 章开始
+}
+
+void SearchEngine::rebuildBook(qint64 bookId,
+                               const QVector<QPair<QString, QStringList>> &chapters) {
+    // 单事务：清空该书旧行 + 全部章节写入原子完成。中途任何失败整体回滚，
+    // 该书保持无索引状态（isBookIndexed 判据仍成立，下次可安全重试），
+    // 不会留下"只有前几章"的部分索引。
+    const bool inTx = m_db.transaction();
+    QSqlQuery del(m_db);
+    del.prepare(QStringLiteral("DELETE FROM fts_content WHERE book_id=?"));
+    del.addBindValue(bookId);
+    if (!del.exec()) {
+        qWarning() << "SearchEngine::rebuildBook: 清理旧索引失败:" << del.lastError().text();
+        if (inTx) m_db.rollback();
+        return;
+    }
+    QSqlQuery ins(m_db);
+    ins.prepare(QStringLiteral("INSERT INTO fts_content"
+                               "(book_id, chapter_index, paragraph_index, chapter_title, text, text_orig)"
+                               " VALUES(?,?,?,?,?,?)"));
+    for (int ci = 0; ci < chapters.size(); ++ci) {
+        const QString &title = chapters.at(ci).first;
+        const QStringList &texts = chapters.at(ci).second;
+        for (int pi = 0; pi < texts.size(); ++pi) {
+            const QString &t = texts.at(pi);
+            ins.addBindValue(bookId);
+            ins.addBindValue(ci);
+            ins.addBindValue(pi);
+            ins.addBindValue(title);
+            ins.addBindValue(spaceForIndexing(t));
+            ins.addBindValue(t);
+            if (!ins.exec()) {
+                qWarning() << "SearchEngine::rebuildBook: 写入索引失败:" << ins.lastError().text();
+                if (inTx) m_db.rollback();
+                return;
+            }
+        }
+    }
+    if (inTx && !m_db.commit()) {
+        qWarning() << "SearchEngine::rebuildBook: 提交失败:" << m_db.lastError().text();
+        m_db.rollback();  // 释放未提交事务，避免污染后续调用
+        return;
+    }
+    // 重建成功：该书游标复位（后续 indexBook 从第 0 章开始，与 removeBook 后一致）
+    m_chapterCursor.remove(bookId);
 }
 
 bool SearchEngine::isBookIndexed(qint64 bookId) const {

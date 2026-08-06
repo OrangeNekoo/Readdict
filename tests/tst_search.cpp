@@ -105,6 +105,24 @@ private slots:
         QCOMPARE(m_s->searchAll("贤者").size(), 1);
     }
 
+    void rebuildBookReplacesWholeBook() {
+        // 原子整书重建（单事务）：旧章节全部清除、新章节按列表序写入；
+        // 重建成功后游标复位，继续 indexBook 从第 0 章开始
+        m_s->indexBook(1, "第一章", {"旧章内容。"});
+        m_s->indexBook(1, "第二章", {"旧二章内容。"});
+        QVector<QPair<QString, QStringList>> chapters;
+        chapters.append(qMakePair(QStringLiteral("新一章"), QStringList{"新内容甲。"}));
+        chapters.append(qMakePair(QStringLiteral("新二章"), QStringList{"新内容乙。"}));
+        m_s->rebuildBook(1, chapters);
+        QVERIFY(m_s->search(1, "旧章").isEmpty());
+        QVERIFY(m_s->search(1, "旧二章").isEmpty());
+        QCOMPARE(m_s->search(1, "新内容甲")[0].chapterIndex, 0);
+        QCOMPARE(m_s->search(1, "新内容乙")[0].chapterIndex, 1);
+        m_s->indexBook(1, "再一章", {"游标复位后的新章。"});
+        QCOMPARE(m_s->search(1, "游标复位")[0].chapterIndex, 0);
+        QCOMPARE(m_s->searchAll("新内容乙").size(), 1);  // 重建的章节不受影响
+    }
+
 private:
     std::unique_ptr<SearchEngine> m_s;
 };

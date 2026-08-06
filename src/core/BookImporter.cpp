@@ -365,16 +365,19 @@ void BookImporter::indexBook(qint64 bookId) {
     const DocumentModel doc = ParserFactory::parse(b.path, b.format);
     if (doc.empty()) return;  // PDF 等无章节模型的书不建全文索引
     SearchEngine se(m_dbPath);  // 独立连接名，析构自动清理
-    // 整书重建契约：先清空该书旧索引（含章节游标复位），再逐章写入
-    se.removeBook(bookId);
-    for (int ci = 0; ci < doc.chapters.size(); ++ci) {
-        const Chapter &c = doc.chapters.at(ci);
+    // 原子整书重建：removeBook + 全部章节在单个事务内提交——中途失败（进程退出/
+    // 某章写入失败）整体回滚，不留部分索引；isBookIndexed 仍可作完整性判据，
+    // 下次启动回填会安全重试整书（无"后半章节永远搜不到"的自愈缺口）。
+    QVector<QPair<QString, QStringList>> chapters;
+    chapters.reserve(doc.chapters.size());
+    for (const Chapter &c : doc.chapters) {
         QStringList texts;
         texts.reserve(c.paragraphs.size());
         for (const Paragraph &p : c.paragraphs)
             texts.append(p.text);
-        se.indexBook(bookId, c.title, texts);
+        chapters.append(qMakePair(c.title, texts));
     }
+    se.rebuildBook(bookId, chapters);
 }
 
 void BookImporter::backfillMissingIndexes() {

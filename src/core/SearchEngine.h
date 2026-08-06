@@ -1,6 +1,7 @@
 #pragma once
 #include <QHash>
 #include <QObject>
+#include <QPair>
 #include <QSqlDatabase>
 #include <QString>
 #include <QStringList>
@@ -43,6 +44,11 @@ public:
     // 空章节也占用一个槽位（章节索引与解析器章节序对齐）。paragraphTexts 为空时
     // 仅清理该槽位旧行。
     void indexBook(qint64 bookId, const QString &chapterTitle, const QStringList &paragraphTexts);
+    // 原子整书重建：清空该书 + 全部章节在**单个事务**内写入，中途失败整体回滚
+    // （不留部分索引，isBookIndexed 仍可作完整性判据，下次可安全重试）。
+    // chapters 元素为 (章节标题, 段落文本列表)，章节索引按列表序。
+    // 成功后该书章节游标复位（与 removeBook 后一致，后续 indexBook 从第 0 章开始）。
+    void rebuildBook(qint64 bookId, const QVector<QPair<QString, QStringList>> &chapters);
     // 清空一书的全部索引并复位其章节游标（整书重建/删除书时调用）
     void removeBook(qint64 bookId);
     // 该书是否已有索引行（存量书回填检查用；空文档书无行，会被反复重试）
