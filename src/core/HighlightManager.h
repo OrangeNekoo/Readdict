@@ -8,7 +8,7 @@ struct Highlight { qint64 id=-1, bookId=0; QString chapter, text, color, note; i
 class HighlightManager : public QObject {
     Q_OBJECT
 public:
-    explicit HighlightManager(const QString &dbPath, QObject *parent = nullptr);
+    explicit HighlightManager(const QString &dbPath, const QString &connection = {}, QObject *parent = nullptr);
     qint64 addHighlight(qint64 bookId, const QString &chapter, int sentenceIndex,
                         const QString &text, const QString &color, const QString &note = {});
     void removeHighlight(qint64 id);

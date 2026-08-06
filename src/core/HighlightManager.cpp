@@ -5,10 +5,12 @@
 #include <QDateTime>
 #include <QDebug>
 
-HighlightManager::HighlightManager(const QString &dbPath, QObject *parent)
+HighlightManager::HighlightManager(const QString &dbPath, const QString &connection, QObject *parent)
     : QObject(parent) {
-    // 复用 DatabaseManager 打开连接（schema 含 highlights 表，见 A2）；与 BookManager 同模式
-    DatabaseManager dbm(dbPath);
+    // 复用 DatabaseManager 打开连接（schema 含 highlights 表，见 A2）；与 BookManager 同模式。
+    // 连接名可注入（空则默认 readdict_main）：C7 接线应传独立连接名（如 readdict_highlights），
+    // 避免与 Books 单例的 readdict_main 重名（同名 addDatabase 会替换全局连接条目，见 DatabaseManager.h 注释）。
+    DatabaseManager dbm(dbPath, connection.isEmpty() ? QStringLiteral("readdict_main") : connection);
     m_db = dbm.database();
 }
 
@@ -85,7 +87,7 @@ QVector<Highlight> HighlightManager::highlightsForBook(qint64 bookId) const {
         h.id = q.value(0).toLongLong();
         h.bookId = q.value(1).toLongLong();
         h.chapter = q.value(2).toString();
-        h.sentenceIndex = q.value(3).toInt();
+        h.sentenceIndex = q.value(3).isNull() ? -1 : q.value(3).toInt();
         h.text = q.value(4).toString();
         h.color = q.value(5).toString();
         h.note = q.value(6).toString();
