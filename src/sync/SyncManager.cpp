@@ -58,11 +58,17 @@ void SyncManager::log(const QString &line) {
 // ---- 打包 ----
 
 QByteArray SyncManager::buildSettingsJson() const {
-    QJsonObject out;
     QFile f(settingsPath());
     if (!f.open(QIODevice::ReadOnly))
-        return QJsonDocument(out).toJson(QJsonDocument::Compact); // 无本地设置 → {}
-    const QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
+        return QJsonDocument(QJsonObject()).toJson(QJsonDocument::Compact); // 无本地设置 → {}
+    QJsonParseError err;
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &err);
+    // 文件损坏/不可解析 → 空载荷：syncOne 视为"本地数据不可解析"跳过该步并 log，
+    // 绝不用空对象覆盖远端（否则 KeepLocal 会把远端设置冲掉）
+    if (err.error != QJsonParseError::NoError || !doc.isObject())
+        return QByteArray();
+    QJsonObject out;
+    const QJsonObject root = doc.object();
     for (const QString &key : kSyncSections)
         if (root.contains(key))
             out.insert(key, root.value(key));
@@ -118,7 +124,7 @@ QByteArray SyncManager::buildBooksJson() const {
     QJsonArray arr;
     QSqlQuery q(m_db);
     if (q.exec(QStringLiteral(
-            "SELECT id,title,author,publisher,category,format,path,cover FROM books"))) {
+            "SELECT id,title,author,publisher,category,format,path,cover,added_at FROM books"))) {
         while (q.next()) {
             arr.append(QJsonObject{
                 {"id", q.value(0).toLongLong()},
@@ -129,6 +135,7 @@ QByteArray SyncManager::buildBooksJson() const {
                 {"format", q.value(5).toString()},
                 {"path", QDir(m_libraryDir).relativeFilePath(q.value(6).toString())},
                 {"cover", q.value(7).toString()},
+                {"addedAt", q.value(8).toString()},
             });
         }
     }
@@ -178,15 +185,20 @@ void SyncManager::applyProgressJson(const QByteArray &data) {
         if (!q.exec() || !q.next())
             continue; // 本地无此书：进度不能凭空建书，跳过
         const QDateTime localTs = parseIso(q.value(0).toString());
-        // 合并语义：远端 ts 有效且早于本地最近阅读 → 保留本地；否则采用远端
-        // （含本地无 last_read_at、远端 ts 缺失/无法解析两种兜底）
-        if (remoteTs.isValid() && localTs.isValid() && remoteTs < localTs)
+        // 合并语义：远端 ts 有效且不晚于本地最近阅读 → 保留本地（等值重放不写，保证
+        // 幂等——同载荷再次同步即 Skip）；否则采用远端（含本地无 last_read_at、
+        // 远端 ts 缺失/无法解析两种兜底）
+        if (remoteTs.isValid() && localTs.isValid() && remoteTs <= localTs)
             continue;
         QSqlQuery up(m_db);
         up.prepare(QStringLiteral("UPDATE books SET progress=?, last_read_at=? WHERE id=?"));
         up.addBindValue(p);
-        // 采用远端后把 last_read_at 刷新为合并时刻：后续 sync 以此保护本地不被更旧载荷覆盖
-        up.addBindValue(QDateTime::currentDateTime().toString(Qt::ISODate));
+        // last_read_at 取载荷 ts（转本地无时区格式，与 setProgress 存储一致，MAX 排序不混）：
+        // 采用远端后本地内容版本 = 载荷版本，下次同步比较即 Skip，不会"合并即刷新"循环下载
+        const QString stamp = remoteTs.isValid()
+            ? remoteTs.toLocalTime().toString(Qt::ISODate)
+            : QDateTime::currentDateTime().toString(Qt::ISODate);
+        up.addBindValue(stamp);
         up.addBindValue(id);
         up.exec();
     }
@@ -204,14 +216,27 @@ void SyncManager::applyHighlightsJson(const QByteArray &data) {
         // 去重键 (bookId, chapter, sentenceIndex, text)：id 不参与（跨设备 id 不可信）。
         // IS 匹配正确处理 NULL 字段（chapter/sentence_index 可空）。
         QSqlQuery q(m_db);
-        q.prepare(QStringLiteral("SELECT 1 FROM highlights WHERE book_id IS ? AND chapter IS ?"
-                                 " AND sentence_index IS ? AND text IS ?"));
+        q.prepare(QStringLiteral("SELECT id,color,note FROM highlights WHERE book_id IS ?"
+                                 " AND chapter IS ? AND sentence_index IS ? AND text IS ?"));
         q.addBindValue(bookId);
         q.addBindValue(chapter);
         q.addBindValue(sentenceIndex);
         q.addBindValue(text);
-        if (q.exec() && q.next())
-            continue; // 已存在：不重复插入（也不覆盖颜色/笔记，见报告）
+        if (q.exec() && q.next()) {
+            // 已存在：不重复插入；但远端对同一划线修改过 note/color 时合并过来
+            // （LWW：远端为准；无差异不写，保持幂等）
+            const QString rColor = o[QStringLiteral("color")].toString();
+            const QString rNote = o[QStringLiteral("note")].toString();
+            if (q.value(1).toString() != rColor || q.value(2).toString() != rNote) {
+                QSqlQuery up(m_db);
+                up.prepare(QStringLiteral("UPDATE highlights SET color=?,note=? WHERE id=?"));
+                up.addBindValue(rColor);
+                up.addBindValue(rNote);
+                up.addBindValue(q.value(0).toLongLong());
+                up.exec();
+            }
+            continue;
+        }
         QSqlQuery ins(m_db);
         ins.prepare(QStringLiteral("INSERT INTO highlights(book_id,chapter,sentence_index,text,"
                                    "color,note,created_at) VALUES(?,?,?,?,?,?,?)"));
@@ -278,7 +303,8 @@ QVector<QPair<qint64, double>> SyncManager::progressPairs() const {
 void SyncManager::syncOne(WebDavClient &client, const QVector<DavEntry> &remote, const QString &name,
                           const std::function<QByteArray()> &build,
                           const std::function<void(const QByteArray &)> &apply,
-                          const QDateTime &localVersion, bool hasLocalData) {
+                          const QDateTime &localVersion, bool hasLocalData,
+                          const std::function<QDateTime(const QByteArray &)> &remoteVersionOf) {
     const DavEntry *remoteEntry = nullptr;
     for (const DavEntry &e : remote) {
         if (e.name == name) {
@@ -289,7 +315,12 @@ void SyncManager::syncOne(WebDavClient &client, const QVector<DavEntry> &remote,
     if (!remoteEntry) {
         // 远端不存在：本地有数据 → 上传（首次同步/远端被清空）
         if (hasLocalData) {
-            if (client.put(name, build()))
+            const QByteArray payload = build();
+            if (payload.isEmpty()) {
+                log(QStringLiteral("跳过 %1: 本地数据不可解析").arg(name));
+                return;
+            }
+            if (client.put(name, payload))
                 log(QStringLiteral("上传 %1").arg(name));
             else
                 log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
@@ -307,21 +338,43 @@ void SyncManager::syncOne(WebDavClient &client, const QVector<DavEntry> &remote,
         log(QStringLiteral("下载 %1").arg(name));
         return;
     }
-    // 两边都有：mtime 冲突解决（本地版本无效 → TakeRemote 兜底，安全收敛）
-    switch (resolveConflict(localVersion, remoteEntry->modified)) {
-    case KeepLocal:
-        if (client.put(name, build()))
-            log(QStringLiteral("保留本地 %1").arg(name));
-        else
-            log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
-        break;
-    case TakeRemote: {
-        const QByteArray data = client.get(name);
+    // 两边都有：取远端版本。内容类项目需先 GET 载荷提取内容 ts（与本地同钟，比较才收敛）；
+    // 载荷无法解析时退回文件 mtime。settings 缺省直接比文件 mtime（同钟，见 sync() 截断）。
+    QByteArray remoteData;
+    QDateTime remoteVersion = remoteEntry->modified;
+    if (remoteVersionOf) {
+        remoteData = client.get(name);
         if (!client.lastError().isEmpty()) {
             log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
             return;
         }
-        apply(data);
+        const QDateTime content = remoteVersionOf(remoteData);
+        if (content.isValid())
+            remoteVersion = content;
+    }
+    switch (resolveConflict(localVersion, remoteVersion)) {
+    case KeepLocal:
+        // 本地内容较新 → 主动重传（新进度借此传播），同时远端版本前移、下次同内容即 Skip
+        {
+            const QByteArray payload = build();
+            if (payload.isEmpty()) {
+                log(QStringLiteral("跳过 %1: 本地数据不可解析").arg(name));
+                return;
+            }
+            if (client.put(name, payload))
+                log(QStringLiteral("保留本地 %1").arg(name));
+            else
+                log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
+        }
+        break;
+    case TakeRemote: {
+        if (remoteData.isEmpty())
+            remoteData = client.get(name);
+        if (!client.lastError().isEmpty()) {
+            log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
+            return;
+        }
+        apply(remoteData);
         log(QStringLiteral("采用远端 %1").arg(name));
         break;
     }
@@ -383,19 +436,38 @@ void SyncManager::syncBookBodies(WebDavClient &client, const QVector<DavEntry> &
     }
 }
 
+// 从载荷数组取最大内容时间戳（progress 的 ts / highlights 的 createdAt / books 的 addedAt）；
+// 无效（数组空或全无时间戳）→ 返回无效 QDateTime，syncOne 退回文件 mtime 比较
+static QDateTime maxContentTs(const QJsonArray &arr, const char *key) {
+    QDateTime best;
+    for (const QJsonValue &v : arr) {
+        const QDateTime t = parseIso(v.toObject().value(QLatin1String(key)).toString());
+        if (t.isValid() && (!best.isValid() || t > best))
+            best = t;
+    }
+    return best;
+}
+
 void SyncManager::sync(WebDavClient &client, const Options &opts) {
     // 快照式决策：list() 只取一次（简报"client.list() 得远端文件与 mtime"），
     // 单次同步内所有项的 有无/冲突 判定基于同一快照。
     const QVector<DavEntry> remote = client.list();
     if (opts.settings) {
         const QString path = settingsPath();
+        // settings 无载荷内版本：用文件 mtime 与远端 mtime 比较（同钟）。本地截断到秒级
+        // ——远端 getlastmodified 秒级，同秒内写入视为同一版本，避免毫秒恒胜导致同秒反复
+        // 重传（见报告"复审修复"）。
+        const QDateTime fileMtime = QFileInfo(path).lastModified();
+        const QDateTime localVersion = fileMtime.isValid()
+            ? QDateTime::fromSecsSinceEpoch(fileMtime.toSecsSinceEpoch())
+            : QDateTime();
         syncOne(client, remote, QStringLiteral("settings.json"),
                 [this] { return buildSettingsJson(); },
                 [this](const QByteArray &d) { applySettingsJson(d); },
-                QFileInfo(path).lastModified(), QFile::exists(path));
+                localVersion, QFile::exists(path));
     }
     if (opts.progress) {
-        // 本地版本 = 最新最近阅读时刻；无有效时间戳 → 无效 QDateTime → 冲突时取远端（兜底收敛）
+        // 本地版本 = 最新最近阅读时刻（载荷 ts 与本地 last_read_at 同钟，比较收敛）
         QDateTime localVersion;
         QSqlQuery q(m_db);
         if (q.exec(QStringLiteral("SELECT MAX(last_read_at) FROM books WHERE progress > 0"))
@@ -407,7 +479,12 @@ void SyncManager::sync(WebDavClient &client, const Options &opts) {
         syncOne(client, remote, QStringLiteral("progress.json"),
                 [this] { return buildProgressJson(progressPairs()); },
                 [this](const QByteArray &d) { applyProgressJson(d); },
-                localVersion, !progressPairs().isEmpty());
+                localVersion, !progressPairs().isEmpty(),
+                [](const QByteArray &d) {
+                    return maxContentTs(QJsonDocument::fromJson(d).object()
+                                            [QStringLiteral("books")].toArray(),
+                                        "ts");
+                });
     }
     if (opts.highlights) {
         QDateTime localVersion;
@@ -423,7 +500,12 @@ void SyncManager::sync(WebDavClient &client, const Options &opts) {
         syncOne(client, remote, QStringLiteral("highlights.json"),
                 [this] { return buildHighlightsJson(); },
                 [this](const QByteArray &d) { applyHighlightsJson(d); },
-                localVersion, hasData);
+                localVersion, hasData,
+                [](const QByteArray &d) {
+                    return maxContentTs(QJsonDocument::fromJson(d).object()
+                                            [QStringLiteral("highlights")].toArray(),
+                                        "createdAt");
+                });
     }
     if (opts.books) {
         QDateTime localVersion;
@@ -439,7 +521,12 @@ void SyncManager::sync(WebDavClient &client, const Options &opts) {
         syncOne(client, remote, QStringLiteral("books.json"),
                 [this] { return buildBooksJson(); },
                 [this](const QByteArray &d) { applyBooksJson(d); },
-                localVersion, hasData);
+                localVersion, hasData,
+                [](const QByteArray &d) {
+                    return maxContentTs(QJsonDocument::fromJson(d).object()
+                                            [QStringLiteral("books")].toArray(),
+                                        "addedAt");
+                });
         syncBookBodies(client, remote);
     }
 }

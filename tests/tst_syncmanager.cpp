@@ -1,8 +1,9 @@
 // D2：SyncManager（数据打包、合并、冲突解决）
 // - 简报 3 用例：buildsPayloads / mergesProgressNewerWins / equalTimestampsSkip
-// - 补充：progress 合并 ts 语义、highlights 去重（含 id 不参与去重键）、
-//   settings 敏感分区排除与合并、sync 全流程（MockWebDavClient，虚接口方案见报告）、
-//   书籍文件体按需上传/下载、put 失败日志
+// - 补充：progress 合并 ts 语义（含等值重放幂等）、highlights 四元组去重（id 不参与
+//   去重键，note/color 差异合并更新）、settings 敏感分区排除与合并（损坏文件跳过不覆盖）、
+//   sync 全流程（内容版本比较：上传/下载/保留本地/采用远端/跳过）、书籍文件体按需
+//   上传/下载、put/get 失败日志
 // mock 方案：WebDavClient 方法抽成 virtual，测试内嵌 MockWebDavClient 以内存
 // QHash 模拟远端存储（list/put/get/remove），避免为 sync 多轮有状态交互搭 TCP mock。
 #include <QtTest>
@@ -28,6 +29,7 @@ public:
     QDateTime mtimeDefault = QDateTime::currentDateTimeUtc();
     QString err;
     bool putReturnsFalse = false;
+    bool getReturnsFalse = false;
     QStringList putNames, getNames;
 
     bool put(const QString &name, const QByteArray &data) override {
@@ -40,6 +42,7 @@ public:
     }
     QByteArray get(const QString &name) override {
         getNames.append(name);
+        if (getReturnsFalse) { err = "mock get 失败"; return QByteArray(); }
         const auto it = files.constFind(name);
         if (it == files.constEnd()) { err = "404 Not Found"; return QByteArray(); }
         err.clear();
@@ -194,6 +197,21 @@ private slots:
         }
         m.applyProgressJson("{\"books\":[{\"bookId\":2,\"progress\":0.6,\"ts\":\"2026-01-02T00:00:00\"}]}");
         QCOMPARE(progressOf(db, 2).toDouble(), 0.6);
+        // 复审：远端 ts == 本地最近阅读 → 等值重放不写（幂等，sync 重复下载即 Skip 的前提）
+        {
+            QSqlDatabase seed = seedDb(db);
+            seedBook(seed, 3, "c", 0.1, "2026-01-03T00:00:00");
+        }
+        m.applyProgressJson("{\"books\":[{\"bookId\":3,\"progress\":0.9,\"ts\":\"2026-01-03T00:00:00\"}]}");
+        QCOMPARE(progressOf(db, 3).toDouble(), 0.1);
+        // 复审：采用远端后 last_read_at 采用载荷 ts（而非合并时刻），转本地无时区格式
+        {
+            QSqlDatabase seed = seedDb(db);
+            QSqlQuery q(seed);
+            q.prepare("SELECT last_read_at FROM books WHERE id=2");
+            QVERIFY(q.exec() && q.next());
+            QCOMPARE(q.value(0).toString(), QString("2026-01-02T00:00:00"));
+        }
     }
 
     // ---- 补充：highlights 全量打包 + 四元组去重合并 ----
@@ -224,6 +242,28 @@ private slots:
         // id 不参与去重键：id 相同但文本不同 → 仍插入新行
         m.applyHighlightsJson("{\"highlights\":[{\"id\":1,\"bookId\":1,\"chapter\":\"第一章\",\"sentenceIndex\":3,\"text\":\"不同文本\",\"color\":\"#FFF\"}]}");
         QCOMPARE(countRows(db, "highlights"), 4);
+        // 复审：四元组已存在且远端改了 note/color → 合并更新（行数不增）；无差异 → 不写
+        m.applyHighlightsJson("{\"highlights\":[{\"bookId\":1,\"chapter\":\"第一章\",\"sentenceIndex\":5,\"text\":\"新句\",\"color\":\"#000\",\"note\":\"n2\"}]}");
+        QCOMPARE(countRows(db, "highlights"), 4);
+        {
+            QSqlDatabase seed = seedDb(db);
+            QSqlQuery q(seed);
+            q.prepare("SELECT color,note FROM highlights WHERE book_id=1 AND chapter='第一章'"
+                      " AND sentence_index=5");
+            QVERIFY(q.exec() && q.next());
+            QCOMPARE(q.value(0).toString(), QString("#000")); // 远端颜色合并过来
+            QCOMPARE(q.value(1).toString(), QString("n2"));   // 远端笔记合并过来
+        }
+        // 无差异重放：不写（颜色保持 #000）
+        m.applyHighlightsJson("{\"highlights\":[{\"bookId\":1,\"chapter\":\"第一章\",\"sentenceIndex\":5,\"text\":\"新句\",\"color\":\"#000\",\"note\":\"n2\"}]}");
+        {
+            QSqlDatabase seed = seedDb(db);
+            QSqlQuery q(seed);
+            q.prepare("SELECT color FROM highlights WHERE book_id=1 AND chapter='第一章'"
+                      " AND sentence_index=5");
+            QVERIFY(q.exec() && q.next());
+            QCOMPARE(q.value(0).toString(), QString("#000"));
+        }
     }
 
     // ---- 补充：settings 打包排除敏感分区 ----
@@ -363,7 +403,7 @@ private slots:
         QVERIFY(m.log().join('\n').contains("采用远端 progress.json"));
     }
 
-    // ---- 补充：sync 流程——mtime 相等 → 跳过 ----
+    // ---- 补充：sync 流程——内容版本相等 → 跳过（载荷 max ts 与本地同钟比较） ----
     void syncFlowSkipsEqualTimestamps() {
         QTemporaryDir dir;
         const QString db = dir.filePath("t.db");
@@ -372,19 +412,19 @@ private slots:
             seedBook(seed, 1, "a", 0.5, "2026-08-01T10:00:00"); // 本地无时区 → LocalTime
         }
         MockWebDavClient mock;
+        // 远端载荷 ts = 本地 last_read_at 的 UTC 瞬时（同内容版本 → Skip，无需下载应用）
+        const QDateTime localRead = QDateTime::fromString("2026-08-01T10:00:00", Qt::ISODate);
         const QByteArray remotePayload =
-            "{\"books\":[{\"bookId\":1,\"progress\":0.5,\"ts\":\"2026-08-01T10:00:00\"}]}";
+            QStringLiteral("{\"books\":[{\"bookId\":1,\"progress\":0.5,\"ts\":\"%1\"}]}")
+                .arg(localRead.toUTC().toString(Qt::ISODate)).toUtf8();
         mock.files["progress.json"] = remotePayload;
-        // 远端 mtime = 本地 last_read_at 的 UTC 瞬时（同一时刻）
-        mock.mtimes["progress.json"] =
-            QDateTime::fromString("2026-08-01T10:00:00", Qt::ISODate).toUTC();
         SyncManager m(db, dir.path());
         SyncManager::Options o; o.settings = false; o.progress = true;
         o.highlights = false; o.books = false;
         m.sync(mock, o);
         QVERIFY(m.log().join('\n').contains("跳过 progress.json"));
-        QVERIFY(mock.getNames.isEmpty());                        // 未下载
-        QCOMPARE(mock.files["progress.json"], remotePayload);    // 未覆盖上传
+        QCOMPARE(mock.getNames.size(), 1);                    // 仅一次版本 GET，无下载应用
+        QCOMPARE(mock.files["progress.json"], remotePayload); // 未被覆盖上传
         QCOMPARE(progressOf(db, 1).toDouble(), 0.5);
     }
 
@@ -410,6 +450,49 @@ private slots:
         QVERIFY(m.log().join('\n').contains("保留本地 settings.json"));
     }
 
+    // ---- 补充：sync 流程——settings 同秒 mtime → 跳过（本地截断到秒级对齐远端） ----
+    void syncFlowSettingsSkipsOnEqualSecond() {
+        QTemporaryDir dir;
+        QFile f(dir.filePath("settings.json"));
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        QVERIFY(f.write("{\"theme\":{\"mode\":\"dark\"}}") > 0);
+        f.close();
+        MockWebDavClient mock;
+        const QByteArray remotePayload = "{\"theme\":{\"mode\":\"dark\"}}";
+        mock.files["settings.json"] = remotePayload;
+        // 远端 mtime = 本地文件 mtime 截断到秒（getlastmodified 秒级，同秒视为同一版本）
+        mock.mtimes["settings.json"] = QDateTime::fromSecsSinceEpoch(
+            QFileInfo(dir.filePath("settings.json")).lastModified().toSecsSinceEpoch());
+        SyncManager m(dir.filePath("Readdict.db"), dir.path());
+        SyncManager::Options o; o.settings = true; o.progress = false;
+        o.highlights = false; o.books = false;
+        m.sync(mock, o);
+        QVERIFY(m.log().join('\n').contains("跳过 settings.json"));
+        QVERIFY(mock.getNames.isEmpty());                     // settings 不比载荷，无 GET
+        QCOMPARE(mock.files["settings.json"], remotePayload); // 未被覆盖上传
+    }
+
+    // ---- 补充：sync 流程——本地 settings.json 损坏 → 跳过且不覆盖远端 ----
+    void syncFlowCorruptSettingsSkipsUpload() {
+        QTemporaryDir dir;
+        QFile f(dir.filePath("settings.json"));
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        QVERIFY(f.write("{{{ 不是 JSON") > 0);
+        f.close();
+        MockWebDavClient mock;
+        const QByteArray remotePayload = "{\"theme\":{\"mode\":\"light\"}}";
+        mock.files["settings.json"] = remotePayload;
+        mock.mtimes["settings.json"] = QDateTime(QDate(2026, 1, 1), QTime(0, 0, 0), QTimeZone::UTC);
+        SyncManager m(dir.filePath("Readdict.db"), dir.path());
+        SyncManager::Options o; o.settings = true; o.progress = false;
+        o.highlights = false; o.books = false;
+        m.sync(mock, o);
+        // KeepLocal 判定后 build() 得空 → 跳过（空载荷绝不上传覆盖远端）
+        QVERIFY(m.log().join('\n').contains("跳过 settings.json"));
+        QCOMPARE(mock.files["settings.json"], remotePayload);
+        QVERIFY(m.buildSettingsJson().isEmpty());
+    }
+
     // ---- 补充：sync 流程——books 元数据 + 书籍文件体按需上传/下载 ----
     void syncFlowBookBodies() {
         QTemporaryDir dir;
@@ -417,7 +500,7 @@ private slots:
         QDir(dir.path()).mkpath("books");
         QFile localBook(dir.path() + "/books/a.epub");
         QVERIFY(localBook.open(QIODevice::WriteOnly));
-        localBook.write("LOCAL-EPUB-CONTENT");
+        QVERIFY(localBook.write("LOCAL-EPUB-CONTENT") > 0);
         localBook.close();
         {
             QSqlDatabase seed = seedDb(db);
@@ -429,10 +512,12 @@ private slots:
                      qPrintable(q.lastError().text()));
         }
         MockWebDavClient mock;
-        // 远端：books.json 元数据（含本地没有的 book 2）+ 已存在的书籍文件体 b2_r.epub
+        // 远端：books.json 元数据（含本地没有的 book 2，addedAt 供内容版本比较）
+        // + 已存在的书籍文件体 b2_r.epub
         mock.files["books.json"] =
             "{\"books\":[{\"id\":2,\"title\":\"remote\",\"author\":\"\",\"publisher\":\"\",\"category\":\"\","
-            "\"format\":\"EPUB\",\"path\":\"books/r.epub\",\"cover\":\"\"}]}";
+            "\"format\":\"EPUB\",\"path\":\"books/r.epub\",\"cover\":\"\","
+            "\"addedAt\":\"2026-08-02T00:00:00\"}]}";
         mock.mtimes["books.json"] = QDateTime(QDate(2026, 8, 2), QTime(0, 0, 0), QTimeZone::UTC);
         mock.files["b2_r.epub"] = "REMOTE-EPUB-CONTENT";
         SyncManager m(db, dir.path());
@@ -452,6 +537,18 @@ private slots:
         m.applyBooksJson("{\"books\":[{\"id\":1,\"title\":\"远程标题\",\"author\":\"A\",\"publisher\":\"P\","
                          "\"category\":\"C\",\"format\":\"EPUB\",\"path\":\"books/a.epub\",\"cover\":\"cov\"}]}");
         QCOMPARE(countRows(db, "books"), 1); // 未新增 book 2
+        {
+            QSqlDatabase seed = seedDb(db);
+            QSqlQuery q(seed);
+            q.prepare("SELECT title,author,publisher,category,format,cover FROM books WHERE id=1");
+            QVERIFY(q.exec() && q.next());
+            QCOMPARE(q.value(0).toString(), QString("远程标题")); // 远端元数据已合并
+            QCOMPARE(q.value(1).toString(), QString("A"));
+            QCOMPARE(q.value(2).toString(), QString("P"));
+            QCOMPARE(q.value(3).toString(), QString("C"));
+            QCOMPARE(q.value(4).toString(), QString("EPUB"));
+            QCOMPARE(q.value(5).toString(), QString("cov"));
+        }
     }
 
     // ---- 补充：sync 失败路径——put 失败记日志 ----
@@ -469,6 +566,26 @@ private slots:
         o.highlights = false; o.books = false;
         m.sync(mock, o);
         QVERIFY(m.log().join('\n').contains("失败 progress.json"));
+    }
+
+    // ---- 补充：sync 失败路径——get 失败记日志且不应用 ----
+    void syncFlowLogsGetFailure() {
+        QTemporaryDir dir;
+        const QString db = dir.filePath("t.db");
+        {
+            QSqlDatabase seed = seedDb(db);
+            seedBook(seed, 1, "a", 0.5, "2026-08-01T10:00:00");
+        }
+        MockWebDavClient mock;
+        mock.files["progress.json"] =
+            "{\"books\":[{\"bookId\":1,\"progress\":0.9,\"ts\":\"2026-08-02T00:00:00Z\"}]}";
+        mock.getReturnsFalse = true; // 远端内容较新 → TakeRemote，但 GET 失败
+        SyncManager m(db, dir.path());
+        SyncManager::Options o; o.settings = false; o.progress = true;
+        o.highlights = false; o.books = false;
+        m.sync(mock, o);
+        QVERIFY(m.log().join('\n').contains("失败 progress.json"));
+        QCOMPARE(progressOf(db, 1).toDouble(), 0.5); // 未应用远端
     }
 };
 QTEST_MAIN(TestSync)
