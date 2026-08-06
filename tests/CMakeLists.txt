@@ -24,6 +24,15 @@ if(APPLE)
 endif()
 add_test(NAME tst_bookmanager COMMAND tst_bookmanager)
 
+qt_add_executable(tst_highlights
+    tst_highlights.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/DatabaseManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/HighlightManager.cpp
+)
+target_include_directories(tst_highlights PRIVATE ../src)
+target_link_libraries(tst_highlights PRIVATE Qt6::Test Qt6::Sql)
+add_test(NAME tst_highlights COMMAND tst_highlights)
+
 qt_add_executable(tst_settings tst_settings.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/SettingsStore.cpp)
 target_include_directories(tst_settings PRIVATE ../src)
 target_link_libraries(tst_settings PRIVATE Qt6::Test)
