@@ -235,3 +235,14 @@ qt_add_executable(tst_webdav tst_webdav.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/s
 target_include_directories(tst_webdav PRIVATE ../src ../src/sync)
 target_link_libraries(tst_webdav PRIVATE Qt6::Test Qt6::Network)
 add_test(NAME tst_webdav COMMAND tst_webdav)
+
+# D2：SyncManager（数据打包/合并/冲突解决；MockWebDavClient 走虚接口，见 tst_syncmanager.cpp 头注释）
+qt_add_executable(tst_syncmanager
+    tst_syncmanager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sync/WebDavClient.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sync/SyncManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/DatabaseManager.cpp
+)
+target_include_directories(tst_syncmanager PRIVATE ../src ../src/sync)
+target_link_libraries(tst_syncmanager PRIVATE Qt6::Test Qt6::Sql Qt6::Network)
+add_test(NAME tst_syncmanager COMMAND tst_syncmanager)

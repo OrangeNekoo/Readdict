@@ -16,11 +16,14 @@ struct DavEntry {
 class WebDavClient {
 public:
     WebDavClient(const QString &baseUrl, const QString &user, const QString &password);
-    bool put(const QString &name, const QByteArray &data);      // PUT + MKCOL 兜底
-    QByteArray get(const QString &name);                        // GET
-    bool remove(const QString &name);                           // DELETE
-    QVector<DavEntry> list();                                   // PROPFIND depth 1
-    QString lastError() const { return m_error; }
+    virtual ~WebDavClient() = default;
+    // D2：方法抽成 virtual——tst_syncmanager 以内存 MockWebDavClient 覆盖，
+    // 使 SyncManager 的 sync 全流程可在无网络下测试（虚接口方案，见 task-D2-report.md）。
+    virtual bool put(const QString &name, const QByteArray &data);      // PUT + MKCOL 兜底
+    virtual QByteArray get(const QString &name);                        // GET
+    virtual bool remove(const QString &name);                           // DELETE
+    virtual QVector<DavEntry> list();                                   // PROPFIND depth 1
+    virtual QString lastError() const { return m_error; }
 private:
     QNetworkRequest makeRequest(const QString &name, const QByteArray &method);
     QNetworkAccessManager m_nam;

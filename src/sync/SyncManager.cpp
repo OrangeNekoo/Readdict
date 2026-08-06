@@ -1,0 +1,445 @@
+#include "SyncManager.h"
+#include "../core/DatabaseManager.h"
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QHash>
+#include <QJsonDocument>
+#include <QRegularExpression>
+#include <QSqlQuery>
+#include <QSqlError>
+#include <QVariant>
+
+namespace {
+
+// settings 同步白名单分区：theme/typography/tts。
+// webdav（url/账号/密码）与 progress（章内滚动位置）永不出本机、永不写入本地
+// （webdav 含凭据；progress 属瞬态阅读状态，且书籍进度由 progress.json 单独同步）。
+const QStringList kSyncSections = {QStringLiteral("theme"), QStringLiteral("typography"),
+                                   QStringLiteral("tts")};
+
+// 深合并：src 叶子覆盖 target 对应键；两侧都是对象则递归；target 独有键保留。
+void mergeSection(QJsonObject &target, const QJsonObject &src) {
+    for (auto it = src.constBegin(); it != src.constEnd(); ++it) {
+        const QJsonValue &sv = it.value();
+        if (sv.isObject() && target.value(it.key()).isObject()) {
+            QJsonObject child = target.value(it.key()).toObject();
+            mergeSection(child, sv.toObject());
+            target.insert(it.key(), child);
+        } else {
+            target.insert(it.key(), sv);
+        }
+    }
+}
+
+QDateTime parseIso(const QString &text) {
+    return QDateTime::fromString(text, Qt::ISODate);
+}
+
+} // namespace
+
+SyncManager::SyncManager(const QString &dbPath, const QString &libraryDir, const QString &connection)
+    : m_dbPath(dbPath), m_libraryDir(libraryDir) {
+    // 打开并迁移 schema（books/highlights 表）；连接名独立于应用各单例
+    DatabaseManager dbm(dbPath, connection);
+    m_db = dbm.database();
+}
+
+QString SyncManager::settingsPath() const {
+    return QFileInfo(m_dbPath).absoluteDir().filePath(QStringLiteral("settings.json"));
+}
+
+void SyncManager::log(const QString &line) {
+    m_log.append(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))
+                 + QStringLiteral(" ") + line);
+}
+
+// ---- 打包 ----
+
+QByteArray SyncManager::buildSettingsJson() const {
+    QJsonObject out;
+    QFile f(settingsPath());
+    if (!f.open(QIODevice::ReadOnly))
+        return QJsonDocument(out).toJson(QJsonDocument::Compact); // 无本地设置 → {}
+    const QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
+    for (const QString &key : kSyncSections)
+        if (root.contains(key))
+            out.insert(key, root.value(key));
+    return QJsonDocument(out).toJson(QJsonDocument::Compact);
+}
+
+QByteArray SyncManager::buildProgressJson(const QVector<QPair<qint64, double>> &progress) const {
+    // ts 语义：优先该书 last_read_at（本地无时区 → 解析后转 UTC 序列化，跨设备不偏移），
+    // 无记录时回退打包时刻。以"最近阅读时刻"而非"打包时刻"作 ts，避免未阅读的同步
+    // 以较新打包时间覆盖他端更新的阅读进度（见报告）。
+    QHash<qint64, QDateTime> lastRead;
+    QSqlQuery q(m_db);
+    if (q.exec(QStringLiteral("SELECT id,last_read_at FROM books"))) {
+        while (q.next()) {
+            const QDateTime d = parseIso(q.value(1).toString());
+            if (d.isValid())
+                lastRead.insert(q.value(0).toLongLong(), d.toUTC());
+        }
+    }
+    QJsonArray arr;
+    for (const auto &p : progress) {
+        const auto it = lastRead.constFind(p.first);
+        const QDateTime ts = it != lastRead.constEnd() ? it.value() : QDateTime::currentDateTimeUtc();
+        arr.append(QJsonObject{{"bookId", p.first},
+                               {"progress", p.second},
+                               {"ts", ts.toString(Qt::ISODate)}});
+    }
+    return QJsonDocument(QJsonObject{{"books", arr}}).toJson(QJsonDocument::Compact);
+}
+
+QByteArray SyncManager::buildHighlightsJson() const {
+    QJsonArray arr;
+    QSqlQuery q(m_db);
+    if (q.exec(QStringLiteral(
+            "SELECT id,book_id,chapter,sentence_index,text,color,note,created_at FROM highlights"))) {
+        while (q.next()) {
+            arr.append(QJsonObject{
+                {"id", q.value(0).toLongLong()},
+                {"bookId", q.value(1).toLongLong()},
+                {"chapter", q.value(2).toString()},
+                {"sentenceIndex", q.value(3).toInt()},
+                {"text", q.value(4).toString()},
+                {"color", q.value(5).toString()},
+                {"note", q.value(6).toString()},
+                {"createdAt", q.value(7).toString()},
+            });
+        }
+    }
+    return QJsonDocument(QJsonObject{{"highlights", arr}}).toJson(QJsonDocument::Compact);
+}
+
+QByteArray SyncManager::buildBooksJson() const {
+    QJsonArray arr;
+    QSqlQuery q(m_db);
+    if (q.exec(QStringLiteral(
+            "SELECT id,title,author,publisher,category,format,path,cover FROM books"))) {
+        while (q.next()) {
+            arr.append(QJsonObject{
+                {"id", q.value(0).toLongLong()},
+                {"title", q.value(1).toString()},
+                {"author", q.value(2).toString()},
+                {"publisher", q.value(3).toString()},
+                {"category", q.value(4).toString()},
+                {"format", q.value(5).toString()},
+                {"path", QDir(m_libraryDir).relativeFilePath(q.value(6).toString())},
+                {"cover", q.value(7).toString()},
+            });
+        }
+    }
+    return QJsonDocument(QJsonObject{{"books", arr}}).toJson(QJsonDocument::Compact);
+}
+
+// ---- 合并（写回本地） ----
+
+void SyncManager::applySettingsJson(const QByteArray &data) {
+    const QJsonObject remote = QJsonDocument::fromJson(data).object();
+    if (remote.isEmpty())
+        return;
+    QJsonObject local;
+    QFile f(settingsPath());
+    if (f.open(QIODevice::ReadOnly))
+        local = QJsonDocument::fromJson(f.readAll()).object();
+    for (const QString &key : kSyncSections) {
+        if (!remote.contains(key))
+            continue;
+        const QJsonValue rv = remote.value(key);
+        if (rv.isObject()) {
+            QJsonObject section = local.value(key).toObject();
+            mergeSection(section, rv.toObject());
+            local.insert(key, section);
+        } else {
+            local.insert(key, rv);
+        }
+    }
+    QFile w(settingsPath());
+    if (!w.open(QIODevice::WriteOnly))
+        return;
+    // 与 SettingsStore::save 同格式（Indented），应用侧下次启动读取无差异
+    w.write(QJsonDocument(local).toJson(QJsonDocument::Indented));
+}
+
+void SyncManager::applyProgressJson(const QByteArray &data) {
+    const QJsonObject root = QJsonDocument::fromJson(data).object();
+    const QJsonArray arr = root[QStringLiteral("books")].toArray();
+    for (const QJsonValue &v : arr) {
+        const QJsonObject o = v.toObject();
+        const qint64 id = o[QStringLiteral("bookId")].toVariant().toLongLong();
+        const double p = o[QStringLiteral("progress")].toDouble();
+        const QDateTime remoteTs = parseIso(o[QStringLiteral("ts")].toString());
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral("SELECT last_read_at FROM books WHERE id=?"));
+        q.addBindValue(id);
+        if (!q.exec() || !q.next())
+            continue; // 本地无此书：进度不能凭空建书，跳过
+        const QDateTime localTs = parseIso(q.value(0).toString());
+        // 合并语义：远端 ts 有效且早于本地最近阅读 → 保留本地；否则采用远端
+        // （含本地无 last_read_at、远端 ts 缺失/无法解析两种兜底）
+        if (remoteTs.isValid() && localTs.isValid() && remoteTs < localTs)
+            continue;
+        QSqlQuery up(m_db);
+        up.prepare(QStringLiteral("UPDATE books SET progress=?, last_read_at=? WHERE id=?"));
+        up.addBindValue(p);
+        // 采用远端后把 last_read_at 刷新为合并时刻：后续 sync 以此保护本地不被更旧载荷覆盖
+        up.addBindValue(QDateTime::currentDateTime().toString(Qt::ISODate));
+        up.addBindValue(id);
+        up.exec();
+    }
+}
+
+void SyncManager::applyHighlightsJson(const QByteArray &data) {
+    const QJsonObject root = QJsonDocument::fromJson(data).object();
+    const QJsonArray arr = root[QStringLiteral("highlights")].toArray();
+    for (const QJsonValue &v : arr) {
+        const QJsonObject o = v.toObject();
+        const qint64 bookId = o[QStringLiteral("bookId")].toVariant().toLongLong();
+        const QString chapter = o[QStringLiteral("chapter")].toString();
+        const int sentenceIndex = o[QStringLiteral("sentenceIndex")].toInt();
+        const QString text = o[QStringLiteral("text")].toString();
+        // 去重键 (bookId, chapter, sentenceIndex, text)：id 不参与（跨设备 id 不可信）。
+        // IS 匹配正确处理 NULL 字段（chapter/sentence_index 可空）。
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral("SELECT 1 FROM highlights WHERE book_id IS ? AND chapter IS ?"
+                                 " AND sentence_index IS ? AND text IS ?"));
+        q.addBindValue(bookId);
+        q.addBindValue(chapter);
+        q.addBindValue(sentenceIndex);
+        q.addBindValue(text);
+        if (q.exec() && q.next())
+            continue; // 已存在：不重复插入（也不覆盖颜色/笔记，见报告）
+        QSqlQuery ins(m_db);
+        ins.prepare(QStringLiteral("INSERT INTO highlights(book_id,chapter,sentence_index,text,"
+                                   "color,note,created_at) VALUES(?,?,?,?,?,?,?)"));
+        ins.addBindValue(bookId);
+        ins.addBindValue(chapter);
+        ins.addBindValue(sentenceIndex);
+        ins.addBindValue(text);
+        ins.addBindValue(o[QStringLiteral("color")].toString());
+        ins.addBindValue(o[QStringLiteral("note")].toString());
+        const QString created = o[QStringLiteral("createdAt")].toString();
+        ins.addBindValue(created.isEmpty() ? QDateTime::currentDateTime().toString(Qt::ISODate)
+                                           : created);
+        ins.exec();
+    }
+}
+
+void SyncManager::applyBooksJson(const QByteArray &data) {
+    const QJsonObject root = QJsonDocument::fromJson(data).object();
+    const QJsonArray arr = root[QStringLiteral("books")].toArray();
+    for (const QJsonValue &v : arr) {
+        const QJsonObject o = v.toObject();
+        const qint64 id = o[QStringLiteral("id")].toVariant().toLongLong();
+        QSqlQuery chk(m_db);
+        chk.prepare(QStringLiteral("SELECT 1 FROM books WHERE id=?"));
+        chk.addBindValue(id);
+        if (!chk.exec() || !chk.next())
+            continue; // 本地无此书：不建书（建书需导入流程/书籍文件，见报告）
+        // 只更新静态元数据；path 不覆盖（本机路径指向本机文件），progress/read_seconds
+        // 归 progress 项管理，added_at/last_read_at 归本地
+        QSqlQuery up(m_db);
+        up.prepare(QStringLiteral("UPDATE books SET title=?,author=?,publisher=?,category=?,"
+                                  "format=?,cover=? WHERE id=?"));
+        up.addBindValue(o[QStringLiteral("title")].toString());
+        up.addBindValue(o[QStringLiteral("author")].toString());
+        up.addBindValue(o[QStringLiteral("publisher")].toString());
+        up.addBindValue(o[QStringLiteral("category")].toString());
+        up.addBindValue(o[QStringLiteral("format")].toString());
+        up.addBindValue(o[QStringLiteral("cover")].toString());
+        up.addBindValue(id);
+        up.exec();
+    }
+}
+
+// ---- 冲突解决 ----
+
+SyncManager::Conflict SyncManager::resolveConflict(const QDateTime &local, const QDateTime &remote) const {
+    if (local == remote)
+        return Skip;
+    return local > remote ? KeepLocal : TakeRemote;
+}
+
+// ---- 同步流程 ----
+
+QVector<QPair<qint64, double>> SyncManager::progressPairs() const {
+    QVector<QPair<qint64, double>> out;
+    QSqlQuery q(m_db);
+    if (q.exec(QStringLiteral("SELECT id,progress FROM books WHERE progress > 0"))) {
+        while (q.next())
+            out.append({q.value(0).toLongLong(), q.value(1).toDouble()});
+    }
+    return out;
+}
+
+void SyncManager::syncOne(WebDavClient &client, const QVector<DavEntry> &remote, const QString &name,
+                          const std::function<QByteArray()> &build,
+                          const std::function<void(const QByteArray &)> &apply,
+                          const QDateTime &localVersion, bool hasLocalData) {
+    const DavEntry *remoteEntry = nullptr;
+    for (const DavEntry &e : remote) {
+        if (e.name == name) {
+            remoteEntry = &e;
+            break;
+        }
+    }
+    if (!remoteEntry) {
+        // 远端不存在：本地有数据 → 上传（首次同步/远端被清空）
+        if (hasLocalData) {
+            if (client.put(name, build()))
+                log(QStringLiteral("上传 %1").arg(name));
+            else
+                log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
+        }
+        return;
+    }
+    if (!hasLocalData) {
+        // 本地无数据：下载并应用（新设备首次同步）
+        const QByteArray data = client.get(name);
+        if (!client.lastError().isEmpty()) {
+            log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
+            return;
+        }
+        apply(data);
+        log(QStringLiteral("下载 %1").arg(name));
+        return;
+    }
+    // 两边都有：mtime 冲突解决（本地版本无效 → TakeRemote 兜底，安全收敛）
+    switch (resolveConflict(localVersion, remoteEntry->modified)) {
+    case KeepLocal:
+        if (client.put(name, build()))
+            log(QStringLiteral("保留本地 %1").arg(name));
+        else
+            log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
+        break;
+    case TakeRemote: {
+        const QByteArray data = client.get(name);
+        if (!client.lastError().isEmpty()) {
+            log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
+            return;
+        }
+        apply(data);
+        log(QStringLiteral("采用远端 %1").arg(name));
+        break;
+    }
+    case Skip:
+        log(QStringLiteral("跳过 %1").arg(name));
+        break;
+    }
+}
+
+void SyncManager::syncBookBodies(WebDavClient &client, const QVector<DavEntry> &remote) {
+    // 上传：本地书籍文件体缺失于远端 → 远端名 b<id>_<basename>（扁平命名，list() depth 1 可见）
+    QSqlQuery q(m_db);
+    if (q.exec(QStringLiteral("SELECT id,path FROM books"))) {
+        while (q.next()) {
+            const qint64 id = q.value(0).toLongLong();
+            const QString path = q.value(1).toString();
+            if (!QFileInfo::exists(path))
+                continue;
+            const QString name = QStringLiteral("b%1_%2").arg(id).arg(QFileInfo(path).fileName());
+            bool present = false;
+            for (const DavEntry &e : remote) {
+                if (e.name == name) {
+                    present = true;
+                    break;
+                }
+            }
+            if (present)
+                continue; // 远端已有同名校验体：按需跳过
+            QFile f(path);
+            if (!f.open(QIODevice::ReadOnly))
+                continue;
+            if (client.put(name, f.readAll()))
+                log(QStringLiteral("上传书籍 %1").arg(name));
+            else
+                log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
+        }
+    }
+    // 下载：远端书籍文件体缺失于本地 → 写入 libraryDir/books/<basename>
+    // 文件名白名单校验：仅接受 b<id>_<basename> 且 basename 无路径分隔符/无 ".."，
+    // 防恶意远端用路径穿越写出 libraryDir（见报告）。
+    const QRegularExpression re(QStringLiteral("^b(\\d+)_([^/]+)$"));
+    for (const DavEntry &e : remote) {
+        const QRegularExpressionMatch m = re.match(e.name);
+        if (!m.hasMatch())
+            continue;
+        const QString basename = m.captured(2);
+        if (basename.contains(QStringLiteral("..")))
+            continue;
+        const QString dest = m_libraryDir + QStringLiteral("/books/") + basename;
+        if (QFile::exists(dest))
+            continue;
+        const QByteArray data = client.get(e.name);
+        if (!client.lastError().isEmpty())
+            continue;
+        QDir().mkpath(QFileInfo(dest).absolutePath());
+        QFile out(dest);
+        if (out.open(QIODevice::WriteOnly) && out.write(data) == data.size())
+            log(QStringLiteral("下载书籍 %1").arg(e.name));
+    }
+}
+
+void SyncManager::sync(WebDavClient &client, const Options &opts) {
+    // 快照式决策：list() 只取一次（简报"client.list() 得远端文件与 mtime"），
+    // 单次同步内所有项的 有无/冲突 判定基于同一快照。
+    const QVector<DavEntry> remote = client.list();
+    if (opts.settings) {
+        const QString path = settingsPath();
+        syncOne(client, remote, QStringLiteral("settings.json"),
+                [this] { return buildSettingsJson(); },
+                [this](const QByteArray &d) { applySettingsJson(d); },
+                QFileInfo(path).lastModified(), QFile::exists(path));
+    }
+    if (opts.progress) {
+        // 本地版本 = 最新最近阅读时刻；无有效时间戳 → 无效 QDateTime → 冲突时取远端（兜底收敛）
+        QDateTime localVersion;
+        QSqlQuery q(m_db);
+        if (q.exec(QStringLiteral("SELECT MAX(last_read_at) FROM books WHERE progress > 0"))
+            && q.next()) {
+            const QDateTime d = parseIso(q.value(0).toString());
+            if (d.isValid())
+                localVersion = d;
+        }
+        syncOne(client, remote, QStringLiteral("progress.json"),
+                [this] { return buildProgressJson(progressPairs()); },
+                [this](const QByteArray &d) { applyProgressJson(d); },
+                localVersion, !progressPairs().isEmpty());
+    }
+    if (opts.highlights) {
+        QDateTime localVersion;
+        QSqlQuery q(m_db);
+        if (q.exec(QStringLiteral("SELECT MAX(created_at) FROM highlights")) && q.next()) {
+            const QDateTime d = parseIso(q.value(0).toString());
+            if (d.isValid())
+                localVersion = d;
+        }
+        bool hasData = false;
+        if (q.exec(QStringLiteral("SELECT COUNT(*) FROM highlights")) && q.next())
+            hasData = q.value(0).toLongLong() > 0;
+        syncOne(client, remote, QStringLiteral("highlights.json"),
+                [this] { return buildHighlightsJson(); },
+                [this](const QByteArray &d) { applyHighlightsJson(d); },
+                localVersion, hasData);
+    }
+    if (opts.books) {
+        QDateTime localVersion;
+        QSqlQuery q(m_db);
+        if (q.exec(QStringLiteral("SELECT MAX(added_at) FROM books")) && q.next()) {
+            const QDateTime d = parseIso(q.value(0).toString());
+            if (d.isValid())
+                localVersion = d;
+        }
+        bool hasData = false;
+        if (q.exec(QStringLiteral("SELECT COUNT(*) FROM books")) && q.next())
+            hasData = q.value(0).toLongLong() > 0;
+        syncOne(client, remote, QStringLiteral("books.json"),
+                [this] { return buildBooksJson(); },
+                [this](const QByteArray &d) { applyBooksJson(d); },
+                localVersion, hasData);
+        syncBookBodies(client, remote);
+    }
+}
