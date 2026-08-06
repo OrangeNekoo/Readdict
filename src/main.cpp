@@ -12,6 +12,7 @@
 #include "core/BookManager.h"
 #include "core/BookImporter.h"
 #include "core/SettingsStore.h"
+#include "tts/TtsController.h"
 
 // B8：加载 fronts/ 下的可变字体（思源黑体 VF / 思源宋体 VF / 得意黑）。
 // 开发期从仓库根 fronts/ 相对当前工作目录加载（构建目录启动时 CWD 为仓库根），
@@ -83,6 +84,18 @@ int main(int argc, char *argv[]) {
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Settings", settings);
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Books", books);
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Importer", importer);
+    // C5：TTS 控制器按 settings.json 的 tts/ 分区构建引擎（system/openai），
+    // reconfigure 由设置页在保存后再次调用以热切换引擎。
+    auto *tts = new TtsController;
+    tts->reconfigure(settings->value("tts/engine").toString("system"),
+                     settings->value("tts/url").toString(),
+                     settings->value("tts/key").toString(),
+                     settings->value("tts/model").toString(),
+                     settings->value("tts/voice").toString(),
+                     settings->value("tts/rate").toDouble(1.0));
+    tts->setRate(settings->value("tts/rate").toDouble(1.0));
+    tts->setVoice(settings->value("tts/voice").toString());
+    qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Tts", tts);
     // B10：应用退出时结算阅读计时（页面 onDestruction 只在正常退出 QML 引擎销毁时触发，
     // 直接退进程/崩溃时兜底由这里结算，保证已读秒数不丢失）。
     QObject::connect(&app, &QCoreApplication::aboutToQuit, books, &BookManager::stopTracking);

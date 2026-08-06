@@ -121,11 +121,15 @@ qt_add_executable(tst_ttscontroller
     tst_ttscontroller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/TtsController.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/TtsController.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/SystemTTSEngine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/SystemTTSEngine.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/OpenAITTSEngine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/OpenAITTSEngine.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/TTSEngine.h
 )
 target_include_directories(tst_ttscontroller PRIVATE ../src ../src/tts)
-# TtsController 只依赖 TTSEngine 抽象（头文件），无需 Network/Multimedia
-target_link_libraries(tst_ttscontroller PRIVATE Qt6::Test)
+# TtsController::reconfigure 会实例化两个具体引擎，需 Network/Multimedia/TextToSpeech
+target_link_libraries(tst_ttscontroller PRIVATE Qt6::Test Qt6::Network Qt6::Multimedia Qt6::TextToSpeech)
 add_test(NAME tst_ttscontroller COMMAND tst_ttscontroller)
 
 qt_add_executable(tst_parserfactory
@@ -161,6 +165,14 @@ qt_add_executable(tst_qml
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/Fb2Parser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/MobiParser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/ParserFactory.cpp
+    # C5：Tts 单例（无引擎桩）供 TtsBar/高亮冒烟
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/TtsController.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/TtsController.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/SystemTTSEngine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/SystemTTSEngine.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/OpenAITTSEngine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/OpenAITTSEngine.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/TTSEngine.h
 )
 target_include_directories(tst_qml PRIVATE ../src ../src/parsers ../third_party/libmobi/src)
 target_compile_definitions(tst_qml PRIVATE QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml")
@@ -169,6 +181,7 @@ target_compile_definitions(tst_qml PRIVATE QUICK_TEST_SOURCE_DIR="${CMAKE_CURREN
 target_compile_definitions(tst_qml PRIVATE TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 target_link_libraries(tst_qml PRIVATE
     Qt6::Test Qt6::QuickTest Qt6::Quick Qt6::Qml Qt6::QuickControls2 Qt6::Sql Qt6::Gui Qt6::Pdf
+    Qt6::Network Qt6::Multimedia Qt6::TextToSpeech
     MINIZIP::minizipstatic mobi zlibstatic
 )
 if(APPLE)
@@ -181,10 +194,12 @@ qt_add_resources(tst_qml "qml_ui"
     FILES
         ../src/ui/qml/ShelfPage.qml
         ../src/ui/qml/BookCard.qml
+        ../src/ui/qml/SettingsPage.qml
         ../src/ui/qml/ReaderPage.qml
         ../src/ui/qml/ReaderContent.qml
         ../src/ui/qml/ReaderControls.qml
         ../src/ui/qml/ReaderBackground.qml
+        ../src/ui/qml/TtsBar.qml
         ../src/ui/qml/PdfReaderPage.qml
 )
 add_test(NAME tst_qml COMMAND tst_qml)

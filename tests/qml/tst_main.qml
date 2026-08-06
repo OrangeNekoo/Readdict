@@ -169,6 +169,12 @@ Item {
                    "loadChapter 应返回带 paragraphs 的章节对象")
             verify(page.chapter.paragraphs.length > 0, "TXT 首章应有段落")
             compare(page.chapter.title, page.book.title, "TXT 首章标题应为书名")
+            // C5：打开书应把拍平的句子喂给 Tts（游标复位首句 → 首句被高亮）
+            compare(Tts.currentIndex, 0, "打开书后朗读游标应复位到 0")
+            wait(50)
+            var t0 = page.contentView.paragraphRepeater.itemAt(0).children[0].text
+            verify(t0.toLowerCase().indexOf("background-color:") >= 0,
+                   "游标 0 落在首段 → 首句应带高亮 span，实际 " + t0)
             loader.destroy()
         }
     }

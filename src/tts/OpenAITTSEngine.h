@@ -16,6 +16,8 @@ public:
     void configure(const QString &baseUrl, const QString &apiKey,
                    const QString &model, const QString &voice, double speed);
     bool available() const override { return !m_apiKey.isEmpty(); }
+    // C5：Tts.rate 滑块（0.25..4.0）直接映射请求 speed，与 configure 的 speed 同一来源
+    void setRate(double rate) override { m_speed = rate; }
     void speak(const QString &text) override;
     void pause() override; void resume() override; void stop() override;
 private:

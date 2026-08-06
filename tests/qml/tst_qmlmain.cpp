@@ -17,6 +17,7 @@
 #include "core/BookImporter.h"
 #include "core/BookManager.h"
 #include "core/SettingsStore.h"
+#include "tts/TtsController.h"
 
 // 仅测试进程可见：在临时目录预生成 TXT 源书，QML 侧经 Importer.doImport 导入。
 class TestEnv : public QObject {
@@ -96,6 +97,9 @@ int main(int argc, char *argv[]) {
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Settings", settings);
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Books", books);
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Importer", importer);
+    // C5：Tts 单例（无引擎桩——测试不发声；engineAvailable=false 用于断言
+    // TtsBar 禁用播放；seekTo/setSentences 仍驱动 QML 高亮游标）
+    qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Tts", new TtsController);
     qmlRegisterSingletonInstance("Readdict.Test", 1, 0, "TestEnv", new TestEnv(appData));
     return quick_test_main(argc, argv, "tst_qml", QUICK_TEST_SOURCE_DIR);
 }

@@ -45,6 +45,8 @@ qt_add_executable(Readdict
     src/tts/SystemTTSEngine.h
     src/tts/OpenAITTSEngine.cpp
     src/tts/OpenAITTSEngine.h
+    src/tts/TtsController.cpp
+    src/tts/TtsController.h
     src/tts/TTSEngine.h
 )
 qt_add_qml_module(Readdict
@@ -61,6 +63,7 @@ qt_add_qml_module(Readdict
         src/ui/qml/ReaderContent.qml
         src/ui/qml/ReaderControls.qml
         src/ui/qml/ReaderBackground.qml
+        src/ui/qml/TtsBar.qml
         src/ui/qml/PdfReaderPage.qml
 )
 

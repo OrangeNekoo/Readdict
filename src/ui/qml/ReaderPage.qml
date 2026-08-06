@@ -61,9 +61,38 @@ Page {
         anchors.top: topBar.bottom
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: controls.top
+        anchors.bottom: ttsBar.top
         chapter: page.chapter
         typography: page.typography
+    }
+
+    // C5：朗读控制条（播放/暂停/停止/跳句/语速/音色），信号接 Tts 单例；
+    // 引擎不可用时 TtsBar 内部禁用播放并显示提示。
+    TtsBar {
+        id: ttsBar
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: controls.top
+        bgMode: page.bgMode
+        onPlayClicked: Tts.play()
+        onPauseClicked: Tts.pause()
+        onStopClicked: Tts.stop()
+        onPrevClicked: Tts.previous()
+        onNextClicked: Tts.next()
+        onRateChanged: (r) => { Tts.rate = r; Settings.setValue("tts/rate", r) }
+        onVoiceChanged: (v) => { Tts.voice = v; Settings.setValue("tts/voice", v) }
+    }
+
+    // C5：Tts 状态/错误同步到 TtsBar（playing 图标切换、错误提示 4 秒后消失）
+    Timer {
+        id: ttsErrorTimer
+        interval: 4000
+        onTriggered: ttsBar.errorText = ""
+    }
+    Connections {
+        target: Tts
+        function onStateChanged(state) { ttsBar.playing = state === 1 }
+        function onErrorOccurred(msg) { ttsBar.errorText = msg; ttsErrorTimer.restart() }
     }
 
     // B10：滚动位置每 5 秒写一次 settings.json（章节索引 + 章内偏移），
@@ -138,6 +167,13 @@ Page {
         i = Math.max(0, Math.min(i, titles.length - 1))
         page.chapter = Books.loadChapter(page.book.id, i)
         Books.currentChapter = i   // 写时持久化 progress/<bookId>
+        // C5：拍平本段全部段落句子喂给 Tts（顺序与 ReaderContent 的 sentenceStarts 一致），
+        // 换章复位游标 → 高亮回到首句；Tts.currentIndex 驱动逐句高亮与滚动跟随。
+        const all = []
+        for (const p of (page.chapter.paragraphs ?? []))
+            for (const s of (p.sentences ?? [])) all.push(s)
+        Tts.setSentences(all)
+        Tts.setChapter(i)
     }
 
     function setFontSize(size) {

@@ -289,6 +289,11 @@ QVariantMap BookManager::paragraphToVariant(const Paragraph &p) {
     m.insert("html", p.html);
     m.insert("level", p.level);
     m.insert("imagePath", p.imagePath);
+    // C5：逐句朗读/高亮依赖段落句子——QML 侧按 sentences 长度累加出每段起始索引
+    QStringList sl;
+    sl.reserve(p.sentences.size());
+    for (const QString &s : p.sentences) sl.append(s);
+    m.insert("sentences", sl);
     return m;
 }
 

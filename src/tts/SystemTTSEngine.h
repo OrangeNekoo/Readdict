@@ -6,7 +6,10 @@ class SystemTTSEngine : public TTSEngine {
     Q_OBJECT
 public:
     explicit SystemTTSEngine(QObject *parent = nullptr);
-    bool available() const override { return m_tts.state() != QTextToSpeech::Error; }
+    // C5：引擎"可用"还需系统存在至少一个语音——无语音时 TtsBar 禁用播放
+    bool available() const override {
+        return m_tts.state() != QTextToSpeech::Error && !m_tts.availableVoices().isEmpty();
+    }
     QStringList voices() const override;
     QString currentVoice() const override;
     void setVoice(const QString &name) override;
