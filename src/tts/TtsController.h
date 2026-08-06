@@ -62,4 +62,8 @@ private:
     QString m_voice;          // 当前音色名（重配置后尝试在新引擎上恢复）
     int m_state = 0;          // 状态机：0 idle 1 playing 2 paused
     bool m_testing = false;   // testVoice 进行中：finished 不推进句子
+    // stop() 置位：QTextToSpeech::stop() 取消朗读会异步置 Ready → SystemTTSEngine 映射为
+    // finished；该 finished 属于"被停止的旧句"而非新朗读，必须抑制（否则 ⏹ 变跳句继续读）。
+    // 新一轮发声（speakCurrent）前清除；被抑制的 finished 消费掉标志。
+    bool m_suppressFinished = false;
 };

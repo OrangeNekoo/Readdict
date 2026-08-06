@@ -200,16 +200,81 @@ private slots:
         QVERIFY(c.engineAvailable());
     }
     // C5：重配置后新引擎复用当前 rate/voice
+    // 注：FakeEngine 必须堆分配——reconfigure 对旧引擎调 deleteLater（栈对象即 UB）
     void reconfigureKeepsRateAndVoice() {
         TtsController c;
-        FakeEngine e;
-        c.setEngine(&e);
+        auto *e = new FakeEngine;
+        c.setEngine(e);
         c.setRate(1.7);
         c.setVoice("fake-voice");
-        c.reconfigure("system", "", "", "", "", 1.0);  // 换真实系统引擎
+        c.reconfigure("system", "", "", "", "", 1.0);  // 换真实系统引擎（旧 FakeEngine deleteLater）
         QCOMPARE(c.rate(), 1.7);
         c.reconfigure("openai", "https://api.openai.com/v1", "sk-test-fake", "tts-1", "nova", 1.3);
         QCOMPARE(c.rate(), 1.7);                        // rate 是控制器级属性，不受重配置影响
+    }
+    // C5 复审：stop() 引发的异步 finished 必须被抑制——否则 ⏹ 变跳句继续朗读
+    void stopSuppressesAsyncFinished() {
+        TtsController c;
+        FakeEngine e;
+        c.setEngine(&e);
+        c.setSentences({"一。", "二。", "三。"});
+        c.play();
+        QCOMPARE(e.spoken, QStringList{"一。"});
+        c.stop();
+        QVERIFY(e.stopped);
+        e.emitFinished();   // 模拟 QTextToSpeech::stop() 后异步 Ready → finished
+        QCOMPARE(c.currentIndex(), 0);
+        QCOMPARE(e.spoken.size(), 1);
+        // 抑制只消费一次：再来一个 finished（模拟换章后新句自然结束）不得再次误吞
+        c.play();           // 新发声清除抑制
+        QCOMPARE(e.spoken.last(), QString("一。"));
+        e.emitFinished();   // 新句自然结束 → 正常推进
+        QCOMPARE(c.currentIndex(), 1);
+        QCOMPARE(e.spoken.last(), QString("二。"));
+    }
+    // C5 复审：换章路径 stop → setSentences：旧章残留 finished 不得推进新章游标
+    void stopThenSetSentencesIgnoresStaleFinished() {
+        TtsController c;
+        FakeEngine e;
+        c.setEngine(&e);
+        c.setSentences({"一。", "二。"});
+        c.play();
+        c.stop();
+        c.setSentences({"新章一。", "新章二。"});   // 模拟 loadChapter：stop + 重拍平
+        QCOMPARE(c.currentIndex(), 0);
+        e.emitFinished();   // 旧章 stop 引发的 finished 延迟到达
+        QCOMPARE(c.currentIndex(), 0);
+        QCOMPARE(e.spoken.size(), 1);
+    }
+    // C5 复审：testVoice 打断朗读并复位状态（stateChanged → 0）
+    void testVoiceResetsStateToIdle() {
+        TtsController c;
+        FakeEngine e;
+        c.setEngine(&e);
+        c.setSentences({"一。", "二。"});
+        c.play();
+        QSignalSpy spy(&c, &TtsController::stateChanged);
+        c.testVoice("测试");
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.takeFirst().at(0).toInt(), 0);
+        e.emitFinished();   // stop 引发的 finished（被抑制消费）
+        e.emitFinished();   // 试音文本自然结束（m_testing 消费）
+        QCOMPARE(c.currentIndex(), 0);
+        QCOMPARE(e.spoken.last(), QString("测试"));
+        c.play();
+        QCOMPARE(e.spoken.last(), QString("一。"));
+    }
+    // C5 复审：reconfigure 后回空闲态（stateChanged → 0）
+    void reconfigureResetsStateToIdle() {
+        TtsController c;
+        FakeEngine e;
+        c.setEngine(&e);
+        c.setSentences({"a."});
+        c.play();
+        QSignalSpy spy(&c, &TtsController::stateChanged);
+        c.reconfigure("openai", "https://api.openai.com/v1", "sk-test-fake", "tts-1", "nova", 1.0);
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.takeFirst().at(0).toInt(), 0);
     }
     // C5：testVoice 朗读固定文本，结束后不推进句子游标
     void testVoiceSpeaksWithoutAdvancing() {

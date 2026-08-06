@@ -17,6 +17,7 @@ void TtsController::setEngine(TTSEngine *engine) {
         // finished → 自动朗读下一句（testVoice 进行中抑制推进）；
         // error → errorOccurred（信号转信号转发）
         connect(m_engine, &TTSEngine::finished, this, [this] {
+            if (m_suppressFinished) { m_suppressFinished = false; return; }  // stop 引发的异步 finished
             if (m_testing) { m_testing = false; return; }
             next();
         });
@@ -59,8 +60,11 @@ void TtsController::testVoice(const QString &text) {
     if (!m_engine) { emit errorOccurred(QStringLiteral("未选择 TTS 引擎")); return; }
     if (!m_engine->available()) { emit errorOccurred(QStringLiteral("当前 TTS 引擎不可用")); return; }
     if (text.trimmed().isEmpty()) return;
-    // 试音打断当前朗读：引擎 stop + 回到空闲态（TtsBar 显示 ▶），finished 不推进游标
+    // 试音打断当前朗读：引擎 stop + 回到空闲态（TtsBar 显示 ▶），finished 不推进游标。
+    // suppress 先于 engine->stop() 置位：stop 引发的异步 finished 由抑制消费，
+    // 试音文本自然结束的 finished 由 m_testing 消费。
     m_testing = true;
+    m_suppressFinished = true;
     m_state = 0;
     emit stateChanged(0);
     m_engine->stop();
@@ -106,6 +110,7 @@ void TtsController::setVoice(const QString &name) {
 
 void TtsController::speakCurrent() {
     if (!m_engine || m_index < 0 || m_index >= m_sentences.size()) return;
+    m_suppressFinished = false;   // 新一轮发声：之前 stop 的抑制只针对其引发的旧 finished
     emit sentenceChanged(m_index);
     m_engine->speak(m_sentences[m_index]);
 }
@@ -137,6 +142,7 @@ void TtsController::pause() {
 
 void TtsController::stop() {
     m_testing = false;
+    m_suppressFinished = true;   // 先置位：stop 引发的异步 finished 不得推进游标
     if (m_engine) m_engine->stop();
     m_state = 0;
     emit stateChanged(0);
