@@ -110,21 +110,22 @@ Page {
                     Component.onCompleted: text = String(Settings.value("tts/rate") || 1.0)
                 }
             }
-            RowLayout {
-                Button {
-                    text: qsTr("保存并应用")
-                    onClicked: page.saveTts()
-                }
-                Button {
-                    text: qsTr("测试发音")
-                    // 试音不改变朗读游标（Tts.testVoice 抑制自动推进）
-                    onClicked: Tts.testVoice(qsTr("你好，这是一段测试语音。"))
-                }
-                Label {
-                    id: ttsSavedHint
-                    text: ""
-                    color: "#2E7D32"
-                }
+        }
+        // 保存/试音按钮常驻（不在 openai 折叠区内）：切回系统引擎也必须能保存应用
+        RowLayout {
+            Button {
+                text: qsTr("保存并应用")
+                onClicked: page.saveTts()
+            }
+            Button {
+                text: qsTr("测试发音")
+                // 试音不改变朗读游标（Tts.testVoice 抑制自动推进）
+                onClicked: Tts.testVoice(qsTr("你好，这是一段测试语音。"))
+            }
+            Label {
+                id: ttsSavedHint
+                text: ""
+                color: "#2E7D32"
             }
         }
 

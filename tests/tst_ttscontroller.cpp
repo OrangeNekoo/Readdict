@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QSignalSpy>
+#include <QTextToSpeech>
 #include "TtsController.h"
 
 // 桩引擎：记录 speak/stop 调用，可手动发射 finished/error
@@ -189,9 +190,12 @@ private slots:
         QVERIFY(c.engineAvailable());
         QVERIFY(c.voices().isEmpty());            // OpenAI 引擎无音色列表（音色为配置项）
     }
-    // C5：reconfigure 切 system 引擎（本机有系统语音 → 可用）
+    // C5：reconfigure 切 system 引擎——可用性依赖宿主系统语音，无语音环境跳过断言
     void reconfigureCreatesSystemEngine() {
         TtsController c;
+        QTextToSpeech probe;
+        if (probe.availableVoices().isEmpty() || probe.state() == QTextToSpeech::Error)
+            QSKIP("宿主无系统语音，跳过系统引擎可用性断言");
         c.reconfigure("system", "", "", "", "", 1.0);
         QVERIFY(c.engineAvailable());
     }

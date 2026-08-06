@@ -180,9 +180,10 @@ Flickable {
                     source: modelData.imagePath ? "file://" + modelData.imagePath : ""
                 }
 
-                // 段内是否含真实行内标记（<b>/<i>/<hN>/<img>）——纯文本段才做逐句 span
+                // 段内是否含真实行内标记（b/i/em/strong/hN/img/br——解析器实际输出集）：
+                // 纯文本段才做逐句 span；含标记段走富文本整段高亮，避免静默丢格式
                 function hasMarkup(html) {
-                    return /<(b|i|h[1-6]|img)\b/i.test(html)
+                    return /<(b|i|em|strong|h[1-6]|img|br)\b/i.test(html)
                 }
                 function escapeHtml(s) {
                     return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")

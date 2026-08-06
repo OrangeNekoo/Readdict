@@ -50,13 +50,19 @@ void TtsController::reconfigure(const QString &engine, const QString &url,
         fresh->setRate(m_rate);
         fresh->setVoice(m_voice);
     }
+    // 引擎已被替换：原朗读必然中断，回到空闲态（TtsBar 切回 ▶）
+    m_state = 0;
+    emit stateChanged(0);
 }
 
 void TtsController::testVoice(const QString &text) {
     if (!m_engine) { emit errorOccurred(QStringLiteral("未选择 TTS 引擎")); return; }
     if (!m_engine->available()) { emit errorOccurred(QStringLiteral("当前 TTS 引擎不可用")); return; }
     if (text.trimmed().isEmpty()) return;
+    // 试音打断当前朗读：引擎 stop + 回到空闲态（TtsBar 显示 ▶），finished 不推进游标
     m_testing = true;
+    m_state = 0;
+    emit stateChanged(0);
     m_engine->stop();
     m_engine->speak(text);
 }

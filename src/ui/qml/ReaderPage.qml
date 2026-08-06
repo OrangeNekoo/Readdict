@@ -165,6 +165,9 @@ Page {
         const titles = Books.chapterTitles(page.book.id)
         if (!titles || titles.length === 0) return
         i = Math.max(0, Math.min(i, titles.length - 1))
+        // C5：换章先停朗读——否则旧章在途 finished 会在 setSentences 复位游标后
+        // 触发 next() 把游标推到 1，导致新章从第 2 句开始（首句被跳过）
+        Tts.stop()
         page.chapter = Books.loadChapter(page.book.id, i)
         Books.currentChapter = i   // 写时持久化 progress/<bookId>
         // C5：拍平本段全部段落句子喂给 Tts（顺序与 ReaderContent 的 sentenceStarts 一致），

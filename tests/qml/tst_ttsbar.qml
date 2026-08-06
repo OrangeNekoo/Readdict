@@ -139,11 +139,13 @@ Item {
             compare(String(Settings.value("tts/engine")), "openai", "engine 应持久化")
             compare(String(Settings.value("tts/key")), "sk-test-fake-key", "key 应持久化到 settings.json")
             verify(Tts.engineAvailable, "reconfigure 后 openai（有 key）引擎应可用")
-            // 再切回系统引擎：reconfigure 换 SystemTTSEngine
+            // 再切回系统引擎：reconfigure 换 SystemTTSEngine（无系统语音的宿主上
+            // 不可用属正常，仅在存在语音时断言可用）
             engineBox.currentIndex = 0
             page.saveTts()
             compare(String(Settings.value("tts/engine")), "system")
-            verify(Tts.engineAvailable, "系统引擎应可用")
+            if (Tts.voices.length > 0)
+                verify(Tts.engineAvailable, "有系统语音时引擎应可用")
             loader.destroy()
         }
     }
