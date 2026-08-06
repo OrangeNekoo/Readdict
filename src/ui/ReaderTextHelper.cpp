@@ -31,7 +31,11 @@ void ReaderTextHelper::applyLineSpacing(QQuickItem *edit, double factor) {
     if (factor <= 0.0) factor = 1.6;
     QTextCursor cur(doc);
     cur.select(QTextCursor::Document);
-    QTextBlockFormat fmt = cur.blockFormat();
+    // 用默认构造的 QTextBlockFormat（不带任何块属性）而非 cur.blockFormat()：
+    // select(Document) 后光标停在文档末尾，blockFormat() 返回**末段**整块格式
+    // （对齐/边距/缩进/标题属性），以其为 merge 基础会把末段格式污染到全章段落
+    // （如居中诗行章节整章被改对齐）。默认构造 + 只设行距 → merge 仅施加行距。
+    QTextBlockFormat fmt;
     fmt.setLineHeight(factor * 100.0, QTextBlockFormat::ProportionalHeight);
     // merge 而非 set：只改行距，不覆盖富文本段落自身的其他块属性
     cur.mergeBlockFormat(fmt);
