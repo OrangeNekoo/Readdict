@@ -130,10 +130,30 @@ QVector<DavEntry> WebDavClient::list()
             continue;
         DavEntry e;
         QString hrefText;
+        // propstat 粒度解析（RFC 4918 §9.1）：每个 propstat 自带 <status>，404 表示属性缺失，
+        // 其 <prop> 子元素为空值（Apache mod_dav 对集合即发 404 propstat），若直接覆盖会清掉
+        // 200 propstat 的 size/modified。只提交 status 为 2xx 的 propstat；
+        // 宽松服务器可能省略 <status>，按通过处理（保持旧行为）。
+        bool inPropstat = false, propstatOk = true;
+        qint64 pendSize = 0;
+        QDateTime pendModified;
+        bool haveSize = false, haveModified = false;
         while (!xml.atEnd()) {
             xml.readNext();
-            if (xml.isEndElement() && xml.name() == QStringLiteral("response"))
-                break;
+            if (xml.isEndElement()) {
+                if (xml.name() == QStringLiteral("response"))
+                    break;
+                if (inPropstat && xml.name() == QStringLiteral("propstat")) {
+                    if (propstatOk) {
+                        if (haveSize)
+                            e.size = pendSize;
+                        if (haveModified)
+                            e.modified = pendModified;
+                    }
+                    inPropstat = false;
+                }
+                continue;
+            }
             if (!xml.isStartElement() || !davElement(xml))
                 continue;
             if (xml.name() == QStringLiteral("href")) {
@@ -142,10 +162,25 @@ QVector<DavEntry> WebDavClient::list()
                 // Qt 6.11 的 fromPercentEncoding 直接返回 QString，无需再包 fromUtf8
                 e.name = QUrl::fromPercentEncoding(hrefText.section('/', -1).toUtf8());
             }
-            else if (xml.name() == QStringLiteral("getcontentlength"))
-                e.size = xml.readElementText().trimmed().toLongLong();
-            else if (xml.name() == QStringLiteral("getlastmodified"))
-                e.modified = parseDavTime(xml.readElementText());
+            else if (xml.name() == QStringLiteral("propstat")) {
+                inPropstat = true;
+                propstatOk = true; // 未见 <status> 前先视为通过
+                pendSize = 0;
+                pendModified = QDateTime();
+                haveSize = haveModified = false;
+            }
+            else if (inPropstat && xml.name() == QStringLiteral("status")) {
+                const int code = xml.readElementText().trimmed().section(' ', 1, 1).toInt();
+                propstatOk = code >= 200 && code < 300;
+            }
+            else if (inPropstat && xml.name() == QStringLiteral("getcontentlength")) {
+                pendSize = xml.readElementText().trimmed().toLongLong();
+                haveSize = true;
+            }
+            else if (inPropstat && xml.name() == QStringLiteral("getlastmodified")) {
+                pendModified = parseDavTime(xml.readElementText());
+                haveModified = true;
+            }
         }
         // 集合自身与子目录（href 尾斜杠）不属于文件：跳过（当前同步模型只同步文件）
         if (!e.name.isEmpty() && !hrefText.endsWith('/'))
