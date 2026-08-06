@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QSignalSpy>
+#include <QSqlQuery>
 #include <memory>
 #include "core/HighlightManager.h"
 
@@ -45,6 +46,31 @@ private slots:
         QCOMPARE(list.size(), 1);
         QCOMPARE(list[0].text, QString("a"));
         QCOMPARE(m_h->highlightsForBook(2).size(), 1);
+    }
+    // 二轮复审：连接名注入分支此前无测试覆盖（死代码）；显式连接名做基础 CRUD，
+    // 该用例因连接名独立也无 duplicate connection 告警
+    void crudWithExplicitConnection() {
+        HighlightManager h(":memory:", "readdict_highlights_test");
+        QSignalSpy spy(&h, &HighlightManager::highlightsChanged);
+        const qint64 id = h.addHighlight(1, "ch", 0, "t", "#FFF", "n");
+        QVERIFY(id > 0);
+        h.updateNote(id, "n2");
+        QCOMPARE(h.highlightsForBook(1)[0].note, QString("n2"));
+        h.removeHighlight(id);
+        QCOMPARE(h.highlightsForBook(1).size(), 0);
+        QCOMPARE(spy.count(), 3);
+    }
+    // 二轮复审：NULL sentence_index 回退 -1（addHighlight 总是绑定 int，NULL 只能来自外部写入）
+    void nullSentenceIndexReadsBackMinusOne() {
+        HighlightManager h(":memory:", "readdict_highlights_test");
+        QSqlDatabase db = QSqlDatabase::database("readdict_highlights_test");
+        QSqlQuery q(db);
+        QVERIFY(q.exec("INSERT INTO highlights(book_id,chapter,sentence_index,text,color,note,created_at)"
+                       " VALUES(1,'ch',NULL,'t','#FFF','',datetime('now'))"));
+        const auto list = h.highlightsForBook(1);
+        QCOMPARE(list.size(), 1);
+        QCOMPARE(list[0].sentenceIndex, -1);
+        QCOMPARE(list[0].text, QString("t"));
     }
 private:
     std::unique_ptr<HighlightManager> m_h;

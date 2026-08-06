@@ -40,7 +40,11 @@ void HighlightManager::removeHighlight(qint64 id) {
     QSqlQuery sel(m_db);
     sel.prepare("SELECT book_id FROM highlights WHERE id=?");
     sel.addBindValue(id);
-    if (!sel.exec() || !sel.next())
+    if (!sel.exec()) {
+        qWarning() << "removeHighlight: 查询划线失败:" << sel.lastError().text();
+        return;
+    }
+    if (!sel.next()) // 行不存在（id 无对应划线）：无变化，静默返回
         return;
     const qint64 bookId = sel.value(0).toLongLong();
     QSqlQuery del(m_db);
@@ -57,7 +61,11 @@ void HighlightManager::updateNote(qint64 id, const QString &note) {
     QSqlQuery sel(m_db);
     sel.prepare("SELECT book_id FROM highlights WHERE id=?");
     sel.addBindValue(id);
-    if (!sel.exec() || !sel.next())
+    if (!sel.exec()) {
+        qWarning() << "updateNote: 查询划线失败:" << sel.lastError().text();
+        return;
+    }
+    if (!sel.next()) // 行不存在：无变化，静默返回
         return;
     const qint64 bookId = sel.value(0).toLongLong();
     QSqlQuery upd(m_db);
