@@ -329,6 +329,164 @@ Item {
             compare(list[0].sentenceIndex, 3)
             loader.destroy()
         }
+        // C7 二次复审：顶部空间不足（选中句贴近视口顶）→ 工具条翻到选中内容下方，
+        // 不再钳到 0 覆盖所选文字；中部选择仍在上方（不回归）
+        function test_toolbarFlipsBelowAtTop() {
+            var loader = contentComp.createObject(root)
+            loader.width = 800; loader.height = 600
+            var c = loader.item
+            c.typography = { fontFamily: "Source Han Sans VF", fontSize: 18, lineHeight: 1.6,
+                             align: "left", pageWidth: "normal" }
+            c.chapter = root.makeChapter()
+            wait(50)
+            c.contentY = 0
+            // 首段首句位于视口顶端 → 上方放不下工具条
+            c.simulateSelection(0, "第0段第一句。")
+            verify(c.selectionToolbar.visible, "选择后工具条应出现")
+            var t0 = c.paragraphRepeater.itemAt(0).children[0]
+            var txtTopVp = t0.mapToItem(c, 0, 0).y
+            verify(c.selBarVpY >= txtTopVp + 6,
+                   "顶部无空间时工具条应位于选中内容下方（selBarVpY=" + c.selBarVpY
+                   + ", txtTopVp=" + txtTopVp + "）")
+            // 中部选择（上方有空间）→ 工具条仍在选中内容上方（既有行为）
+            c.chapter = root.makeTallChapter()
+            wait(50)
+            c.simulateSelection(20, "第10段第一句。")
+            var t10 = c.paragraphRepeater.itemAt(10).children[0]
+            var txt10TopVp = t10.mapToItem(c, 0, 0).y
+            verify(c.selBarVpY <= txt10TopVp - 6,
+                   "中部选择工具条应在选中内容上方（selBarVpY=" + c.selBarVpY
+                   + ", txt10TopVp=" + txt10TopVp + "）")
+            loader.destroy()
+        }
+        // C7 二次复审：视口底部空间不足 → 色板翻到工具条上方，不与工具条重叠。
+        // 说明：真实鼠标拖选无法在 quicktest 合成（选择起点必为段落首字符 → 段落顶
+        // ≤ 视口底 - 行高，色板下方恒有空间）；直接构造"工具条贴近视口底"的几何
+        // 验证色板翻转绑定公式（selBarVpX/Y 是公开属性，y 绑定依赖它们）。
+        function test_colorBarFlipsAboveAtBottom() {
+            var loader = contentComp.createObject(root)
+            loader.width = 800; loader.height = 600
+            var c = loader.item
+            c.typography = { fontFamily: "Source Han Sans VF", fontSize: 18, lineHeight: 1.6,
+                             align: "left", pageWidth: "normal" }
+            c.chapter = root.makeTallChapter()
+            wait(50)
+            c.selBarVpX = 100
+            c.selBarVpY = c.height - 30   // 底部仅剩 30px，放不下 32px 色板 + 4 间距
+            c.toggleColorBar()
+            verify(c.colorToolbar.visible, "点划线后色板应展开")
+            var cb = c.colorToolbar
+            var tb = c.selectionToolbar
+            verify(cb.y + cb.height <= tb.y + 1,
+                   "底部空间不足时色板应翻到工具条上方（cb.y=" + cb.y + ", tb.y=" + tb.y + "）")
+            verify(cb.y - c.contentY >= 0 && cb.y + cb.height - c.contentY <= c.height + 1,
+                   "色板应整体在视口内（cb.y=" + cb.y + ", contentY=" + c.contentY + "）")
+            // 中部工具条：下方空间充足 → 色板仍在工具条下方（既有行为不回归）
+            c.selBarVpY = 100
+            wait(50)
+            verify(cb.y >= tb.y + tb.height && cb.y + cb.height - c.contentY <= c.height,
+                   "中部工具条色板应在下方且不超视口（cb.y=" + cb.y + ", tb.y=" + tb.y + "）")
+            loader.destroy()
+        }
+        // C7 二次复审：笔记 Dialog 取消 → 自动创建的默认色划线回滚删除（无残留）；
+        // 已有划线时取消 → 原划线保留
+        function test_noteDialogCancelRollsBackAutoMarker() {
+            var loader = contentComp.createObject(root)
+            loader.width = 800; loader.height = 600
+            var c = loader.item
+            c.typography = { fontFamily: "Source Han Sans VF", fontSize: 18, lineHeight: 1.6,
+                             align: "left", pageWidth: "normal" }
+            c.chapter = root.makeChapter()
+            c.bookId = 9006
+            wait(50)
+            // 场景 1：无原有划线 → 打开笔记 Dialog（自动建默认色划线）→ 取消 → 回滚
+            c.simulateSelection(3, "第二句！")
+            c.openNoteDialog()
+            verify(c.noteDialog.visible, "笔记 Dialog 应打开")
+            compare(Highlights.highlightsForBook(9006).length, 1, "打开 Dialog 应先建默认色划线")
+            c.noteDialog.reject()
+            tryVerify(function () { return !c.noteDialog.visible }, 2000, "取消后 Dialog 应收起")
+            compare(Highlights.highlightsForBook(9006).length, 0,
+                    "取消后自动创建的划线应回滚删除（无残留）")
+            // 场景 2：已有划线 → 打开笔记 Dialog（不自动创建）→ 取消 → 原划线保留
+            c.simulateSelection(2, "第1段第一句。")
+            c.doAddHighlight("#FFEB3B")
+            compare(Highlights.highlightsForBook(9006).length, 1)
+            c.simulateSelection(2, "第1段第一句。")
+            c.openNoteDialog()
+            c.noteDialog.reject()
+            tryVerify(function () { return !c.noteDialog.visible }, 2000, "取消后 Dialog 应收起")
+            var rows = Highlights.highlightsForBook(9006)
+            compare(rows.length, 1, "已有划线时取消应保留原划线")
+            compare(rows[0].color, "#FFEB3B")
+            Highlights.removeHighlight(rows[0].id)
+            loader.destroy()
+        }
+        // C7 二次复审：重复 h2 标题章跨章同句索引不再碰撞——章 1 划线不串染章 2 渲染、
+        // 章 2 同句划线新建独立行、updateColor 只改本章行（Books 兜底 "第N章"）
+        function test_dupTitleChaptersDoNotCollide() {
+            if (TestEnv.dupTitlesSource.length === 0) skip("无重复标题书，跳过")
+            Importer.doImport(TestEnv.dupTitlesSource)
+            var book = null
+            for (let b of Books.booksModel)
+                if (b.title === "duptitles") { book = b; break }
+            if (!book) skip("重复标题书未导入")
+            var loader = readerComp.createObject(root)
+            loader.setSource("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: book })
+            var page = loader.item
+            verify(page !== null, "ReaderPage 应能加载")
+            tryVerify(function () { return page.chapter.paragraphs && page.chapter.paragraphs.length > 0 }, 5000,
+                      "打开应加载章节")
+            var cv = page.contentView
+            // 章 1（h2 "第一章"）：划线句 1 黄色
+            page.loadChapter(1)
+            tryVerify(function () { return page.chapter.title === "第一章" }, 3000,
+                      "第 2 章标题应为 第一章（首个 h2 保留），实际 " + page.chapter.title)
+            tryVerify(function () { return cv.paragraphRepeater.itemAt(1) !== null }, 3000,
+                      "章 1 段落应渲染完成")
+            cv.simulateSelection(1, "这是第一章的第一段正文。")
+            cv.doAddHighlight("#FFEB3B")
+            var list1 = Highlights.highlightsForBook(book.id)
+            compare(list1.length, 1)
+            compare(list1[0].chapter, "第一章")
+            compare(list1[0].sentenceIndex, 1)
+            // 章 2（重复 h2 → Books 兜底 "第3章"）：同句索引，渲染不得串染章 1 划线色
+            page.loadChapter(2)
+            tryVerify(function () { return page.chapter.title === "第3章" }, 3000,
+                      "重复 h2 章标题应兜底为 第3章，实际 " + page.chapter.title)
+            tryVerify(function () {
+                var d = cv.paragraphRepeater.itemAt(1)
+                return d && d.children[0].text.toLowerCase().indexOf("#ffeb3b") < 0
+            }, 3000, "章 2 不应渲染章 1 的划线色（跨章串染）")
+            // 章 2 同句再划粉色 → 应新建独立行（而非 updateColor 误改章 1 行）
+            cv.simulateSelection(1, "这是第二章的第一段正文。")
+            cv.doAddHighlight("#F8BBD0")
+            var list2 = Highlights.highlightsForBook(book.id)
+            compare(list2.length, 2, "跨章同句应产生两条独立划线行")
+            var ch1row = null, ch2row = null
+            for (let h of list2) {
+                if (h.chapter === "第一章") ch1row = h
+                if (h.chapter === "第3章") ch2row = h
+            }
+            verify(ch1row !== null && ch2row !== null,
+                   "两章应各有自己的划线行，实际 " + JSON.stringify(list2))
+            compare(ch1row.color, "#FFEB3B", "doAddHighlight 不得误改他章行的颜色")
+            compare(ch2row.color, "#F8BBD0")
+            verify(ch1row.id !== ch2row.id, "两章行 id 应不同")
+            // 显式 updateColor 章 2 行 → 章 1 行颜色不受影响
+            Highlights.updateColor(ch2row.id, "#A5D6A7")
+            var list3 = Highlights.highlightsForBook(book.id)
+            for (let h of list3) {
+                if (h.chapter === "第一章") compare(h.color, "#FFEB3B", "updateColor 只改本章行")
+                if (h.chapter === "第3章") compare(h.color, "#A5D6A7")
+            }
+            // 清理：划线 + 书（后续 findTxtBook 用例依赖原有 3 本 TXT）
+            for (let h of Highlights.highlightsForBook(book.id)) Highlights.removeHighlight(h.id)
+            tryVerify(function () { return Highlights.highlightsForBook(book.id).length === 0 }, 3000,
+                      "删除划线后应清空")
+            Books.removeBook(book.id)
+            loader.destroy()
+        }
         // 阅读页集成：笔记列表打开 → 跳转（换章 + 闪烁目标句）→ 划线重载链路
         function test_notesListJump() {
             var book = findTxtBook()

@@ -16,6 +16,8 @@ import Readdict.Backend
 // C7 划线渲染：ReaderPage 从 Highlights.highlightsForBook 加载本书全部划线，经 highlights
 // 属性注入；rebuildHighlightMap 以 "章节标题|句子全局索引" 为键建 map（与 addHighlight
 // 时记录的 chapterTitle + sentenceIndex 一致），逐句渲染时命中即包划线色 span；
+// C7b 查重键唯一性由 Books 保证：空/重复章节标题（FB2 无 <title>、TXT 重复 h2）经
+// BookManager::uniqueChapterTitles 兜底为 "第N章"，落库标题与查表标题同源，跨章不碰撞；
 // 划线句同时是朗读当前句 → 划线色为底 + 下划线叠加（两类信息都可见）。
 // 富文本段无法逐句定位：段内任一划线句 → 整段背景（近似，取段内首个划线色）。
 // C7 选择交互：句子 Text selectByMouse，松开选择后弹工具条（复制/划线/笔记）；
@@ -210,8 +212,20 @@ Flickable {
         // selBar 的 x/y 绑定叠回 content 偏移 → 视口固定，滚动不丢
         var vp = txt.mapToItem(flick, rect.x, rect.y)
         flick.selBarVpX = Math.max(0, Math.min(vp.x, flick.width - selBar.width))
-        flick.selBarVpY = Math.max(0, Math.min(vp.y - selBar.height - 6,
-                                               flick.height - selBar.height))
+        // C7b：优先放选中内容上方；上方空间不足（选中句贴近视口顶，钳到 0
+        // 会覆盖所选文字）→ 翻到选中内容下方（以选中**末端**为基准，多行
+        // 选择时仍完整让出）
+        var aboveY = vp.y - selBar.height - 6
+        if (aboveY >= 0) {
+            flick.selBarVpY = Math.min(aboveY, flick.height - selBar.height)
+        } else {
+            var endPos = Math.max(0, txt.selectionEnd > txt.selectionStart
+                                     ? txt.selectionEnd - 1 : txt.selectionStart)
+            var endRect = txt.positionToRectangle(endPos)
+            var endVp = txt.mapToItem(flick, endRect.x, endRect.y)
+            flick.selBarVpY = Math.min(endVp.y + endRect.height + 6,
+                                       flick.height - selBar.height)
+        }
         selBar.visible = true
         colorBar.visible = false
     }
@@ -261,6 +275,9 @@ Flickable {
         var key = (flick.chapter.title || "") + "|" + flick.selSentenceIndex
         var mk = flick.highlightMap[key]
         noteArea.text = mk ? (mk.note || "") : ""
+        // C7b：无原有划线时自动创建默认色划线（供 note 附着）；记录 autoCreated，
+        // 取消时回滚删除，避免残留默认色划线
+        noteDlg.autoCreated = !mk
         noteDlg.targetId = mk ? mk.id : Highlights.addHighlight(flick.bookId, flick.chapter.title,
                                                                 flick.selSentenceIndex, flick.selText,
                                                                 flick.defaultMarkerColor)
@@ -518,10 +535,12 @@ Flickable {
     Rectangle {
         id: colorBar
         visible: false
-        // 跟随工具条下方（工具条视口固定 → 色板同样视口固定），不超出视口底边
+        // 跟随工具条（工具条视口固定 → 色板同样视口固定）；C7b：底部空间不足
+        // （工具条贴近视口底，硬钳到视口底会与工具条重叠）→ 翻到工具条上方
         x: Math.max(0, Math.min(selBar.x, flick.width - colorBar.width))
-        y: Math.min(selBar.y + selBar.height + 4,
-                    flick.contentY + flick.height - colorBar.height)
+        y: (selBar.y + selBar.height + 4 + colorBar.height <= flick.contentY + flick.height)
+               ? selBar.y + selBar.height + 4
+               : Math.max(flick.contentY, selBar.y - colorBar.height - 4)
         width: 92    // 3 色块 × 20 + 间距 + 内边距
         height: 32
         radius: 6
@@ -556,6 +575,8 @@ Flickable {
         width: 380
         height: 250
         property int targetId: -1
+        // C7b：目标划线是否为本次自动创建（无原有划线时）——取消需回滚删除
+        property bool autoCreated: false
         contentItem: ColumnLayout {
             spacing: 12
             Label {
@@ -575,7 +596,12 @@ Flickable {
                 Highlights.updateNote(noteDlg.targetId, noteArea.text)
             flick.clearSelection()
         }
-        onRejected: flick.clearSelection()
+        onRejected: {
+            // 取消：仅本次自动创建的划线需要回滚（原有划线保留不动）
+            if (noteDlg.autoCreated && noteDlg.targetId > 0)
+                Highlights.removeHighlight(noteDlg.targetId)
+            flick.clearSelection()
+        }
     }
 
     function pageWidthFactor() {

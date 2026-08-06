@@ -64,6 +64,12 @@ private:
     // 解析并缓存文档（QHash<bookId, DocumentModel>）；清缓存时机见 B10
     DocumentModel documentFor(qint64 bookId);
     static QVariantMap paragraphToVariant(const Paragraph &p);
+    // C7b：章节标题唯一化——划线查重键（"章节标题|句索引"）依赖标题唯一。
+    // FB2 无 <title> 的 section 与 TXT 重复 h2 会产出空/重复标题 → 跨章键碰撞
+    // （渲染串染、updateColor 误改他章行、笔记跳转恒指首章）。空/重复标题兜底
+    // 为 "第N章"（对齐 EpubParser/MobiParser 行为），chapterTitles/loadChapter
+    // 共用保证两者一致（划线落库标题与查表标题必须对得上）。
+    static QStringList uniqueChapterTitles(const DocumentModel &doc);
     // 与 m_sort 对应的 ORDER BY 子句（books/search 共用单一来源）；t 为列名前缀
     // （search 中 JOIN books_fts 后裸列名歧义，须传 "b."），空串用于 books() 单表查询
     QString orderSql(const QString &t = QString()) const;

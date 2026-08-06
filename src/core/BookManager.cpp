@@ -9,6 +9,7 @@
 #include <QDebug>
 #include <QFontDatabase>
 #include <QJsonValue>
+#include <QSet>
 
 BookManager::BookManager(const QString &dbPath, const QString &connection, QObject *parent)
     : QObject(parent) {
@@ -297,12 +298,31 @@ QVariantMap BookManager::paragraphToVariant(const Paragraph &p) {
     return m;
 }
 
+QStringList BookManager::uniqueChapterTitles(const DocumentModel &doc) {
+    QStringList out;
+    out.reserve(doc.chapters.size());
+    QSet<QString> used;
+    for (int i = 0; i < doc.chapters.size(); ++i) {
+        QString t = doc.chapters.at(i).title.trimmed();
+        if (t.isEmpty() || used.contains(t)) {
+            // 空/重复标题 → "第N章"（对齐 EpubParser/MobiParser 解析器行为）；
+            // 序号递增直至未占用，避免与字面 "第N章" 标题（前章 h2）撞名
+            int n = i + 1;
+            do { t = QStringLiteral("第%1章").arg(n++); } while (used.contains(t));
+        }
+        used.insert(t);
+        out.append(t);
+    }
+    return out;
+}
+
 QVariantList BookManager::chapterTitles(qint64 bookId) {
     m_activeBookId = bookId;
-    QVariantList out;
     const DocumentModel doc = documentFor(bookId);
-    out.reserve(doc.chapters.size());
-    for (const Chapter &c : doc.chapters) out.append(c.title);
+    const QStringList titles = uniqueChapterTitles(doc);
+    QVariantList out;
+    out.reserve(titles.size());
+    for (const QString &t : titles) out.append(t);
     return out;
 }
 
@@ -311,8 +331,9 @@ QVariant BookManager::loadChapter(qint64 bookId, int index) {
     const DocumentModel doc = documentFor(bookId);
     QVariantMap out;
     if (index < 0 || index >= doc.chapters.size()) return out;
+    const QStringList titles = uniqueChapterTitles(doc);
     const Chapter &c = doc.chapters.at(index);
-    out.insert("title", c.title);
+    out.insert("title", titles.at(index));
     QVariantList paras;
     paras.reserve(c.paragraphs.size());
     for (const Paragraph &p : c.paragraphs) paras.append(paragraphToVariant(p));

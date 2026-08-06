@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">
+  <description><title-info>
+    <book-title>空标题书</book-title>
+  </title-info></description>
+  <body>
+    <section>
+      <p>第一章正文。</p>
+    </section>
+    <section>
+      <p>第二章正文。</p>
+    </section>
+    <section>
+      <p>第三章正文。</p>
+    </section>
+  </body>
+</FictionBook>

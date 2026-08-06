@@ -34,6 +34,8 @@ class TestEnv : public QObject {
     Q_PROPERTY(QString epubFixture READ epubFixture CONSTANT)
     // 长文本书（300 段，单章）：滚动恢复冒烟（内容高度远大于视口，滚动值可区分）（B10）
     Q_PROPERTY(QString longSource READ longSource CONSTANT)
+    // 重复 h2 标题 TXT（4 章，后 3 章 h2 同名）：划线查重键跨章碰撞回归（C7b）
+    Q_PROPERTY(QString dupTitlesSource READ dupTitlesSource CONSTANT)
 public:
     explicit TestEnv(const QString &workDir, QObject *parent = nullptr) : QObject(parent) {
         QDir srcDir(workDir + "/src");
@@ -59,8 +61,25 @@ public:
             lf.close();
         }
         m_longSource = QUrl::fromLocalFile(longPath).toString();
+        // 重复 h2 标题书：4 章（首章=文件名，后 3 章 h2 均为 "第一章"）——
+        // 未去重时第 2/3/4 章标题相同，划线查重键跨章碰撞（C7b 回归用）
+        const QString dupPath = srcDir.filePath("duptitles.txt");
+        QFile df(dupPath);
+        if (df.open(QIODevice::WriteOnly)) {
+            df.write(QStringLiteral(
+                "这是重复标题书的第一段正文。\n"
+                "## 第一章\n"
+                "这是第一章的第一段正文。\n"
+                "## 第一章\n"
+                "这是第二章的第一段正文。\n"
+                "## 第一章\n"
+                "这是第三章的第一段正文。\n").toUtf8());
+            df.close();
+        }
+        m_dupTitlesSource = QUrl::fromLocalFile(dupPath).toString();
     }
     QStringList sourceFiles() const { return m_files; }
+    QString dupTitlesSource() const { return m_dupTitlesSource; }
     QString pdfSource() const {
         const QString p = qEnvironmentVariable("READDICT_REAL_PDF");
         return QFile::exists(p) ? p : QString();
@@ -78,6 +97,7 @@ public:
 private:
     QStringList m_files;
     QString m_longSource;
+    QString m_dupTitlesSource;
 };
 
 int main(int argc, char *argv[]) {

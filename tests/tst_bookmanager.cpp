@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QSet>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include "core/BookManager.h"
@@ -94,6 +95,40 @@ private slots:
         QCOMPARE(m_mgr->bookById(1).readSeconds, 0);
         m_mgr->stopTracking();
         QCOMPARE(m_mgr->bookById(1).readSeconds, 0);
+    }
+    void dedupesDuplicateTxtChapterTitles() {
+        // C7b：TXT 重复 h2 标题 → chapterTitles 兜底为 "第N章"，标题全唯一；
+        // loadChapter 标题与 chapterTitles 同源（划线键 "章节标题|句索引" 才能对上）
+        const qint64 id = m_mgr->addBook(Book{-1, "dup", "作者", "出版社", "", "TXT",
+            QStringLiteral(EPUB_FIXTURES_DIR) + "/dup-titles.txt", QString(), 0.0});
+        const QVariantList titles = m_mgr->chapterTitles(id);
+        QCOMPARE(titles.size(), 4);
+        QCOMPARE(titles.at(0).toString(), QString("dup-titles")); // 首章 = 文件名（唯一）
+        QCOMPARE(titles.at(1).toString(), QString("第一章"));      // 首个 h2 保留
+        // 重复 h2 章兜底为序号章名，且不与既有标题冲突
+        QSet<QString> seen;
+        for (const QVariant &t : titles) {
+            const QString s = t.toString();
+            QVERIFY2(!s.isEmpty(), qPrintable("标题不应为空：" + s));
+            QVERIFY2(!seen.contains(s), qPrintable("标题应唯一，重复：" + s));
+            seen.insert(s);
+        }
+        for (int i = 0; i < titles.size(); ++i)
+            QCOMPARE(m_mgr->loadChapter(id, i).toMap().value("title").toString(),
+                     titles.at(i).toString());
+    }
+    void fallbackForEmptyFb2Titles() {
+        // C7b：FB2 无 <title> 的 section → 空标题兜底为 "第N章"（对齐 EPUB/MOBI 行为）
+        const qint64 id = m_mgr->addBook(Book{-1, "empty", "作者", "出版社", "", "FB2",
+            QStringLiteral(EPUB_FIXTURES_DIR) + "/empty-title.fb2", QString(), 0.0});
+        const QVariantList titles = m_mgr->chapterTitles(id);
+        QCOMPARE(titles.size(), 3);
+        QCOMPARE(titles.at(0).toString(), QString("第1章"));
+        QCOMPARE(titles.at(1).toString(), QString("第2章"));
+        QCOMPARE(titles.at(2).toString(), QString("第3章"));
+        for (int i = 0; i < titles.size(); ++i)
+            QCOMPARE(m_mgr->loadChapter(id, i).toMap().value("title").toString(),
+                     titles.at(i).toString());
     }
 private:
     std::unique_ptr<QTemporaryDir> m_tmp;
