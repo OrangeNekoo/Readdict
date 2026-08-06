@@ -15,6 +15,7 @@ Rectangle {
     signal toggleAlign()
     signal togglePageWidth()
     signal openToc()
+    signal openNotes()
 
     height: 52
     color: controls.bgMode === "dark" ? "#F2121212" : "#F2FFFFFF"
@@ -59,5 +60,7 @@ Rectangle {
         CtlBtn { lbl: qsTr("对齐"); onClicked: controls.toggleAlign() }
         CtlBtn { lbl: qsTr("页宽"); onClicked: controls.togglePageWidth() }
         CtlBtn { lbl: qsTr("下一章"); onClicked: controls.nextChapter() }
+        // C7：笔记列表（追加在行尾，保持既有按钮的 children 索引不变——ControlsSmoke 依赖）
+        CtlBtn { lbl: qsTr("笔记"); onClicked: controls.openNotes() }
     }
 }

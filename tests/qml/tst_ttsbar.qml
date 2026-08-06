@@ -98,9 +98,10 @@ Item {
             verify(t1.indexOf("background-color:#FFD54F") >= 0
                    || t1.indexOf("background-color:#ffd54f") >= 0,
                    "段 1 应含高亮 span，实际 " + t1)
-            // 当前句应包高亮 span（Qt 富文本会归一化颜色为小写）
-            var expectSpan = "<span style='background-color:#ffd54f'>第二句！</span>"
-            verify(t1.toLowerCase().indexOf(expectSpan.toLowerCase()) >= 0,
+            // 当前句应包高亮 span（C7 起段落用只读 TextEdit 渲染：text 返回序列化 HTML——
+            // 双引号属性、颜色小写、分号结尾，语义不变：当前句带 #FFD54F 背景）
+            var expectSpan = "<span style=\" background-color:#ffd54f;\">第二句！</span>"
+            verify(t1.toLowerCase().indexOf(expectSpan) >= 0,
                    "当前句应包高亮 span，实际 " + t1)
             var t0 = c.paragraphRepeater.itemAt(0).children[0].text
             verify(t0.indexOf("FFD54F") < 0, "段 0 不应高亮，实际 " + t0)

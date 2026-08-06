@@ -13,8 +13,12 @@ Page {
     property var typography: ({})
     property string bgMode: "light"
     property var tocTitles: []
+    // C7：本书全部划线（Highlights.highlightsForBook 结果，供渲染注入与笔记列表）
+    property var highlights: []
     // B10：暴露内容视图（滚动恢复冒烟测试经此读写 contentY/contentHeight）
     property alias contentView: content
+    // C7：笔记列表 Dialog（冒烟测试经此打开/关闭）
+    property alias notesDialog: notesDlg
 
     ReaderBackground {
         anchors.fill: parent
@@ -64,6 +68,9 @@ Page {
         anchors.bottom: ttsBar.top
         chapter: page.chapter
         typography: page.typography
+        // C7：划线上下文——bookId 供 addHighlight，highlights 供逐句渲染查表
+        bookId: (page.book && page.book.id) || -1
+        highlights: page.highlights
     }
 
     // C5：朗读控制条（播放/暂停/停止/跳句/语速/音色），信号接 Tts 单例；
@@ -119,6 +126,17 @@ Page {
         onToggleAlign: page.cycleAlign()
         onTogglePageWidth: page.cyclePageWidth()
         onOpenToc: tocDialog.open()
+        onOpenNotes: notesDlg.open()
+    }
+
+    // C7：划线增删改（addHighlight/removeHighlight/updateNote）后从 Highlights 重载，
+    // 驱动 content.highlights → 逐句重渲染
+    Connections {
+        target: Highlights
+        function onHighlightsChanged(bookId) {
+            if (page.book && bookId === page.book.id)
+                page.reloadHighlights()
+        }
     }
 
     Dialog {
@@ -147,6 +165,127 @@ Page {
             page.tocTitles = Books.chapterTitles(page.book.id)
             tocList.currentIndex = Books.currentChapter
         }
+    }
+
+    // C7：笔记列表（侧滑面板形态的 Dialog）——列出本书全部划线（章节/文本/笔记），
+    // 点击跳转该句；支持编辑笔记与删除划线
+    Dialog {
+        id: notesDlg
+        title: qsTr("笔记") + "（" + page.highlights.length + "）"
+        modal: true
+        standardButtons: Dialog.Close
+        width: 480
+        height: 540
+        contentItem: ListView {
+            id: notesList
+            clip: true
+            model: page.highlights
+            delegate: Rectangle {
+                width: ListView.view.width
+                height: bodyCol.implicitHeight + 18
+                color: index % 2 === 0 ? "#0A000000" : "transparent"
+                Column {
+                    id: bodyCol
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 4
+                    Row {
+                        spacing: 6
+                        Rectangle {
+                            width: 10
+                            height: 10
+                            radius: 5
+                            color: modelData.color || "#CCCCCC"
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Label {
+                            text: modelData.chapter || ""
+                            font.pixelSize: 12
+                            color: "#888888"
+                        }
+                    }
+                    Label {
+                        text: (modelData.text || "").slice(0, 80)
+                        elide: Text.ElideRight
+                        font.pixelSize: 14
+                    }
+                    Label {
+                        text: modelData.note ? qsTr("笔记：") + modelData.note : qsTr("（无笔记）")
+                        font.pixelSize: 12
+                        color: modelData.note ? "#555555" : "#AAAAAA"
+                        wrapMode: Text.Wrap
+                    }
+                    Row {
+                        spacing: 12
+                        Button {
+                            text: qsTr("跳转")
+                            font.pixelSize: 12
+                            onClicked: page.jumpToHighlight(modelData)
+                        }
+                        Button {
+                            text: qsTr("编辑")
+                            font.pixelSize: 12
+                            onClicked: {
+                                editNoteDlg.targetId = modelData.id
+                                editNoteArea.text = modelData.note || ""
+                                editNoteDlg.open()
+                            }
+                        }
+                        Button {
+                            text: qsTr("删除")
+                            font.pixelSize: 12
+                            onClicked: Highlights.removeHighlight(modelData.id)
+                        }
+                    }
+                }
+            }
+            ScrollBar.vertical: ScrollBar {}
+        }
+        onOpened: page.reloadHighlights()
+    }
+
+    // C7：编辑笔记 Dialog
+    Dialog {
+        id: editNoteDlg
+        title: qsTr("编辑笔记")
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        width: 380
+        height: 250
+        property int targetId: -1
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label {
+                text: qsTr("修改这条划线的笔记：")
+                color: "#555555"
+            }
+            TextArea {
+                id: editNoteArea
+                Layout.fillWidth: true
+                Layout.preferredHeight: 130
+                placeholderText: qsTr("写下你的想法…")
+                wrapMode: TextEdit.Wrap
+            }
+        }
+        onAccepted: {
+            if (editNoteDlg.targetId > 0)
+                Highlights.updateNote(editNoteDlg.targetId, editNoteArea.text)
+        }
+    }
+
+    // C7：跳转——定位到划线所在章并滚动/闪烁该句（120ms 等章节委托就绪）
+    Timer {
+        id: jumpTimer
+        interval: 120
+        repeat: false
+        onTriggered: {
+            content.flashSentence(jumpTimer.targetIndex)
+            content.followSentence(jumpTimer.targetIndex)
+        }
+        property int targetIndex: -1
     }
 
     // 从 Settings 组合排版参数；fontFamily 经 Books.resolveFontFamily 映射到已安装字族
@@ -215,6 +354,24 @@ Page {
         Books.savePosition(page.book.id, Books.currentChapter, content.contentY)
     }
 
+    // C7：从 Highlights 加载本书全部划线（打开阅读页/划线变更/笔记列表打开时调用）
+    function reloadHighlights() {
+        if (!page.book || !page.book.id) return
+        page.highlights = Highlights.highlightsForBook(page.book.id)
+    }
+
+    // C7：笔记列表跳转——按章节标题定位章索引，loadChapter 后滚动/闪烁目标句
+    function jumpToHighlight(hl) {
+        if (!hl || hl.sentenceIndex === undefined || hl.sentenceIndex < 0) return
+        const titles = Books.chapterTitles(page.book.id)
+        const ci = titles.indexOf(hl.chapter)
+        if (ci < 0) return
+        notesDlg.close()
+        page.loadChapter(ci)
+        jumpTimer.targetIndex = hl.sentenceIndex
+        jumpTimer.restart()
+    }
+
     Component.onCompleted: {
         page.typography = page.typographyFromSettings()
         const bg = Settings.value("reader/background")
@@ -223,8 +380,10 @@ Page {
         // 在内容高度就绪后设置（progress/scroll_<bookId>）
         page.loadChapter(Books.lastChapter(page.book.id))
         content.restoreScrollY = Books.lastScrollY(page.book.id)
-        if (page.book && page.book.id)
+        if (page.book && page.book.id) {
+            page.reloadHighlights()   // C7：重新进入阅读页加载本书全部划线
             Books.startTracking(page.book.id)  // 阅读计时开始
+        }
     }
 
     Component.onDestruction: {

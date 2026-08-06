@@ -1,4 +1,6 @@
 import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
 import Readdict.Backend
 
 // 章节内容渲染：Flickable + Column + Repeater。
@@ -11,6 +13,13 @@ import Readdict.Backend
 // 长度累加）判断 Tts.currentIndex 是否落在本段；纯文本段把每句包成独立 <span>（拼接后
 // 与原文逐字符一致，保持自然换行），当前句包黄色高亮 span；含 <b>/<i>/<hN>/<img> 的
 // 富文本段整体包高亮 span（无法安全定位句边界时退化为段级高亮）。
+// C7 划线渲染：ReaderPage 从 Highlights.highlightsForBook 加载本书全部划线，经 highlights
+// 属性注入；rebuildHighlightMap 以 "章节标题|句子全局索引" 为键建 map（与 addHighlight
+// 时记录的 chapterTitle + sentenceIndex 一致），逐句渲染时命中即包划线色 span；
+// 划线句同时是朗读当前句 → 划线色为底 + 下划线叠加（两类信息都可见）。
+// 富文本段无法逐句定位：段内任一划线句 → 整段背景（近似，取段内首个划线色）。
+// C7 选择交互：句子 Text selectByMouse，松开选择后弹工具条（复制/划线/笔记）；
+// 划线→色板（黄/绿/粉）→ Highlights.addHighlight；笔记→Dialog 填 note → updateNote。
 // 滚动跟随：Tts.sentenceChanged → 定位所在段落委托的 y → contentY 平滑滚动。
 Flickable {
     id: flick
@@ -28,8 +37,29 @@ Flickable {
     // ReaderPage 拍平喂给 Tts.setSentences 的顺序一致；totalSentences 供测试断言。
     property var sentenceStarts: []
     property int totalSentences: 0
-    property color highlightColor: "#FFD54F"   // 当前句高亮底色（黄）
+    property color highlightColor: "#FFD54F"   // 当前句高亮底色（黄，TTS 朗读游标）
     property alias paragraphRepeater: rep
+    // ---- C7：划线/笔记 ----
+    property int bookId: -1                      // 当前书 id（addHighlight 参数）
+    property var highlights: []                   // Highlights.highlightsForBook 结果（ReaderPage 注入）
+    property var highlightMap: ({})               // "chapter|sentenceIndex" → 划线 map，O(1) 渲染查表
+    property int flashIndex: -1                   // 笔记跳转目标句（临时下划线提示，1.6s 后复位）
+    // 划线预设色（黄/绿/粉）与默认色（笔记入口无划线时使用）
+    property var markerColors: [
+        { name: qsTr("黄"), color: "#FFEB3B" },
+        { name: qsTr("绿"), color: "#A5D6A7" },
+        { name: qsTr("粉"), color: "#F8BBD0" }
+    ]
+    property string defaultMarkerColor: "#FFEB3B"
+    // 当前选择（句全局索引 + 文本 + 所在段），供工具条动作使用
+    property int selSentenceIndex: -1
+    property string selText: ""
+    property int selParaIndex: -1
+    // 测试/外部可访问的 UI 句柄
+    property alias selectionToolbar: selBar
+    property alias colorToolbar: colorBar
+    property alias noteDialog: noteDlg
+    property alias noteTextArea: noteArea
     clip: true
     contentWidth: width
     contentHeight: col.implicitHeight
@@ -44,6 +74,9 @@ Flickable {
         flick.restorePending = false
         flick.restoreApplied = false
         flick.computeSentenceStarts()
+        // C7：章节变了，旧选择/跳转提示作废
+        flick.flashIndex = -1
+        flick.hideSelectionToolbar()
     }
 
     onRestoreScrollYChanged: {
@@ -55,11 +88,21 @@ Flickable {
     }
     onContentHeightChanged: flick.scheduleRestore()
 
+    onHighlightsChanged: flick.rebuildHighlightMap()
+
     Timer {
         id: restoreTimer
         interval: 200
         repeat: false
         onTriggered: flick.applyRestore()
+    }
+
+    // C7：跳转提示 1.6s 后复位
+    Timer {
+        id: flashTimer
+        interval: 1600
+        repeat: false
+        onTriggered: flick.flashIndex = -1
     }
 
     function scheduleRestore() {
@@ -112,6 +155,94 @@ Flickable {
         followAnim.start()
     }
 
+    // ---- C7：划线查表 ----
+    function rebuildHighlightMap() {
+        var m = {}
+        var list = flick.highlights ?? []
+        for (var i = 0; i < list.length; i++) {
+            var h = list[i]
+            if (!h || h.sentenceIndex === undefined || h.sentenceIndex < 0) continue
+            var key = (h.chapter || "") + "|" + h.sentenceIndex
+            m[key] = h
+        }
+        flick.highlightMap = m
+    }
+
+    // 笔记列表跳转：目标句下划线提示 1.6s（滚动由 ReaderPage 调 followSentence 完成）
+    function flashSentence(index) {
+        flick.flashIndex = index
+        flashTimer.restart()
+    }
+
+    // ---- C7：选择工具条 ----
+    // 真实选择路径（Text.onSelectedTextChanged）与测试注入路径共用
+    function showSelectionToolbar(txt, globalIdx, text) {
+        if (globalIdx < 0 || !text) return
+        flick.selText = text
+        flick.selSentenceIndex = globalIdx
+        flick.selParaIndex = flick.paragraphForIndex(globalIdx)
+        if (flick.selParaIndex < 0) return
+        var rect = txt.positionToRectangle(txt.selectionStart)
+        var pos = txt.mapToItem(flick.contentItem, rect.x, rect.y)
+        selBar.x = Math.max(0, Math.min(pos.x, flick.width - selBar.width))
+        selBar.y = Math.max(0, Math.min(pos.y - selBar.height - 6,
+                                        Math.max(0, flick.contentHeight - selBar.height)))
+        selBar.visible = true
+        colorBar.visible = false
+    }
+
+    function hideSelectionToolbar() {
+        selBar.visible = false
+        colorBar.visible = false
+        flick.selText = ""
+        flick.selSentenceIndex = -1
+        flick.selParaIndex = -1
+    }
+
+    function clearSelection() {
+        var it = rep.itemAt(flick.selParaIndex)
+        if (it && it.children[0] && it.children[0].deselect)
+            it.children[0].deselect()
+        flick.hideSelectionToolbar()
+    }
+
+    // 划线：以所选句 (bookId, chapterTitle, sentenceIndex, text, color) 落库；
+    // Highlights.highlightsChanged → ReaderPage.reloadHighlights → 本组件 highlights
+    // 更新 → rebuildHighlightMap → 逐句重渲染（绑定依赖 flick.highlightMap）
+    function doAddHighlight(color) {
+        if (flick.bookId <= 0 || flick.selSentenceIndex < 0 || !flick.selText) return
+        Highlights.addHighlight(flick.bookId, flick.chapter.title,
+                                flick.selSentenceIndex, flick.selText, color)
+        flick.clearSelection()
+    }
+
+    // 笔记：已有划线 → 直接编辑其 note；无划线 → 先以默认色建划线再填 note
+    function openNoteDialog() {
+        if (flick.bookId <= 0 || flick.selSentenceIndex < 0 || !flick.selText) return
+        var key = (flick.chapter.title || "") + "|" + flick.selSentenceIndex
+        var mk = flick.highlightMap[key]
+        noteArea.text = mk ? (mk.note || "") : ""
+        noteDlg.targetId = mk ? mk.id : Highlights.addHighlight(flick.bookId, flick.chapter.title,
+                                                                flick.selSentenceIndex, flick.selText,
+                                                                flick.defaultMarkerColor)
+        noteDlg.open()
+    }
+
+    // 测试注入路径：无真实鼠标选择时模拟"选择了全局句 globalIdx 的 text"
+    function simulateSelection(globalIdx, text) {
+        var pi = flick.paragraphForIndex(globalIdx)
+        if (pi < 0) return
+        var it = rep.itemAt(pi)
+        if (!it) return
+        flick.selText = text
+        flick.selSentenceIndex = globalIdx
+        flick.selParaIndex = pi
+        selBar.x = 8
+        selBar.y = 8
+        selBar.visible = true
+        colorBar.visible = false
+    }
+
     // C5：朗读游标/换章（setSentences 复位游标 0）驱动高亮与滚动
     Connections {
         target: Tts
@@ -157,18 +288,48 @@ Flickable {
                 readonly property bool inHighlightRange: para.hlInPara >= 0
                     && para.hlInPara < para.sentenceCount
                 implicitHeight: para.pureImage ? imgPara.height : txt.implicitHeight
-                Text {
+                // C7：段落用只读 TextEdit 渲染（富文本渲染与 Text 一致）。
+                // 注意：Qt 6.7 起 Text 移除了 selectByMouse/selectedText/selectionStart/
+                // positionToRectangle 等选择 API（deprecated 后删除），TextEdit 才是
+                // 支持鼠标选择的富文本项——readOnly + selectByMouse 即"可选中不可编辑"。
+                TextEdit {
                     id: txt
                     visible: !para.pureImage
                     width: parent.width
-                    textFormat: Text.RichText
+                    textFormat: TextEdit.RichText
                     text: para.buildText()
                     font.family: flick.typography.fontFamily ?? "思源黑体 VF"
                     font.pixelSize: flick.typography.fontSize ?? 18
-                    lineHeight: flick.typography.lineHeight ?? 1.6
                     horizontalAlignment: flick.typography.align === "center" ? Text.AlignHCenter
                                         : (flick.typography.align === "right" ? Text.AlignRight : Text.AlignLeft)
-                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
+                    readOnly: true
+                    selectByMouse: true
+                    cursorVisible: false
+                    activeFocusOnPress: false
+                    // C7：行距经 ReaderText 助手施加到富文本文档（TextEdit 无 lineHeight 属性；
+                    // 文本/字号/行距变化时重施加，与 Text.lineHeight 语义一致）
+                    readonly property real lineSpacing: flick.typography.lineHeight ?? 1.6
+                    // 重入守卫：mergeBlockFormat 会触发文档 contentsChanged → textChanged
+                    // 再次进入本函数（无守卫会递归直至栈溢出）；首次应用后格式相同不再变化
+                    property bool applyingSpacing: false
+                    function applyLineSpacing() {
+                        if (txt.applyingSpacing) return
+                        txt.applyingSpacing = true
+                        ReaderText.applyLineSpacing(txt, txt.lineSpacing)
+                        txt.applyingSpacing = false
+                    }
+                    Component.onCompleted: txt.applyLineSpacing()
+                    onTextChanged: txt.applyLineSpacing()
+                    onFontChanged: txt.applyLineSpacing()
+                    onLineSpacingChanged: txt.applyLineSpacing()
+                    // C7：松开鼠标 selectedText 非空 → 弹工具条
+                    onSelectedTextChanged: {
+                        if (txt.selectedText.length > 0)
+                            para.handleSelection()
+                        else
+                            flick.hideSelectionToolbar()
+                    }
                 }
                 Image {
                     id: imgPara
@@ -188,30 +349,193 @@ Flickable {
                 function escapeHtml(s) {
                     return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
                 }
-                // 显示用富文本：纯文本段每句独立 span（当前句包高亮）；富文本段整体包高亮
+
+                // C7：全局句索引 → 划线 map 命中（无划线返回 null）
+                function markerFor(k) {
+                    var g = para.sentenceStart + k
+                    return flick.highlightMap[(flick.chapter.title || "") + "|" + g] || null
+                }
+                // C7：富文本段取段内首个划线色（整段背景近似）
+                function paraMarkerColor() {
+                    for (var m = 0; m < para.sentenceCount; m++) {
+                        var mk = para.markerFor(m)
+                        if (mk && mk.color) return mk.color
+                    }
+                    return ""
+                }
+                // C7：单句 span——划线色优先（朗读游标叠加时划线色为底 + 下划线），
+                // 未划线且是朗读当前句 → TTS 黄底；跳转提示额外下划线
+                function sentenceSpan(k, s) {
+                    var mk = para.markerFor(k)
+                    var isCur = para.inHighlightRange && k === para.hlInPara
+                    var isFlash = (para.sentenceStart + k) === flick.flashIndex
+                    var styles = []
+                    if (mk && mk.color) {
+                        styles.push("background-color:" + mk.color)
+                        if (isCur) styles.push("text-decoration:underline")
+                    } else if (isCur) {
+                        styles.push("background-color:" + flick.highlightColor)
+                    }
+                    if (isFlash && styles.indexOf("text-decoration:underline") < 0)
+                        styles.push("text-decoration:underline")
+                    if (styles.length === 0) return s
+                    return "<span style='" + styles.join(";") + "'>" + s + "</span>"
+                }
+
+                // 显示用富文本：纯文本段每句独立 span（划线色 / 当前句高亮）；富文本段整段高亮
                 function buildText() {
                     if (para.pureImage) return ""
                     var htmlSrc = para.mixedHtml
                     var plain = htmlSrc.length === 0 || !para.hasMarkup(htmlSrc)
-                    var hl = para.hlInPara
                     if (plain) {
                         var parts = []
                         for (var k = 0; k < para.sentenceCount; k++) {
                             var s = para.escapeHtml(para.sentences[k])
-                            if (para.inHighlightRange && k === hl)
-                                s = "<span style='background-color:" + flick.highlightColor + "'>" + s + "</span>"
-                            parts.push(s)
+                            parts.push(para.sentenceSpan(k, s))
                         }
                         if (parts.length > 0) return parts.join("")
                         // 无句子（如解析器未分句）→ 回退原文（纯文本按字面转义）
                         return para.escapeHtml(modelData.text ?? "")
                     }
+                    // 富文本段：无法逐句定位 → 段内任一划线句整段背景（近似，取首个划线色）；
+                    // 与朗读整段高亮叠加时以划线色为底（取舍：富文本段不做逐句，见 C7 报告）。
+                    // 注意：外层必须用 <div>（块级）而非 <span>——Qt 富文本会丢弃包裹块级
+                    // 元素的 span 背景（C5 富文本段高亮因此从未实际渲染，C7 顺带修复）。
+                    var mc = para.paraMarkerColor()
+                    if (mc.length > 0)
+                        return "<div style='background-color:" + mc + "'>" + htmlSrc + "</div>"
                     if (para.inHighlightRange && htmlSrc.length > 0)
-                        return "<span style='background-color:" + flick.highlightColor + "'>" + htmlSrc + "</span>"
+                        return "<div style='background-color:" + flick.highlightColor + "'>" + htmlSrc + "</div>"
                     return htmlSrc
+                }
+
+                // C7：选择起点（Text.selectionStart，文档字符流坐标）→ 段内句子序号。
+                // 纯文本段文档流 = 各句拼接（span 标记不占字符），逐句长度累加定位
+                function sentenceIndexAt(docPos) {
+                    var acc = 0
+                    for (var k = 0; k < para.sentenceCount; k++) {
+                        acc += para.sentences[k].length
+                        if (docPos < acc) return k
+                    }
+                    return para.sentenceCount - 1 // 段尾选择（含全选）钳制到末句
+                }
+                function handleSelection() {
+                    if (txt.selectedText.length > 0)
+                        flick.showSelectionToolbar(txt, para.sentenceStart + para.sentenceIndexAt(txt.selectionStart),
+                                                   txt.selectedText)
+                    else
+                        flick.hideSelectionToolbar()
                 }
             }
         }
+    }
+
+    // ---- C7：选择工具条（复制/划线/笔记），位于选中句上方 ----
+    Rectangle {
+        id: selBar
+        visible: false
+        width: 166   // 3 按钮 × 52 + 间距（Rectangle 不随子项自动撑宽）
+        height: 34
+        radius: 6
+        color: "#EE303030"
+        z: 10
+        Row {
+            anchors.fill: parent
+            spacing: 2
+            component SelBtn: Button {
+                required property string lbl
+                text: lbl
+                font.pixelSize: 12
+                implicitWidth: 52
+                implicitHeight: 28
+                contentItem: Text {
+                    text: parent.text
+                    color: "white"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    color: parent.down ? "#55FFFFFF" : "transparent"
+                    radius: 4
+                }
+            }
+            SelBtn {
+                lbl: qsTr("复制")
+                onClicked: {
+                    if (flick.selText.length > 0)
+                        Clipboard.text = flick.selText
+                    flick.clearSelection()
+                }
+            }
+            SelBtn {
+                lbl: qsTr("划线")
+                onClicked: colorBar.visible = !colorBar.visible
+            }
+            SelBtn {
+                lbl: qsTr("笔记")
+                onClicked: flick.openNoteDialog()
+            }
+        }
+    }
+
+    // ---- C7：划线色板（黄/绿/粉），位于工具条下方 ----
+    Rectangle {
+        id: colorBar
+        visible: false
+        width: 92    // 3 色块 × 20 + 间距 + 内边距
+        height: 32
+        radius: 6
+        color: "#EE303030"
+        z: 10
+        Row {
+            anchors.centerIn: parent
+            spacing: 8
+            Repeater {
+                model: flick.markerColors
+                delegate: Rectangle {
+                    width: 20
+                    height: 20
+                    radius: 10
+                    color: modelData.color
+                    border.color: "#99FFFFFF"
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: flick.doAddHighlight(modelData.color)
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- C7：笔记 Dialog（划线后填 note / 直接加 note）----
+    Dialog {
+        id: noteDlg
+        title: qsTr("笔记")
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        width: 380
+        height: 250
+        property int targetId: -1
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label {
+                text: qsTr("为这条划线添加笔记：")
+                color: "#555555"
+            }
+            TextArea {
+                id: noteArea
+                Layout.fillWidth: true
+                Layout.preferredHeight: 130
+                placeholderText: qsTr("写下你的想法…")
+                wrapMode: TextEdit.Wrap
+            }
+        }
+        onAccepted: {
+            if (noteDlg.targetId > 0)
+                Highlights.updateNote(noteDlg.targetId, noteArea.text)
+            flick.clearSelection()
+        }
+        onRejected: flick.clearSelection()
     }
 
     function pageWidthFactor() {
