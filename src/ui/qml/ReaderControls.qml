@@ -16,6 +16,8 @@ Rectangle {
     signal togglePageWidth()
     signal openToc()
     signal openNotes()
+    // C8：书内搜索（ReaderPage 打开 Dialog → Search.searchModel(bookId) → 跳转）
+    signal openSearch()
 
     height: 52
     color: controls.bgMode === "dark" ? "#F2121212" : "#F2FFFFFF"
@@ -62,5 +64,7 @@ Rectangle {
         CtlBtn { lbl: qsTr("下一章"); onClicked: controls.nextChapter() }
         // C7：笔记列表（追加在行尾，保持既有按钮的 children 索引不变——ControlsSmoke 依赖）
         CtlBtn { lbl: qsTr("笔记"); onClicked: controls.openNotes() }
+        // C8：书内搜索（同样追加行尾，不动既有索引）
+        CtlBtn { lbl: qsTr("搜索"); onClicked: controls.openSearch() }
     }
 }

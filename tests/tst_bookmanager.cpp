@@ -3,6 +3,7 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include "core/BookManager.h"
+#include "core/SearchEngine.h"
 #include "core/SettingsStore.h"
 
 class TestBookManager : public QObject {
@@ -53,6 +54,22 @@ private slots:
         m_mgr->removeBook(1);
         QCOMPARE(m_mgr->books().size(), 1);
         QCOMPARE(m_mgr->search("红楼梦").size(), 0); // FTS 索引同步清理
+    }
+    void removeBookClearsFulltextIndex() {
+        // C8：removeBook 应同步清理 SearchEngine 的 fts_content 行（表存在时）。
+        // 独立文件库 + 独立连接名（init 的 readdict_main 已被 :memory: 占用）。
+        QTemporaryDir tmp;
+        const QString db = tmp.path() + "/t.db";
+        {
+            SearchEngine se(db);
+            se.indexBook(1, "第一章", {"魔女现身。"});
+            QCOMPARE(se.searchAll("魔女").size(), 1);
+        }
+        BookManager mgr(db, "readdict_fts_test");
+        mgr.addBook(Book{-1, "书", "作者", "社", "类", "TXT", "/tmp/x.txt", QString(), 0.0});
+        mgr.removeBook(1);
+        SearchEngine se2(db);
+        QVERIFY(se2.searchAll("魔女").isEmpty());
     }
     void searchesTitleContainingQuote() {
         // 复审修复：MATCH 中未转义的 '"' 会截断字符串导致 exec 失败静默返回空，剔除后仍应命中。

@@ -36,6 +36,7 @@ qt_add_executable(Readdict
     src/core/SettingsStore.cpp
     src/core/BookImporter.cpp
     src/core/HighlightManager.cpp
+    src/core/SearchEngine.cpp
     src/parsers/SentenceSplitter.cpp
     src/parsers/TextParser.cpp
     src/parsers/EpubParser.cpp

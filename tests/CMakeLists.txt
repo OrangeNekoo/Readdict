@@ -8,6 +8,8 @@ qt_add_executable(tst_bookmanager
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/DatabaseManager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/BookManager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/SettingsStore.cpp
+    # C8：removeBook 清理 fts_content 的集成用例
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/SearchEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/SentenceSplitter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/TextParser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/EpubParser.cpp
@@ -38,12 +40,20 @@ target_include_directories(tst_settings PRIVATE ../src)
 target_link_libraries(tst_settings PRIVATE Qt6::Test)
 add_test(NAME tst_settings COMMAND tst_settings)
 
+# C8：FTS5 全文搜索（SearchEngine）
+qt_add_executable(tst_search tst_search.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/SearchEngine.cpp)
+target_include_directories(tst_search PRIVATE ../src)
+target_link_libraries(tst_search PRIVATE Qt6::Test Qt6::Sql)
+add_test(NAME tst_search COMMAND tst_search)
+
 qt_add_executable(tst_bookimporter
     tst_bookimporter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/DatabaseManager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/BookManager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/SettingsStore.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/BookImporter.cpp
+    # C8：导入后全文索引（BookImporter::indexBook → SearchEngine）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/SearchEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/SentenceSplitter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/TextParser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/EpubParser.cpp
@@ -170,6 +180,8 @@ qt_add_executable(tst_qml
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/BookImporter.cpp
     # C7：Highlights 单例（划线数据流冒烟）
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/HighlightManager.cpp
+    # C8：Search 单例（全文搜索冒烟）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/SearchEngine.cpp
     # C7：TextEdit 行距助手（段落渲染用 TextEdit）
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/ReaderTextHelper.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/ReaderTextHelper.h

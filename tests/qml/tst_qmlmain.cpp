@@ -17,6 +17,7 @@
 #include "core/BookImporter.h"
 #include "core/BookManager.h"
 #include "core/HighlightManager.h"
+#include "core/SearchEngine.h"
 #include "core/SettingsStore.h"
 #include "tts/TtsController.h"
 #include "ui/ReaderTextHelper.h"
@@ -125,6 +126,9 @@ int main(int argc, char *argv[]) {
     // C7：Highlights 单例（独立连接名，与生产 main.cpp 对齐）——划线数据流测试经真实 SQLite
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Highlights",
                                  new HighlightManager(appData + "/t.db", QStringLiteral("readdict_highlights")));
+    // C8：Search 单例（固定连接名，与生产 main.cpp 对齐）——全文搜索 QML 冒烟
+    qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Search",
+                                 new SearchEngine(appData + "/t.db", QStringLiteral("readdict_search")));
     // C7：TextEdit 行距助手（同生产 main.cpp）
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "ReaderText", new ReaderTextHelper);
     qmlRegisterSingletonInstance("Readdict.Test", 1, 0, "TestEnv", new TestEnv(appData));

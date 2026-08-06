@@ -147,6 +147,19 @@ Flickable {
         return -1
     }
 
+    // C8：全文搜索跳转——滚动到指定段落（定位到视口上 1/3 处，同 followSentence）。
+    // 段落后于句子粒度，经 rep.itemAt 直接取段落 y，不依赖句子映射。
+    function scrollToParagraph(pi) {
+        if (flick.restorePending || flick.contentHeight <= 0) return
+        var item = rep.itemAt(pi)
+        if (!item) return
+        var targetY = item.y - flick.height / 3
+        var maxY = Math.max(0, flick.contentHeight - flick.height)
+        followAnim.stop()
+        followAnim.to = Math.max(0, Math.min(targetY, maxY))
+        followAnim.start()
+    }
+
     // 滚动跟随：当前句所在段落定位到视口上 1/3 处（平滑动画）
     function followSentence(index) {
         if (flick.restorePending || flick.contentHeight <= 0) return

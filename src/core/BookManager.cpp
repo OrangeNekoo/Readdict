@@ -53,6 +53,17 @@ void BookManager::removeBook(qint64 id) {
     f.addBindValue(id);
     if (!f.exec())
         qWarning() << "removeBook: books_fts 索引清理失败:" << f.lastError().text();
+    // C8：全文索引（fts_content）由 SearchEngine 按需创建；表不存在时（未索引过
+    // 任何书，如仅测试 BookManager 的场景）静默跳过，保持删除路径一致。
+    QSqlQuery has(m_db);
+    has.exec("SELECT 1 FROM sqlite_master WHERE name='fts_content'");
+    if (has.next()) {
+        QSqlQuery fts(m_db);
+        fts.prepare("DELETE FROM fts_content WHERE book_id=?");
+        fts.addBindValue(id);
+        if (!fts.exec())
+            qWarning() << "removeBook: 全文索引清理失败:" << fts.lastError().text();
+    }
     m_docCache.remove(id); // 阅读器文档缓存一并失效
     emit booksChanged();
 }

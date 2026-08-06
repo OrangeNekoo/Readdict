@@ -12,6 +12,7 @@
 #include "core/BookManager.h"
 #include "core/BookImporter.h"
 #include "core/HighlightManager.h"
+#include "core/SearchEngine.h"
 #include "core/SettingsStore.h"
 #include "tts/TtsController.h"
 #include "ui/ReaderTextHelper.h"
@@ -90,6 +91,9 @@ int main(int argc, char *argv[]) {
     // Books 单例的 readdict_main 重名（同名 addDatabase 会移除旧连接，见 DatabaseManager.h）。
     auto *highlights = new HighlightManager(appData + "/Readdict.db", QStringLiteral("readdict_highlights"));
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Highlights", highlights);
+    // C8：FTS5 全文搜索单例（书架全文搜索 + 书内搜索共用；固定连接名同 Highlights 模式）。
+    auto *search = new SearchEngine(appData + "/Readdict.db", QStringLiteral("readdict_search"));
+    qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Search", search);
     // C7：TextEdit 行距助手（段落改 TextEdit 渲染后 lineHeight 属性不可用，见 ReaderTextHelper.h）
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "ReaderText", new ReaderTextHelper);
     // C5：TTS 控制器按 settings.json 的 tts/ 分区构建引擎（system/openai），

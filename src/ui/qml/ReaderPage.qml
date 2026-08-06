@@ -19,6 +19,12 @@ Page {
     property alias contentView: content
     // C7：笔记列表 Dialog（冒烟测试经此打开/关闭）
     property alias notesDialog: notesDlg
+    // C8：全文搜索结果跳转目标（书架全文搜索 push 时传入；-1 表示正常打开）。
+    // 打开后 loadChapter(initialChapter) 并滚动到 initialParagraph，跳过滚动恢复。
+    property int initialChapter: -1
+    property int initialParagraph: -1
+    // C8：书内搜索 Dialog（冒烟测试经此打开/关闭）
+    property alias searchDialog: searchDlg
 
     ReaderBackground {
         anchors.fill: parent
@@ -127,6 +133,7 @@ Page {
         onTogglePageWidth: page.cyclePageWidth()
         onOpenToc: tocDialog.open()
         onOpenNotes: notesDlg.open()
+        onOpenSearch: searchDlg.open()
     }
 
     // C7：划线增删改（addHighlight/removeHighlight/updateNote）后从 Highlights 重载，
@@ -276,6 +283,61 @@ Page {
         }
     }
 
+    // C8：书内搜索 Dialog——输入即查本书全文（Search.searchModel），
+    // 结果列表（章节/摘要），点击 loadChapter + 滚动到命中段。
+    Dialog {
+        id: searchDlg
+        title: qsTr("书内搜索")
+        modal: true
+        standardButtons: Dialog.Close
+        width: 480
+        height: 520
+        property var hits: []
+        contentItem: ColumnLayout {
+            spacing: 8
+            TextField {
+                id: searchInput
+                Layout.fillWidth: true
+                placeholderText: qsTr("输入关键词…")
+                onTextChanged: {
+                    searchDlg.hits = (page.book && page.book.id)
+                        ? Search.searchModel(page.book.id, text) : []
+                }
+            }
+            ListView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                model: searchDlg.hits
+                delegate: ItemDelegate {
+                    width: ListView.view.width
+                    onClicked: {
+                        page.jumpToSearchHit(modelData)
+                        searchDlg.close()
+                    }
+                    contentItem: Column {
+                        spacing: 2
+                        Label {
+                            text: (modelData.chapterTitle || qsTr("无标题"))
+                                  + " · " + qsTr("第%1段").arg((modelData.paragraphIndex ?? 0) + 1)
+                            font.pixelSize: 12
+                            color: "#888888"
+                        }
+                        Label {
+                            text: modelData.snippet || ""
+                            elide: Text.ElideRight
+                        }
+                    }
+                }
+                ScrollBar.vertical: ScrollBar {}
+            }
+        }
+        onOpened: {
+            searchInput.text = ""
+            searchDlg.hits = []
+        }
+    }
+
     // C7：跳转——定位到划线所在章并滚动/闪烁该句（120ms 等章节委托就绪）
     Timer {
         id: jumpTimer
@@ -285,6 +347,15 @@ Page {
             content.flashSentence(jumpTimer.targetIndex)
             content.followSentence(jumpTimer.targetIndex)
         }
+        property int targetIndex: -1
+    }
+
+    // C8：全文搜索跳转——章节切换后等段落委托就绪再滚动到目标段
+    Timer {
+        id: paraJumpTimer
+        interval: 120
+        repeat: false
+        onTriggered: content.scrollToParagraph(paraJumpTimer.targetIndex)
         property int targetIndex: -1
     }
 
@@ -360,6 +431,22 @@ Page {
         page.highlights = Highlights.highlightsForBook(page.book.id)
     }
 
+    // C8：书内搜索跳转——按索引定位章节（标题可能重复/为空，索引最可靠），
+    // loadChapter 后滚动到命中段
+    function jumpToSearchHit(hit) {
+        if (!hit || hit.chapterIndex === undefined || hit.paragraphIndex === undefined) return
+        page.loadChapter(hit.chapterIndex)
+        paraJumpTimer.targetIndex = hit.paragraphIndex
+        paraJumpTimer.restart()
+    }
+
+    // C8：外部（书架全文搜索入口）定位——同一跳转路径，供 initial* 属性复用
+    function jumpToChapterParagraph(ci, pi) {
+        page.loadChapter(ci)
+        paraJumpTimer.targetIndex = pi
+        paraJumpTimer.restart()
+    }
+
     // C7：笔记列表跳转——按章节标题定位章索引，loadChapter 后滚动/闪烁目标句
     function jumpToHighlight(hl) {
         if (!hl || hl.sentenceIndex === undefined || hl.sentenceIndex < 0) return
@@ -377,9 +464,18 @@ Page {
         const bg = Settings.value("reader/background")
         page.bgMode = (bg === "light" || bg === "paper" || bg === "dark") ? bg : "light"
         // 恢复：定位到保存的章节（progress/<bookId>），滚动偏移交给 ReaderContent
-        // 在内容高度就绪后设置（progress/scroll_<bookId>）
-        page.loadChapter(Books.lastChapter(page.book.id))
-        content.restoreScrollY = Books.lastScrollY(page.book.id)
+        // 在内容高度就绪后设置（progress/scroll_<bookId>）。
+        // C8：全文搜索跳转打开时（initialChapter/initialParagraph >= 0）改用目标章节，
+        // 并跳过滚动恢复（恢复会覆盖跳转位置）；段落滚动由 paraJumpTimer 完成。
+        const initChapter = page.initialChapter >= 0
+            ? page.initialChapter : Books.lastChapter(page.book.id)
+        page.loadChapter(initChapter)
+        if (page.initialParagraph >= 0) {
+            paraJumpTimer.targetIndex = page.initialParagraph
+            paraJumpTimer.restart()
+        } else {
+            content.restoreScrollY = Books.lastScrollY(page.book.id)
+        }
         if (page.book && page.book.id) {
             page.reloadHighlights()   // C7：重新进入阅读页加载本书全部划线
             Books.startTracking(page.book.id)  // 阅读计时开始

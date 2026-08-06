@@ -8,6 +8,13 @@ import Readdict.Backend
 Page {
     id: shelf
     property string toastText: ""
+    // C8：全文搜索结果（Search.searchAllModel 返回：bookId/chapterIndex/paragraphIndex/
+    // chapterTitle/snippet）；空数组表示无结果或未在全文模式。测试经此读模型。
+    property var searchResults: []
+    // C8：测试/外部句柄（QML 冒烟经此驱动模式切换与输入）
+    property alias searchModeBox: searchMode
+    property alias searchField: searchEdit
+    property alias fulltextList: ftList
 
     Connections {
         target: Importer
@@ -47,10 +54,31 @@ Page {
             spacing: 8
 
             TextField {
-                id: searchField
+                id: searchEdit
                 Layout.fillWidth: true
                 placeholderText: qsTr("搜索书名/作者…")
-                onTextChanged: Books.doSearch(text)
+                // C8：元数据模式过滤书架网格（Books.doSearch）；全文模式查 FTS5
+                onTextChanged: {
+                    if (searchMode.currentIndex === 1)
+                        shelf.searchResults = Search.searchAllModel(text)
+                    else
+                        Books.doSearch(text)
+                }
+            }
+
+            // C8：搜索范围切换——元数据（书名/作者，保持原书架过滤）或全文
+            //（全书内容命中，结果列在搜索框下方，点击跳转到对应段落）
+            ComboBox {
+                id: searchMode
+                Layout.preferredWidth: 96
+                model: [qsTr("元数据"), qsTr("全文")]
+                onActivated: {
+                    if (index === 1) {
+                        shelf.searchResults = Search.searchAllModel(searchEdit.text)
+                    } else {
+                        Books.doSearch(searchEdit.text)
+                    }
+                }
             }
 
             ComboBox {
@@ -74,6 +102,39 @@ Page {
                         Importer.doImport(f)
                 }
             }
+        }
+
+        // C8：全文搜索结果列表（书名/章节/摘要，点击打开对应书与段落）
+        ListView {
+            id: ftList
+            Layout.fillWidth: true
+            Layout.preferredHeight: 300
+            Layout.topMargin: 4
+            Layout.bottomMargin: 4
+            visible: searchMode.currentIndex === 1 && searchEdit.text.length > 0
+            clip: true
+            model: shelf.searchResults
+            delegate: ItemDelegate {
+                width: ListView.view.width
+                onClicked: shelf.openSearchResult(modelData)
+                contentItem: Column {
+                    spacing: 2
+                    Label {
+                        text: shelf.bookTitleFor(modelData.bookId)
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
+                    Label {
+                        text: (modelData.chapterTitle || "")
+                              + (modelData.chapterTitle ? " · " : "")
+                              + (modelData.snippet || "")
+                        font.pixelSize: 12
+                        color: "#666666"
+                        elide: Text.ElideRight
+                    }
+                }
+            }
+            ScrollBar.vertical: ScrollBar {}
         }
 
         RowLayout {
@@ -128,5 +189,29 @@ Page {
                 ScrollBar.vertical: ScrollBar {}
             }
         }
+    }
+
+    // ---- C8：全文搜索结果辅助 ----
+    function bookById(id) {
+        for (let b of Books.booksModel)
+            if (b.id === id) return b
+        return null
+    }
+    function bookTitleFor(id) {
+        const b = shelf.bookById(id)
+        return b ? b.title : qsTr("未知书籍")
+    }
+    function openSearchResult(hit) {
+        if (!hit || hit.bookId === undefined) return
+        const book = shelf.bookById(hit.bookId)
+        if (!book) return
+        const fmt = (book.format ?? "").toUpperCase()
+        if (fmt === "PDF") return  // PDF 无段落模型，不建全文索引，也不会命中
+        // 打开书 → 定位章节 → 滚动到命中段（ReaderPage 的 initialChapter/initialParagraph）
+        shelf.StackView.view.push("ReaderPage.qml", {
+            book: book,
+            initialChapter: hit.chapterIndex,
+            initialParagraph: hit.paragraphIndex
+        })
     }
 }

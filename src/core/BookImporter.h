@@ -13,7 +13,11 @@ public:
     static QString detectFormat(const QString &fileName);
     // 返回空串表示成功，否则为错误信息
     // moveIntoLibrary：当前恒为复制语义（QFile::copy），参数保留供后续启用移动语义
-    QString importFile(const QString &srcPath, bool moveIntoLibrary);
+    // importedId（可选）：导入成功后回填新书 id（C8：全文索引由导入流程驱动）
+    QString importFile(const QString &srcPath, bool moveIntoLibrary, qint64 *importedId = nullptr);
+    // C8：为指定书同步建 FTS5 全文索引（解析全书 → SearchEngine 逐章入库）。
+    // ":memory:" 库（每连接独立实例）下索引无从共享，直接跳过。
+    void indexBook(qint64 bookId);
     QVector<Book> books() const;
     // 最近一次导入的非致命错误（如 EPUB 解析失败导致封面回退占位）；成功或
     // 无错误时为空串。致命错误仍由 importFile 的返回值表达。
@@ -35,6 +39,7 @@ private:
     // covers/cover_<书文件 md5>.png；加载/渲染失败返回空串（回退占位）。
     QString extractPdfCover(const QString &pdfPath, const QString &coverDir);
     QString m_libraryDir;
+    QString m_dbPath;
     QString m_lastError;
     class BookManager *m_books;
 };

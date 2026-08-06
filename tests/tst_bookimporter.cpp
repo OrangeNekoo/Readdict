@@ -1,5 +1,7 @@
 #include <QtTest>
 #include "core/BookImporter.h"
+#include "core/BookManager.h"
+#include "core/SearchEngine.h"
 
 #include <QBuffer>
 #include <QCryptographicHash>
@@ -278,6 +280,69 @@ private slots:
         QCOMPARE(img.pixelColor(150, 200), QColor("#00C000")); // IRI 命中的绿图
         QVERIFY(img.pixelColor(150, 200) != QColor("#E00000")); // 非 manifest 首图（红）
     }
+    // C8：导入后同步建全文索引——同一 db 文件的 SearchEngine 应能搜到书内内容。
+    // TXT 路径（fixture 级真实文件导入）；文件库（":memory:" 各连接独立，索引不可共享）。
+    void importIndexesFulltext() {
+        QTemporaryDir libDir;
+        QTemporaryDir srcDir;
+        QFile src(srcDir.path() + "/魔女书.txt");
+        QVERIFY(src.open(QIODevice::WriteOnly));
+        src.write("第一章正文，魔女在森林中现身。\n");
+        src.close();
+        const QString dbPath = libDir.path() + "/lib.db";
+        BookImporter imp(libDir.path(), dbPath);
+        qint64 id = -1;
+        const QString err = imp.importFile(src.fileName(), true, &id);
+        QVERIFY(err.isEmpty());
+        QVERIFY(id > 0);
+        SearchEngine se(dbPath);
+        const auto hits = se.search(id, "魔女");
+        QCOMPARE(hits.size(), 1);
+        QCOMPARE(hits[0].chapterIndex, 0);
+        QCOMPARE(hits[0].paragraphIndex, 0);
+        QVERIFY(hits[0].snippet.contains("魔女"));
+        QCOMPARE(se.searchAll("魔女").size(), 1);
+    }
+
+    // C8：真实 EPUB 验证——导入 Re从零… 后，从正文提取实际出现的词断言命中
+    void realEpubFulltext() {
+        const QString real = qEnvironmentVariable("READDICT_REAL_EPUB");
+        if (real.isEmpty() || !QFile::exists(real))
+            QSKIP("未设置 READDICT_REAL_EPUB，跳过真实书全文搜索验证");
+        QTemporaryDir libDir;
+        const QString dbPath = libDir.path() + "/lib.db";
+        BookImporter imp(libDir.path(), dbPath);
+        qint64 id = -1;
+        QVERIFY(imp.importFile(real, true, &id).isEmpty());
+        QVERIFY(id > 0);
+        SearchEngine se(dbPath);
+        // 从书内容提取真实词：加载首章文本，取第一个 ≥4 字的 CJK 片段。
+        // 拆字 AND 保证该片段四个字都在原文 → 必命中，断言无歧义。
+        BookManager mgr(dbPath, "readdict_fts_real");
+        const QVariant ch = mgr.loadChapter(id, 0);
+        const QVariantList paras = ch.toMap().value("paragraphs").toList();
+        // 从单个段落的文本提取 ≥4 字的纯字母 CJK 片段（拼接多段会让片段跨段
+        // 边界、标点字符拆字后为空 token 破坏 MATCH——提取与索引粒度必须一致）。
+        QString term;
+        for (const auto &p : paras) {
+            const QString t = p.toMap().value("text").toString();
+            for (int i = 0; i + 4 <= t.size(); ++i) {
+                bool cjk = true;
+                for (int k = 0; k < 4; ++k) {
+                    const QChar ch = t.at(i + k);
+                    if (ch.unicode() < 0x2E80 || !ch.isLetter()) { cjk = false; break; }
+                }
+                if (cjk) { term = t.mid(i, 4); break; }
+            }
+            if (!term.isEmpty()) break;
+        }
+        QVERIFY(!term.isEmpty());
+        const auto hits = se.search(id, term);
+        QVERIFY(!hits.isEmpty());
+        for (const auto &h : hits)
+            QCOMPARE(h.bookId, id);
+    }
+
     // 真实书验证：设置环境变量 READDICT_REAL_EPUB=<epub 路径> 时执行
     // （本机真实书文件，CI 环境未设置则跳过）
     void realEpubCover() {

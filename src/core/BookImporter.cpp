@@ -1,5 +1,7 @@
 #include "BookImporter.h"
 #include "BookManager.h"
+#include "SearchEngine.h"
+#include "parsers/DocumentModel.h"
 #include "parsers/ParserFactory.h"
 
 #include <unzip.h>   // minizip：EPUB 封面条目读取（与 EpubParser 同源）
@@ -176,7 +178,8 @@ QString realCoverPath(const QString &bookPath, const QString &coverDir) {
 } // namespace
 
 BookImporter::BookImporter(const QString &libraryDir, const QString &dbPath, QObject *parent)
-    : QObject(parent), m_libraryDir(libraryDir), m_books(new BookManager(dbPath, "readdict_importer")) {}
+    : QObject(parent), m_libraryDir(libraryDir), m_dbPath(dbPath),
+      m_books(new BookManager(dbPath, "readdict_importer")) {}
 
 BookImporter::~BookImporter() {
     delete m_books;
@@ -194,7 +197,7 @@ QString BookImporter::detectFormat(const QString &fileName) {
     return {};
 }
 
-QString BookImporter::importFile(const QString &srcPath, bool moveIntoLibrary) {
+QString BookImporter::importFile(const QString &srcPath, bool moveIntoLibrary, qint64 *importedId) {
     const QString format = detectFormat(srcPath);
     if (format.isEmpty()) return "不支持的文件格式";
     QDir lib(m_libraryDir); lib.mkpath("books");
@@ -240,11 +243,16 @@ QString BookImporter::importFile(const QString &srcPath, bool moveIntoLibrary) {
     b.title = title;
     b.format = format; b.path = dest; b.cover = cover;
     // addBook 返回 -1 表示写入失败（如 path 唯一约束冲突、FTS 索引写入失败），此时回滚文件副作用。
-    if (m_books->addBook(b) < 0) {
+    const qint64 id = m_books->addBook(b);
+    if (id < 0) {
         QFile::remove(dest);
         if (!rollbackCover.isEmpty()) QFile::remove(rollbackCover);
         return "写入数据库失败";
     }
+    if (importedId) *importedId = id;
+    // C8：入库后立即建全文索引（同步：解析全书 + FTS5 写入；大书耗时留 D 优化——
+    // 若卡顿改为 QtConcurrent 后台线程 + indexed 信号，索引结果对搜索即时可见）。
+    indexBook(id);
     return {};
 }
 
@@ -345,6 +353,27 @@ QString BookImporter::extractPdfCover(const QString &pdfPath, const QString &cov
         return {};
     }
     return path;
+}
+
+void BookImporter::indexBook(qint64 bookId) {
+    // ":memory:" 下每个连接是独立数据库，索引写入无法被其它连接读到，跳过
+    // （测试用内存库时也免于对 fixture 重复解析）。
+    if (m_dbPath == QLatin1String(":memory:")) return;
+    const Book b = m_books->bookById(bookId);
+    if (b.path.isEmpty()) return;
+    const DocumentModel doc = ParserFactory::parse(b.path, b.format);
+    if (doc.empty()) return;  // PDF 等无章节模型的书不建全文索引
+    SearchEngine se(m_dbPath);  // 独立连接名，析构自动清理
+    // 整书重建契约：先清空该书旧索引（含章节游标复位），再逐章写入
+    se.removeBook(bookId);
+    for (int ci = 0; ci < doc.chapters.size(); ++ci) {
+        const Chapter &c = doc.chapters.at(ci);
+        QStringList texts;
+        texts.reserve(c.paragraphs.size());
+        for (const Paragraph &p : c.paragraphs)
+            texts.append(p.text);
+        se.indexBook(bookId, c.title, texts);
+    }
 }
 
 QVector<Book> BookImporter::books() const {
