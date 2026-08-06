@@ -299,9 +299,16 @@ Page {
                 id: searchInput
                 Layout.fillWidth: true
                 placeholderText: qsTr("输入关键词…")
-                onTextChanged: {
+                // 防抖：输入停止 250ms 后才查 FTS
+                onTextChanged: searchDlgDebounce.restart()
+            }
+            Timer {
+                id: searchDlgDebounce
+                interval: 250
+                repeat: false
+                onTriggered: {
                     searchDlg.hits = (page.book && page.book.id)
-                        ? Search.searchModel(page.book.id, text) : []
+                        ? Search.searchModel(page.book.id, searchInput.text) : []
                 }
             }
             ListView {

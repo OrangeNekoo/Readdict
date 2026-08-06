@@ -115,35 +115,45 @@ void SearchEngine::indexBook(qint64 bookId, const QString &chapterTitle,
     // 不动其它章节——整书重建由调用方先 removeBook（BookImporter 逐章调用，
     // 若整书 DELETE 会把已索引的其它章节一起清掉）。
     const int chapterIndex = m_chapterCursor.value(bookId, 0);
+    // DELETE 与 INSERT 同事务：任一步失败整体回滚（旧行不丢、游标不推进），
+    // 调用方可安全重试同一槽位；transaction() 失败则退回自动提交（同 addBook 先例）。
+    const bool inTx = m_db.transaction();
     QSqlQuery del(m_db);
     del.prepare(QStringLiteral("DELETE FROM fts_content WHERE book_id=? AND chapter_index=?"));
     del.addBindValue(bookId);
     del.addBindValue(chapterIndex);
-    if (!del.exec())
+    if (!del.exec()) {
         qWarning() << "SearchEngine::indexBook: 清理旧索引失败:" << del.lastError().text();
-    // 空章节也占一个槽位（章节索引与解析器章节序对齐），先推进游标
-    m_chapterCursor.insert(bookId, chapterIndex + 1);
-    if (paragraphTexts.isEmpty()) return;
-    const bool inTx = m_db.transaction();
-    QSqlQuery ins(m_db);
-    ins.prepare(QStringLiteral("INSERT INTO fts_content"
-                               "(book_id, chapter_index, paragraph_index, chapter_title, text, text_orig)"
-                               " VALUES(?,?,?,?,?,?)"));
-    for (int i = 0; i < paragraphTexts.size(); ++i) {
-        const QString &t = paragraphTexts.at(i);
-        ins.addBindValue(bookId);
-        ins.addBindValue(chapterIndex);
-        ins.addBindValue(i);
-        ins.addBindValue(chapterTitle);
-        ins.addBindValue(spaceForIndexing(t));
-        ins.addBindValue(t);
-        if (!ins.exec()) {
-            qWarning() << "SearchEngine::indexBook: 写入索引失败:" << ins.lastError().text();
-            if (inTx) m_db.rollback();
-            return;
+        if (inTx) m_db.rollback();
+        return;
+    }
+    if (!paragraphTexts.isEmpty()) {
+        QSqlQuery ins(m_db);
+        ins.prepare(QStringLiteral("INSERT INTO fts_content"
+                                   "(book_id, chapter_index, paragraph_index, chapter_title, text, text_orig)"
+                                   " VALUES(?,?,?,?,?,?)"));
+        for (int i = 0; i < paragraphTexts.size(); ++i) {
+            const QString &t = paragraphTexts.at(i);
+            ins.addBindValue(bookId);
+            ins.addBindValue(chapterIndex);
+            ins.addBindValue(i);
+            ins.addBindValue(chapterTitle);
+            ins.addBindValue(spaceForIndexing(t));
+            ins.addBindValue(t);
+            if (!ins.exec()) {
+                qWarning() << "SearchEngine::indexBook: 写入索引失败:" << ins.lastError().text();
+                if (inTx) m_db.rollback();
+                return;
+            }
         }
     }
-    if (inTx) m_db.commit();
+    if (inTx && !m_db.commit()) {
+        qWarning() << "SearchEngine::indexBook: 提交失败:" << m_db.lastError().text();
+        return;
+    }
+    // 提交成功后才推进游标（回滚则槽位不变，重试仍写同一槽位）；
+    // 空章节也占一个槽位（章节索引与解析器章节序对齐）
+    m_chapterCursor.insert(bookId, chapterIndex + 1);
 }
 
 void SearchEngine::removeBook(qint64 bookId) {
@@ -153,6 +163,13 @@ void SearchEngine::removeBook(qint64 bookId) {
     if (!q.exec())
         qWarning() << "SearchEngine::removeBook: 清理索引失败:" << q.lastError().text();
     m_chapterCursor.remove(bookId);  // 复位章节游标，重索引用新 id 从第 0 章开始
+}
+
+bool SearchEngine::isBookIndexed(qint64 bookId) const {
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT 1 FROM fts_content WHERE book_id=? LIMIT 1"));
+    q.addBindValue(bookId);
+    return q.exec() && q.next();
 }
 
 QVector<SearchHit> SearchEngine::search(qint64 bookId, const QString &query) const {

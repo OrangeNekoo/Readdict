@@ -10,6 +10,7 @@
 #include <QCryptographicHash>
 #include <QCoreApplication>
 #include <QDebug>
+#include <QTimer>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -373,6 +374,27 @@ void BookImporter::indexBook(qint64 bookId) {
         for (const Paragraph &p : c.paragraphs)
             texts.append(p.text);
         se.indexBook(bookId, c.title, texts);
+    }
+}
+
+void BookImporter::backfillMissingIndexes() {
+    if (m_dbPath == QLatin1String(":memory:")) return;
+    m_backfillQueue = m_books->books();
+    QTimer::singleShot(0, this, [this] { backfillNext(); });
+}
+
+// 私有：从队列逐本处理。PDF（无章节模型）与已有索引的书廉价跳过（本 tick 内
+// 连续出队）；遇到缺索引的书则建索引（可能耗时），完成后 singleShot(0) 调度下一
+// 本，让出事件循环——UI 在书与书之间可响应。
+void BookImporter::backfillNext() {
+    while (!m_backfillQueue.isEmpty()) {
+        const Book b = m_backfillQueue.takeFirst();
+        if (b.format == QLatin1String("PDF")) continue;
+        SearchEngine se(m_dbPath);
+        if (se.isBookIndexed(b.id)) continue;
+        indexBook(b.id);
+        QTimer::singleShot(0, this, [this] { backfillNext(); });
+        return;
     }
 }
 

@@ -58,26 +58,40 @@ Page {
                 Layout.fillWidth: true
                 placeholderText: qsTr("搜索书名/作者…")
                 // C8：元数据模式过滤书架网格（Books.doSearch）；全文模式查 FTS5
+                //（防抖：输入停止 250ms 后才搜，避免逐键触发 FTS 查询）
                 onTextChanged: {
                     if (searchMode.currentIndex === 1)
-                        shelf.searchResults = Search.searchAllModel(text)
+                        ftSearchTimer.restart()
                     else
                         Books.doSearch(text)
                 }
             }
 
             // C8：搜索范围切换——元数据（书名/作者，保持原书架过滤）或全文
-            //（全书内容命中，结果列在搜索框下方，点击跳转到对应段落）
+            //（全书内容命中，结果列在搜索框下方，点击跳转到对应段落）。
+            // 进入全文模式时清空网格的元数据过滤（Books.doSearch("")），
+            // 避免残留旧搜索词把网格卡在过滤态。
             ComboBox {
                 id: searchMode
                 Layout.preferredWidth: 96
                 model: [qsTr("元数据"), qsTr("全文")]
                 onActivated: {
                     if (index === 1) {
-                        shelf.searchResults = Search.searchAllModel(searchEdit.text)
+                        Books.doSearch("")
+                        ftSearchTimer.restart()
                     } else {
                         Books.doSearch(searchEdit.text)
                     }
+                }
+            }
+
+            // C8：全文搜索防抖（输入停止 250ms 后执行）
+            Timer {
+                id: ftSearchTimer
+                interval: 250
+                repeat: false
+                onTriggered: {
+                    shelf.searchResults = Search.searchAllModel(searchEdit.text)
                 }
             }
 

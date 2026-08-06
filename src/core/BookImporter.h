@@ -18,6 +18,10 @@ public:
     // C8：为指定书同步建 FTS5 全文索引（解析全书 → SearchEngine 逐章入库）。
     // ":memory:" 库（每连接独立实例）下索引无从共享，直接跳过。
     void indexBook(qint64 bookId);
+    // C8 复审：存量书索引回填——遍历书库，对 fts_content 无行的书建索引
+    // （功能上线前已入库的书没有全文索引）。逐本经事件循环调度（每本索引后
+    // singleShot(0) 让出），UI 在书与书之间保持响应；PDF 无章节模型跳过。
+    void backfillMissingIndexes();
     QVector<Book> books() const;
     // 最近一次导入的非致命错误（如 EPUB 解析失败导致封面回退占位）；成功或
     // 无错误时为空串。致命错误仍由 importFile 的返回值表达。
@@ -30,6 +34,8 @@ signals:
     void imported();
     void importFailed(const QString &message, const QString &fileName);
 private:
+    // 回填队列的逐本处理（经 QTimer::singleShot 调度）
+    void backfillNext();
     static QString coverPathFor(const QString &title, const QString &destDir);
     QString generatePlaceholderCover(const QString &title, const QString &destDir) const;
     // 从 EPUB 提取封面（OPF cover 声明优先，其次 DocumentModel 首个内嵌图片），
@@ -42,4 +48,5 @@ private:
     QString m_dbPath;
     QString m_lastError;
     class BookManager *m_books;
+    QVector<Book> m_backfillQueue;  // 存量书回填队列（逐本出队，空=完成）
 };

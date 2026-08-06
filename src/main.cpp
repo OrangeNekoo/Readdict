@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QFontDatabase>
 #include <QStandardPaths>
+#include <QTimer>
 #include <qqml.h>
 #include "core/BookManager.h"
 #include "core/BookImporter.h"
@@ -94,6 +95,9 @@ int main(int argc, char *argv[]) {
     // C8：FTS5 全文搜索单例（书架全文搜索 + 书内搜索共用；固定连接名同 Highlights 模式）。
     auto *search = new SearchEngine(appData + "/Readdict.db", QStringLiteral("readdict_search"));
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Search", search);
+    // C8 复审：存量书索引回填——功能上线前已入库的书没有全文索引。延迟到事件循环
+    // 起来后逐本执行（书与书之间让出，UI 保持响应），回填失败不影响启动。
+    QTimer::singleShot(0, importer, [importer] { importer->backfillMissingIndexes(); });
     // C7：TextEdit 行距助手（段落改 TextEdit 渲染后 lineHeight 属性不可用，见 ReaderTextHelper.h）
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "ReaderText", new ReaderTextHelper);
     // C5：TTS 控制器按 settings.json 的 tts/ 分区构建引擎（system/openai），

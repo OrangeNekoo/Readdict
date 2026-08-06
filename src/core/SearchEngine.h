@@ -45,6 +45,8 @@ public:
     void indexBook(qint64 bookId, const QString &chapterTitle, const QStringList &paragraphTexts);
     // 清空一书的全部索引并复位其章节游标（整书重建/删除书时调用）
     void removeBook(qint64 bookId);
+    // 该书是否已有索引行（存量书回填检查用；空文档书无行，会被反复重试）
+    bool isBookIndexed(qint64 bookId) const;
     QVector<SearchHit> search(qint64 bookId, const QString &query) const;
     QVector<SearchHit> searchAll(const QString &query) const;
 

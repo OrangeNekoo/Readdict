@@ -304,6 +304,35 @@ private slots:
         QCOMPARE(se.searchAll("魔女").size(), 1);
     }
 
+    // C8 复审：存量书索引回填——功能上线前已入库的书（books 表有、fts_content 无行）
+    // 经 backfillMissingIndexes 逐本补建索引，回填后即可全文搜索。
+    // 书直接经 BookManager 入库（模拟非导入路径的历史书），不触发 importFile 的索引。
+    void backfillIndexesExistingBooks() {
+        QTemporaryDir libDir;
+        const QString dbPath = libDir.path() + "/lib.db";
+        QDir(libDir.path()).mkpath("books");
+        const QString bookPath = libDir.path() + "/books/old.txt";
+        QFile f(bookPath);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("旧书正文，魔女与贤者。\n");
+        f.close();
+        BookManager mgr(dbPath, "readdict_backfill_test");
+        const qint64 id = mgr.addBook(Book{-1, "旧书", "作者", "社", "类",
+                                           "TXT", bookPath, QString(), 0.0});
+        QVERIFY(id > 0);
+        // 回填前：该书无索引行
+        {
+            SearchEngine se(dbPath);
+            QVERIFY(!se.isBookIndexed(id));
+            QVERIFY(se.searchAll("魔女").isEmpty());
+        }
+        BookImporter imp(libDir.path(), dbPath);
+        imp.backfillMissingIndexes();  // 异步逐本：QTRY 驱动事件循环使 singleShot 生效
+        SearchEngine se(dbPath);
+        QTRY_VERIFY_WITH_TIMEOUT(!se.search(id, "魔女").isEmpty(), 5000);
+        QCOMPARE(se.search(id, "魔女")[0].paragraphIndex, 0);
+    }
+
     // C8：真实 EPUB 验证——导入 Re从零… 后，从正文提取实际出现的词断言命中
     void realEpubFulltext() {
         const QString real = qEnvironmentVariable("READDICT_REAL_EPUB");
