@@ -31,7 +31,11 @@ QDateTime parseDavTime(const QString &text)
         if (it != zones.cend())
             s = s.left(sp + 1) + it.value();
     }
-    return QDateTime::fromString(s, Qt::RFC2822Date);
+    QDateTime dt = QDateTime::fromString(s, Qt::RFC2822Date);
+    if (dt.isValid())
+        return dt;
+    // 兜底 RFC3339/ISO8601：部分服务器发 "2026-08-04T00:00:00Z"（含 Z 后缀）
+    return QDateTime::fromString(s, Qt::ISODate);
 }
 
 } // namespace
@@ -114,29 +118,37 @@ QVector<DavEntry> WebDavClient::list()
     }
     m_error.clear();
 
-    // 解析 multistatus（RFC 4918，DAV: 命名空间）：仅收集非空 href 的条目
+    // 解析 multistatus（RFC 4918）：校验 DAV: 命名空间；宽松服务器可能省略命名空间
+    // 声明（namespaceUri() 为空），一并接受——真机联调遇空列表优先排查响应结构
+    auto davElement = [](const QXmlStreamReader &x) {
+        return x.namespaceUri().isEmpty() || x.namespaceUri() == QStringLiteral("DAV:");
+    };
     QXmlStreamReader xml(r->readAll());
     while (!xml.atEnd()) {
         xml.readNext();
-        if (!xml.isStartElement() || xml.namespaceUri() != QStringLiteral("DAV:")
-            || xml.name() != QStringLiteral("response"))
+        if (!xml.isStartElement() || !davElement(xml) || xml.name() != QStringLiteral("response"))
             continue;
         DavEntry e;
+        QString hrefText;
         while (!xml.atEnd()) {
             xml.readNext();
             if (xml.isEndElement() && xml.name() == QStringLiteral("response"))
                 break;
-            if (!xml.isStartElement() || xml.namespaceUri() != QStringLiteral("DAV:"))
+            if (!xml.isStartElement() || !davElement(xml))
                 continue;
-            if (xml.name() == QStringLiteral("href"))
-                e.name = xml.readElementText().section('/', -1);
+            if (xml.name() == QStringLiteral("href")) {
+                hrefText = xml.readElementText();
+                // 先取末段再 percent-decode：%2F 编码的斜杠属于文件名本身（RFC 3986 段内编码）；
+                // Qt 6.11 的 fromPercentEncoding 直接返回 QString，无需再包 fromUtf8
+                e.name = QUrl::fromPercentEncoding(hrefText.section('/', -1).toUtf8());
+            }
             else if (xml.name() == QStringLiteral("getcontentlength"))
                 e.size = xml.readElementText().trimmed().toLongLong();
             else if (xml.name() == QStringLiteral("getlastmodified"))
                 e.modified = parseDavTime(xml.readElementText());
         }
-        // 集合自身的 href（如 /sync/）取 basename 后为空 → 跳过
-        if (!e.name.isEmpty())
+        // 集合自身与子目录（href 尾斜杠）不属于文件：跳过（当前同步模型只同步文件）
+        if (!e.name.isEmpty() && !hrefText.endsWith('/'))
             out.append(e);
     }
     r->deleteLater();
