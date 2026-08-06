@@ -36,6 +36,24 @@ private slots:
         QCOMPARE(row(list, 0)["note"].toString(), QString("新笔记"));
         QCOMPARE(row(list, 0)["text"].toString(), QString("t")); // 仅改 note，其余字段不变
     }
+    // C7 复审：同句重复划线 → 复用行 id 更新颜色，行数不增、文本/笔记不变
+    void updatesColorKeepsRow() {
+        const qint64 id = m_h->addHighlight(1, "ch", 2, "t", "#FFEB3B", "n");
+        m_h->updateColor(id, "#F8BBD0");
+        const auto list = m_h->highlightsForBook(1);
+        QCOMPARE(list.size(), 1);
+        QCOMPARE(row(list, 0)["id"].toLongLong(), id);
+        QCOMPARE(row(list, 0)["color"].toString(), QString("#F8BBD0"));
+        QCOMPARE(row(list, 0)["text"].toString(), QString("t"));
+        QCOMPARE(row(list, 0)["note"].toString(), QString("n"));
+        QCOMPARE(row(list, 0)["sentenceIndex"].toInt(), 2);
+    }
+    void updateColorMissingRowIsNoop() {
+        QSignalSpy spy(m_h.get(), &HighlightManager::highlightsChanged);
+        m_h->updateColor(999999, "#000000"); // 不存在的行：静默返回，不发信号
+        QCOMPARE(spy.count(), 0);
+        QCOMPARE(m_h->highlightsForBook(1).size(), 0);
+    }
     void emitsChangedOnEveryWrite() {
         QSignalSpy spy(m_h.get(), &HighlightManager::highlightsChanged);
         const qint64 id = m_h->addHighlight(1, "ch", 0, "t", "#FFF");

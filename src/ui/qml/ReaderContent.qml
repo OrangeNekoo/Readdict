@@ -55,6 +55,10 @@ Flickable {
     property int selSentenceIndex: -1
     property string selText: ""
     property int selParaIndex: -1
+    // 工具条在**视口**内的目标位置（selBar 是 contentItem 子项，坐标为内容坐标；
+    // 通过 x/y 绑定叠加 contentX/contentY 实现视口固定——滚动后工具条仍可见，见 C7 复审）
+    property real selBarVpX: 0
+    property real selBarVpY: 0
     // 测试/外部可访问的 UI 句柄
     property alias selectionToolbar: selBar
     property alias colorToolbar: colorBar
@@ -156,16 +160,31 @@ Flickable {
     }
 
     // ---- C7：划线查表 ----
-    function rebuildHighlightMap() {
+    // 从划线列表重建 "chapter|sentenceIndex" → 划线 map（供渲染与查重用）
+    function rebuildMapFrom(list) {
         var m = {}
-        var list = flick.highlights ?? []
-        for (var i = 0; i < list.length; i++) {
-            var h = list[i]
+        var rows = list ?? []
+        for (var i = 0; i < rows.length; i++) {
+            var h = rows[i]
             if (!h || h.sentenceIndex === undefined || h.sentenceIndex < 0) continue
             var key = (h.chapter || "") + "|" + h.sentenceIndex
             m[key] = h
         }
         flick.highlightMap = m
+    }
+    function rebuildHighlightMap() {
+        flick.rebuildMapFrom(flick.highlights ?? [])
+    }
+
+    // C7：划线增删改后自刷新查表（ReaderPage 另经 highlights 属性注入并维护笔记列表——
+    // 两者幂等；本组件自持保证脱离 ReaderPage 使用时查重/渲染一致，且不动 highlights
+    // 属性，避免切断 ReaderPage 的绑定）
+    Connections {
+        target: Highlights
+        function onHighlightsChanged(bookId) {
+            if (flick.bookId > 0 && bookId === flick.bookId)
+                flick.rebuildMapFrom(Highlights.highlightsForBook(flick.bookId))
+        }
     }
 
     // 笔记列表跳转：目标句下划线提示 1.6s（滚动由 ReaderPage 调 followSentence 完成）
@@ -175,18 +194,24 @@ Flickable {
     }
 
     // ---- C7：选择工具条 ----
-    // 真实选择路径（Text.onSelectedTextChanged）与测试注入路径共用
+    // 真实选择路径（TextEdit.onSelectedTextChanged）与测试注入路径共用。
+    // 定位：先映射到视口坐标（flick）做可见区钳制（flick.height 为可见高度），
+    // 再换算回内容坐标（selBar 是 Flickable 声明子项 → 挂在 contentItem，坐标为内容坐标，
+    // 与文本一起滚动，滚动后仍在选中句附近且不超出视口）
     function showSelectionToolbar(txt, globalIdx, text) {
         if (globalIdx < 0 || !text) return
         flick.selText = text
         flick.selSentenceIndex = globalIdx
         flick.selParaIndex = flick.paragraphForIndex(globalIdx)
         if (flick.selParaIndex < 0) return
-        var rect = txt.positionToRectangle(txt.selectionStart)
-        var pos = txt.mapToItem(flick.contentItem, rect.x, rect.y)
-        selBar.x = Math.max(0, Math.min(pos.x, flick.width - selBar.width))
-        selBar.y = Math.max(0, Math.min(pos.y - selBar.height - 6,
-                                        Math.max(0, flick.contentHeight - selBar.height)))
+        var pos = Math.max(0, txt.selectionStart)
+        var rect = txt.positionToRectangle(pos)
+        // 映射到视口坐标（flick）并钳制在可见区（flick.height 为可见高度）；
+        // selBar 的 x/y 绑定叠回 content 偏移 → 视口固定，滚动不丢
+        var vp = txt.mapToItem(flick, rect.x, rect.y)
+        flick.selBarVpX = Math.max(0, Math.min(vp.x, flick.width - selBar.width))
+        flick.selBarVpY = Math.max(0, Math.min(vp.y - selBar.height - 6,
+                                               flick.height - selBar.height))
         selBar.visible = true
         colorBar.visible = false
     }
@@ -206,13 +231,27 @@ Flickable {
         flick.hideSelectionToolbar()
     }
 
-    // 划线：以所选句 (bookId, chapterTitle, sentenceIndex, text, color) 落库；
+    // 划线色板显隐：位置由 x/y 绑定跟随工具条（同一视口固定帧，滚动时同步）
+    function toggleColorBar() {
+        if (colorBar.visible)
+            colorBar.visible = false
+        else
+            colorBar.visible = true
+    }
+
+    // 划线：命中已划线句 → 复用其行 id 更新颜色（不产生重复行）；
+    // 否则以 (bookId, chapterTitle, sentenceIndex, text, color) 落库。
     // Highlights.highlightsChanged → ReaderPage.reloadHighlights → 本组件 highlights
     // 更新 → rebuildHighlightMap → 逐句重渲染（绑定依赖 flick.highlightMap）
     function doAddHighlight(color) {
         if (flick.bookId <= 0 || flick.selSentenceIndex < 0 || !flick.selText) return
-        Highlights.addHighlight(flick.bookId, flick.chapter.title,
-                                flick.selSentenceIndex, flick.selText, color)
+        var key = (flick.chapter.title || "") + "|" + flick.selSentenceIndex
+        var mk = flick.highlightMap[key]
+        if (mk && mk.id > 0)
+            Highlights.updateColor(mk.id, color)
+        else
+            Highlights.addHighlight(flick.bookId, flick.chapter.title,
+                                    flick.selSentenceIndex, flick.selText, color)
         flick.clearSelection()
     }
 
@@ -228,19 +267,13 @@ Flickable {
         noteDlg.open()
     }
 
-    // 测试注入路径：无真实鼠标选择时模拟"选择了全局句 globalIdx 的 text"
+    // 测试注入路径：模拟"选择了全局句 globalIdx 的 text"，走真实定位逻辑
     function simulateSelection(globalIdx, text) {
         var pi = flick.paragraphForIndex(globalIdx)
         if (pi < 0) return
         var it = rep.itemAt(pi)
         if (!it) return
-        flick.selText = text
-        flick.selSentenceIndex = globalIdx
-        flick.selParaIndex = pi
-        selBar.x = 8
-        selBar.y = 8
-        selBar.visible = true
-        colorBar.visible = false
+        flick.showSelectionToolbar(it.children[0], globalIdx, text)
     }
 
     // C5：朗读游标/换章（setSentences 复位游标 0）驱动高亮与滚动
@@ -434,6 +467,9 @@ Flickable {
     Rectangle {
         id: selBar
         visible: false
+        // 视口固定：内容坐标 = 视口目标 + 滚动偏移（contentX 恒为 0，公式保留一般性）
+        x: flick.contentX + flick.selBarVpX
+        y: flick.contentY + flick.selBarVpY
         width: 166   // 3 按钮 × 52 + 间距（Rectangle 不随子项自动撑宽）
         height: 34
         radius: 6
@@ -469,7 +505,7 @@ Flickable {
             }
             SelBtn {
                 lbl: qsTr("划线")
-                onClicked: colorBar.visible = !colorBar.visible
+                onClicked: flick.toggleColorBar()
             }
             SelBtn {
                 lbl: qsTr("笔记")
@@ -482,6 +518,10 @@ Flickable {
     Rectangle {
         id: colorBar
         visible: false
+        // 跟随工具条下方（工具条视口固定 → 色板同样视口固定），不超出视口底边
+        x: Math.max(0, Math.min(selBar.x, flick.width - colorBar.width))
+        y: Math.min(selBar.y + selBar.height + 4,
+                    flick.contentY + flick.height - colorBar.height)
         width: 92    // 3 色块 × 20 + 间距 + 内边距
         height: 32
         radius: 6

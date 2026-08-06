@@ -14,6 +14,8 @@ public:
                                     const QString &text, const QString &color, const QString &note = {});
     Q_INVOKABLE void removeHighlight(qint64 id);
     Q_INVOKABLE void updateNote(qint64 id, const QString &note);
+    // C7 复审：同句重复划线 → 复用行 id 更新颜色（不产生重复行）
+    Q_INVOKABLE void updateColor(qint64 id, const QString &color);
     Q_INVOKABLE QVariantList highlightsForBook(qint64 bookId) const;
 signals:
     void highlightsChanged(qint64 bookId);

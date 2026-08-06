@@ -32,6 +32,17 @@ Item {
         return { title: "章", paragraphs: paras }
     }
 
+    // 30 段 × 2 句：内容高度远大于视口，供工具条滚动定位测试
+    function makeTallChapter() {
+        var paras = []
+        for (var i = 0; i < 30; i++)
+            paras.push({ text: "第" + i + "段第一句。第二句！",
+                         html: "第" + i + "段第一句。第二句！",
+                         level: 0, imagePath: "",
+                         sentences: ["第" + i + "段第一句。", "第二句！"] })
+        return { title: "章", paragraphs: paras }
+    }
+
     TestCase {
         name: "HighlightBackend"
         // 独立 bookId（900x）防与其他用例互相污染
@@ -222,6 +233,79 @@ Item {
                    "划线应落库（章节/句索引/颜色），实际 " + JSON.stringify(list))
             compare(list[0].chapter, "章")
             verify(!c.selectionToolbar.visible, "划线后工具条应收起")
+            loader.destroy()
+        }
+        // C7 复审：工具条视口固定——滚动后仍应在可见区内（selBar 是 contentItem 子项，
+        // x/y 绑定叠加 contentY 实现视口固定）
+        function test_toolbarStaysInViewportAfterScroll() {
+            var loader = contentComp.createObject(root)
+            loader.width = 800; loader.height = 600
+            var c = loader.item
+            c.typography = { fontFamily: "Source Han Sans VF", fontSize: 18, lineHeight: 1.6,
+                             align: "left", pageWidth: "normal" }
+            c.chapter = root.makeTallChapter()
+            wait(50)
+            c.contentY = 0
+            c.simulateSelection(2, "第1段第一句。")
+            verify(c.selectionToolbar.visible, "选择后工具条应出现")
+            var tb = c.selectionToolbar
+            var vy0 = tb.y - c.contentY
+            verify(vy0 >= 0 && vy0 <= c.height - tb.height,
+                   "工具条应位于视口内（vy0=" + vy0 + "）")
+            c.contentY = 150
+            wait(50)
+            var vy1 = tb.y - c.contentY
+            verify(vy1 >= 0 && vy1 <= c.height - tb.height,
+                   "滚动后工具条应仍在视口内（y=" + tb.y + ", contentY=" + c.contentY + "）")
+            verify(Math.abs(vy1 - vy0) < 2,
+                   "工具条应固定在视口内位置（vy0=" + vy0 + ", vy1=" + vy1 + "）")
+            loader.destroy()
+        }
+        // C7 复审：划线色板展开在工具条正下方（视口固定同步），再点收起
+        function test_colorBarPositionedUnderToolbar() {
+            var loader = contentComp.createObject(root)
+            loader.width = 800; loader.height = 600
+            var c = loader.item
+            c.typography = { fontFamily: "Source Han Sans VF", fontSize: 18, lineHeight: 1.6,
+                             align: "left", pageWidth: "normal" }
+            c.chapter = root.makeTallChapter()
+            wait(50)
+            c.contentY = 0
+            c.simulateSelection(2, "第1段第一句。")
+            c.toggleColorBar()
+            verify(c.colorToolbar.visible, "点划线后色板应展开")
+            var cb = c.colorToolbar
+            verify(Math.abs(cb.x - c.selectionToolbar.x) < 2,
+                   "色板 x 应对齐工具条（cb.x=" + cb.x + ", selBar.x=" + c.selectionToolbar.x + "）")
+            verify(cb.y >= c.selectionToolbar.y + c.selectionToolbar.height
+                   && cb.y - c.contentY <= c.height - cb.height,
+                   "色板应位于工具条下方且在视口内（cb.y=" + cb.y + "）")
+            c.toggleColorBar()
+            verify(!c.colorToolbar.visible, "再点划线应收起色板")
+            loader.destroy()
+        }
+        // C7 复审：同句重复划线 → 复用行 id 更新颜色，不产生重复行
+        function test_duplicateHighlightUpdatesColor() {
+            var loader = contentComp.createObject(root)
+            loader.width = 800; loader.height = 600
+            var c = loader.item
+            c.typography = { fontFamily: "Source Han Sans VF", fontSize: 18, lineHeight: 1.6,
+                             align: "left", pageWidth: "normal" }
+            c.chapter = root.makeChapter()
+            c.bookId = 9005
+            wait(50)
+            c.simulateSelection(2, "第1段第一句。")
+            c.doAddHighlight("#FFEB3B")
+            var list1 = Highlights.highlightsForBook(9005)
+            compare(list1.length, 1)
+            // 同句再划另一色 → updateColor 复用行
+            c.simulateSelection(2, "第1段第一句。")
+            c.doAddHighlight("#F8BBD0")
+            var list2 = Highlights.highlightsForBook(9005)
+            compare(list2.length, 1, "同句重复划线不应产生重复行")
+            compare(list2[0].id, list1[0].id, "应复用原行 id")
+            compare(list2[0].color, "#F8BBD0", "颜色应更新为第二次选择")
+            Highlights.removeHighlight(list2[0].id)
             loader.destroy()
         }
         // 笔记入口：无划线 → 先建默认色划线，Dialog 填 note → accept → updateNote

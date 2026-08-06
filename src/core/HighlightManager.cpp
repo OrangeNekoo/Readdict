@@ -79,6 +79,29 @@ void HighlightManager::updateNote(qint64 id, const QString &note) {
     emit highlightsChanged(bookId);
 }
 
+void HighlightManager::updateColor(qint64 id, const QString &color) {
+    // 与 updateNote 同模式：先取 book_id 供信号携带，查不到行则无变化静默返回
+    QSqlQuery sel(m_db);
+    sel.prepare("SELECT book_id FROM highlights WHERE id=?");
+    sel.addBindValue(id);
+    if (!sel.exec()) {
+        qWarning() << "updateColor: 查询划线失败:" << sel.lastError().text();
+        return;
+    }
+    if (!sel.next()) // 行不存在：无变化，静默返回
+        return;
+    const qint64 bookId = sel.value(0).toLongLong();
+    QSqlQuery upd(m_db);
+    upd.prepare("UPDATE highlights SET color=? WHERE id=?");
+    upd.addBindValue(color);
+    upd.addBindValue(id);
+    if (!upd.exec()) {
+        qWarning() << "updateColor:" << upd.lastError().text();
+        return;
+    }
+    emit highlightsChanged(bookId);
+}
+
 QVariantList HighlightManager::highlightsForBook(qint64 bookId) const {
     QVariantList out;
     QSqlQuery q(m_db);
