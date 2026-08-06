@@ -229,3 +229,9 @@ qt_add_resources(tst_qml "qml_ui"
         ../src/ui/qml/PdfReaderPage.qml
 )
 add_test(NAME tst_qml COMMAND tst_qml)
+
+# D1：WebDAV 协议客户端（自实现 PROPFIND/MKCOL/PUT/GET/DELETE，本地 QTcpServer mock）
+qt_add_executable(tst_webdav tst_webdav.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/sync/WebDavClient.cpp)
+target_include_directories(tst_webdav PRIVATE ../src ../src/sync)
+target_link_libraries(tst_webdav PRIVATE Qt6::Test Qt6::Network)
+add_test(NAME tst_webdav COMMAND tst_webdav)
