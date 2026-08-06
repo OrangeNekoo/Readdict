@@ -187,6 +187,12 @@ Item {
             c.chapter = { title: "章", paragraphs: [
                 { text: "第一行文字。\n第二行文字。\n第三行文字。",
                   html: "第一行文字。<br/>第二行文字。<br/>第三行文字。",
+                  level: 0, imagePath: "", sentences: [] },
+                // 多块文档且**末块**为非默认块格式（居中）——applyLineSpacing 若以
+                // 末段 blockFormat 为 merge 基础会把居中对齐污染到前一默认块，
+                // 序列化后 align="center" 出现 2 次；修复后应保持 1 次（只改行距）
+                { text: "默认对齐块。居中块粗体。",
+                  html: "<p>默认对齐块。</p><p align=\"center\">居中块<b>粗体</b>。</p>",
                   level: 0, imagePath: "", sentences: [] }
             ]}
             tryVerify(function () {
@@ -199,6 +205,18 @@ Item {
                 var h2 = c.paragraphRepeater.itemAt(0).children[0].implicitHeight
                 return h2 > h1 * 1.5
             }, 3000, "行距 2.5 应明显高于 1.0（h1=" + h1 + "）")
+            // C7 复审：行距 merge 不得覆盖各块自身块格式——居中块的对齐保持，
+            // 默认块不被末块格式污染（align="center" 序列化应恰出现 1 次）
+            tryVerify(function () { return c.paragraphRepeater.itemAt(1) !== null }, 2000,
+                      "多块段落应完成布局")
+            var t1 = c.paragraphRepeater.itemAt(1).children[0].text
+            var centers = t1.split('align="center"').length - 1
+            compare(centers, 1,
+                    "行距应用后仅居中块保持对齐（默认块不被污染），实际 align=\"center\" 出现 "
+                    + centers + " 次：\n" + t1)
+            var t0 = c.paragraphRepeater.itemAt(0).children[0].text
+            verify(t0.split('align="center"').length - 1 === 0,
+                   "默认段不应被任何块格式污染：\n" + t0)
             loader.destroy()
         }
     }
