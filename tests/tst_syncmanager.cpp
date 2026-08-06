@@ -19,6 +19,7 @@
 #include <QRegularExpression>
 #include "SyncManager.h"
 #include "core/DatabaseManager.h"
+#include "core/HighlightManager.h"
 
 // ---- 远端 mock：内存文件表 + 可控 mtime，记录调用 ----
 class MockWebDavClient : public WebDavClient {
@@ -232,6 +233,9 @@ private slots:
         QCOMPARE(first["bookId"].toVariant().toLongLong(), 1);
         QCOMPARE(first["text"].toString(), QString("高亮文本"));
         QVERIFY(first.contains("chapter") && first.contains("sentenceIndex"));
+        // 复审：createdAt UTC 归一化（本地无时区串 → UTC 瞬时，跨设备时区不偏移）
+        QCOMPARE(first["createdAt"].toString(),
+                 QDateTime::fromString("2026-01-01T00:00:00", Qt::ISODate).toUTC().toString(Qt::ISODate));
 
         // 重放全量：四元组全重复 → 零插入
         m.applyHighlightsJson(m.buildHighlightsJson());
@@ -458,18 +462,62 @@ private slots:
         QVERIFY(f.write("{\"theme\":{\"mode\":\"dark\"}}") > 0);
         f.close();
         MockWebDavClient mock;
-        const QByteArray remotePayload = "{\"theme\":{\"mode\":\"dark\"}}";
-        mock.files["settings.json"] = remotePayload;
-        // 远端 mtime = 本地文件 mtime 截断到秒（getlastmodified 秒级，同秒视为同一版本）
+        // 内容不同（否则走内容相等分支），但远端 mtime = 本地文件 mtime 截断到秒
+        mock.files["settings.json"] = "{\"theme\":{\"mode\":\"light\"}}";
         mock.mtimes["settings.json"] = QDateTime::fromSecsSinceEpoch(
             QFileInfo(dir.filePath("settings.json")).lastModified().toSecsSinceEpoch());
         SyncManager m(dir.filePath("Readdict.db"), dir.path());
         SyncManager::Options o; o.settings = true; o.progress = false;
         o.highlights = false; o.books = false;
         m.sync(mock, o);
+        QVERIFY(m.log().join('\n').contains("跳过 settings.json")); // mtime 同秒 → Skip
+        QCOMPARE(mock.getNames, QStringList({"settings.json"}));    // 一次内容 GET
+        QVERIFY(mock.putNames.isEmpty());                           // 未上传
+        QCOMPARE(mock.files["settings.json"], QByteArray("{\"theme\":{\"mode\":\"light\"}}"));
+    }
+
+    // ---- 补充：sync 流程——settings 上传后内容趋同 → 下次同步 Skip（收敛） ----
+    void syncFlowSettingsConvergesAfterUpload() {
+        QTemporaryDir dir;
+        QFile f(dir.filePath("settings.json"));
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        QVERIFY(f.write("{\"theme\":{\"mode\":\"dark\"}}") > 0);
+        f.close();
+        MockWebDavClient mock;
+        mock.files["settings.json"] = "{\"typography\":{\"fontSize\":20}}"; // 内容不同
+        mock.mtimes["settings.json"] = QDateTime(QDate(2026, 1, 1), QTime(0, 0, 0), QTimeZone::UTC);
+        SyncManager m(dir.filePath("Readdict.db"), dir.path());
+        SyncManager::Options o; o.settings = true; o.progress = false;
+        o.highlights = false; o.books = false;
+        // #1：内容不同 → mtime 本地(截断 now) > 2026-01-01 → KeepLocal 上传
+        m.sync(mock, o);
+        QVERIFY(m.log().join('\n').contains("保留本地 settings.json"));
+        const QJsonObject up = QJsonDocument::fromJson(mock.files["settings.json"]).object();
+        QCOMPARE(up["theme"].toObject()["mode"].toString(), QString("dark"));
+        QCOMPARE(mock.putNames.size(), 1);
+        // #2：内容一致（本地已上传内容 == 远端）→ 内容相等分支直接 Skip，
+        // 不再因"服务器盖章新 mtime"而交替往返
+        m.sync(mock, o);
         QVERIFY(m.log().join('\n').contains("跳过 settings.json"));
-        QVERIFY(mock.getNames.isEmpty());                     // settings 不比载荷，无 GET
-        QCOMPARE(mock.files["settings.json"], remotePayload); // 未被覆盖上传
+        QCOMPARE(mock.putNames.size(), 1); // 未再上传
+    }
+
+    // ---- 补充：applySettingsJson 内容无差异不写盘（保留 mtime） ----
+    void applySettingsNoopPreservesMtime() {
+        QTemporaryDir dir;
+        QFile f(dir.filePath("settings.json"));
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        QVERIFY(f.write("{\"theme\":{\"mode\":\"dark\"}}") > 0);
+        f.close();
+        SyncManager m(dir.filePath("Readdict.db"), dir.path());
+        const QString path = dir.filePath("settings.json");
+        const QDateTime before = QFileInfo(path).lastModified();
+        QTest::qWait(1100); // 确保跨秒：若发生重写 mtime 必然前移
+        m.applySettingsJson("{\"theme\":{\"mode\":\"dark\"}}"); // 内容一致 → 不写
+        QCOMPARE(QFileInfo(path).lastModified(), before);
+        // 内容不同 → 仍写
+        m.applySettingsJson("{\"typography\":{\"fontSize\":20}}");
+        QVERIFY(QFileInfo(path).lastModified() >= before);
     }
 
     // ---- 补充：sync 流程——本地 settings.json 损坏 → 跳过且不覆盖远端 ----
@@ -533,6 +581,11 @@ private slots:
         const QString joined = m.log().join('\n');
         QVERIFY(joined.contains("上传书籍 b1_a.epub"));
         QVERIFY(joined.contains("下载书籍 b2_r.epub"));
+        // 复审：addedAt UTC 归一化（跨设备时区不偏移）
+        const QJsonArray meta = QJsonDocument::fromJson(m.buildBooksJson())
+                                    .object()["books"].toArray();
+        QCOMPARE(meta.first().toObject()["addedAt"].toString(),
+                 QDateTime::fromString("2026-01-01T00:00:00", Qt::ISODate).toUTC().toString(Qt::ISODate));
         // applyBooksJson：本地无 book 2 → 不建书（建书属导入流程）；有 book 1 → 元数据可更新
         m.applyBooksJson("{\"books\":[{\"id\":1,\"title\":\"远程标题\",\"author\":\"A\",\"publisher\":\"P\","
                          "\"category\":\"C\",\"format\":\"EPUB\",\"path\":\"books/a.epub\",\"cover\":\"cov\"}]}");
@@ -586,6 +639,74 @@ private slots:
         m.sync(mock, o);
         QVERIFY(m.log().join('\n').contains("失败 progress.json"));
         QCOMPARE(progressOf(db, 1).toDouble(), 0.5); // 未应用远端
+    }
+
+    // ---- 补充：highlights note/color 修改经 sync 传播（版本时钟感知编辑） ----
+    void highlightsNotePropagatesViaSync() {
+        QTemporaryDir dirA, dirB;
+        const QString dbA = dirA.filePath("a.db"), dbB = dirB.filePath("b.db");
+        const QString seed = "INSERT INTO highlights(id,book_id,chapter,sentence_index,text,"
+                             "color,note,created_at) VALUES(1,1,'ch',3,'text','#FFF','',"
+                             "'2026-01-01T00:00:00')";
+        {
+            QSqlDatabase a = seedDb(dbA);
+            QSqlQuery qa(a);
+            QVERIFY2(qa.exec(seed), qPrintable(qa.lastError().text()));
+        }
+        {
+            QSqlDatabase b = seedDb(dbB);
+            QSqlQuery qb(b);
+            QVERIFY2(qb.exec(seed), qPrintable(qb.lastError().text()));
+        }
+        // A 改笔记：updateNote bump created_at → 版本时钟（MAX(created_at)）感知编辑。
+        // qWait 1.1s：让 A 的 bump 与 B 稍后的合并严格跨秒，B 的再同步判定确定（KeepLocal）
+        HighlightManager hmA(dbA, "readdict_hl_a");
+        hmA.updateNote(1, "新笔记");
+        QTest::qWait(1100);
+        MockWebDavClient mock;
+        SyncManager mA(dbA, dirA.path());
+        SyncManager::Options o; o.settings = false; o.progress = false;
+        o.highlights = true; o.books = false;
+        mA.sync(mock, o); // 远端空 → 上传（载荷带新笔记 + 更新的 createdAt）
+        QVERIFY(mock.files.contains("highlights.json"));
+        QVERIFY(QString::fromUtf8(mock.files["highlights.json"]).contains("新笔记"));
+        // B 同步 #1 → 内容版本：远端 max createdAt(A 的 bump) > B 本地 2026-01-01 → TakeRemote 合并
+        SyncManager mB(dbB, dirB.path(), "readdict_sync_b");
+        mB.sync(mock, o);
+        HighlightManager hmB(dbB, "readdict_hl_b");
+        const QVariantList list = hmB.highlightsForBook(1);
+        QCOMPARE(list.size(), 1);
+        QCOMPARE(list.first().toMap()["note"].toString(), QString("新笔记")); // 笔记已传播
+        // B 同步 #2：合并已 bump 本地 createdAt → 本地版本(A 之后) > 远端 → KeepLocal 重传
+        const int n2 = mB.log().size();
+        mB.sync(mock, o);
+        QVERIFY(mB.log().mid(n2).join('\n').contains("保留本地 highlights.json"));
+        // B 同步 #3：两端版本一致 → Skip（收敛，不再下载）
+        const int n3 = mB.log().size();
+        mB.sync(mock, o);
+        QVERIFY(mB.log().mid(n3).join('\n').contains("跳过 highlights.json"));
+    }
+
+    // ---- 补充：NULL 章/句索引序列化保留 + 去重不失效 ----
+    void highlightsNullFieldsRoundtrip() {
+        QTemporaryDir dir;
+        const QString db = dir.filePath("t.db");
+        {
+            QSqlDatabase seed = seedDb(db);
+            QSqlQuery q(seed);
+            // NULL chapter + NULL sentence_index（C7 允许的外部写入形态）
+            QVERIFY2(q.exec("INSERT INTO highlights(id,book_id,chapter,sentence_index,text,color,"
+                            "note,created_at) VALUES(1,1,NULL,NULL,'t','#FFF','','2026-01-01T00:00:00')"),
+                     qPrintable(q.lastError().text()));
+        }
+        SyncManager m(db, dir.path());
+        const QJsonObject first = QJsonDocument::fromJson(m.buildHighlightsJson())
+                                      .object()["highlights"].toArray().first().toObject();
+        QVERIFY(first["chapter"].isNull());       // JSON null，不压平为 ""
+        QVERIFY(first["sentenceIndex"].isNull()); // JSON null，不压平为 0
+        // 重放：NULL 元组正确匹配本地 NULL 行 → 不重复插入
+        m.applyHighlightsJson(m.buildHighlightsJson());
+        QCOMPARE(countRows(db, "highlights"), 1);
     }
 };
 QTEST_MAIN(TestSync)

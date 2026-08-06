@@ -69,8 +69,11 @@ void HighlightManager::updateNote(qint64 id, const QString &note) {
         return;
     const qint64 bookId = sel.value(0).toLongLong();
     QSqlQuery upd(m_db);
-    upd.prepare("UPDATE highlights SET note=? WHERE id=?");
+    // D2 复审：created_at 兼作"最后变更时刻"（同步版本时钟取 MAX(created_at)）——
+    // 纯 note 编辑必须 bump，否则两端版本不变、sync 恒 Skip，修改永不传播
+    upd.prepare("UPDATE highlights SET note=?, created_at=? WHERE id=?");
     upd.addBindValue(note);
+    upd.addBindValue(QDateTime::currentDateTime().toString(Qt::ISODate));
     upd.addBindValue(id);
     if (!upd.exec()) {
         qWarning() << "updateNote:" << upd.lastError().text();
@@ -92,8 +95,10 @@ void HighlightManager::updateColor(qint64 id, const QString &color) {
         return;
     const qint64 bookId = sel.value(0).toLongLong();
     QSqlQuery upd(m_db);
-    upd.prepare("UPDATE highlights SET color=? WHERE id=?");
+    // D2 复审：同 updateNote——颜色编辑也 bump created_at，同步版本时钟才能感知
+    upd.prepare("UPDATE highlights SET color=?, created_at=? WHERE id=?");
     upd.addBindValue(color);
+    upd.addBindValue(QDateTime::currentDateTime().toString(Qt::ISODate));
     upd.addBindValue(id);
     if (!upd.exec()) {
         qWarning() << "updateColor:" << upd.lastError().text();

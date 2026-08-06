@@ -46,7 +46,8 @@ private:
     void log(const QString &line);                       // 时间 + 动作 + 文件名
     QString settingsPath() const;                        // db 同目录 settings.json
     QVector<QPair<qint64, double>> progressPairs() const; // books 表 progress>0 的书
-    // 通用单项同步：按 远端有无 × 本地有无 分派；两边都有时按版本比较裁决。
+    // 通用单项同步：按 远端有无 × 本地有无 分派；两边都有时先做内容相等检查
+    // （sameAsLocal，settings 用：内容一致即 Skip，mtime 时钟不再导致循环），再按版本比较裁决。
     // remoteVersionOf（内容类项目 progress/highlights/books）：从远端载荷提取内容版本
     // （max ts），与本地内容版本比较——同钟收敛（Skip 可达、不重复下载）；settings 缺省
     // 用 DavEntry::modified（文件 mtime，本地侧截断到秒级对齐，见 sync()）。
@@ -54,7 +55,8 @@ private:
                  const std::function<QByteArray()> &build,
                  const std::function<void(const QByteArray &)> &apply,
                  const QDateTime &localVersion, bool hasLocalData,
-                 const std::function<QDateTime(const QByteArray &)> &remoteVersionOf = {});
+                 const std::function<QDateTime(const QByteArray &)> &remoteVersionOf = {},
+                 const std::function<bool(const QByteArray &)> &sameAsLocal = {});
     void syncBookBodies(WebDavClient &client, const QVector<DavEntry> &remote);
     QString m_dbPath, m_libraryDir;
     QSqlDatabase m_db;
