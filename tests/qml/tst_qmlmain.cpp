@@ -16,8 +16,10 @@
 
 #include "core/BookImporter.h"
 #include "core/BookManager.h"
+#include "core/HighlightManager.h"
 #include "core/SettingsStore.h"
 #include "tts/TtsController.h"
+#include "ui/ReaderTextHelper.h"
 
 // 仅测试进程可见：在临时目录预生成 TXT 源书，QML 侧经 Importer.doImport 导入。
 class TestEnv : public QObject {
@@ -100,6 +102,11 @@ int main(int argc, char *argv[]) {
     // C5：Tts 单例（无引擎桩——测试不发声；engineAvailable=false 用于断言
     // TtsBar 禁用播放；seekTo/setSentences 仍驱动 QML 高亮游标）
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Tts", new TtsController);
+    // C7：Highlights 单例（独立连接名，与生产 main.cpp 对齐）——划线数据流测试经真实 SQLite
+    qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Highlights",
+                                 new HighlightManager(appData + "/t.db", QStringLiteral("readdict_highlights")));
+    // C7：TextEdit 行距助手（同生产 main.cpp）
+    qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "ReaderText", new ReaderTextHelper);
     qmlRegisterSingletonInstance("Readdict.Test", 1, 0, "TestEnv", new TestEnv(appData));
     return quick_test_main(argc, argv, "tst_qml", QUICK_TEST_SOURCE_DIR);
 }

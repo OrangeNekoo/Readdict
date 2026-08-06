@@ -11,8 +11,10 @@
 #include <qqml.h>
 #include "core/BookManager.h"
 #include "core/BookImporter.h"
+#include "core/HighlightManager.h"
 #include "core/SettingsStore.h"
 #include "tts/TtsController.h"
+#include "ui/ReaderTextHelper.h"
 
 // B8：加载 fronts/ 下的可变字体（思源黑体 VF / 思源宋体 VF / 得意黑）。
 // 开发期从仓库根 fronts/ 相对当前工作目录加载（构建目录启动时 CWD 为仓库根），
@@ -84,6 +86,12 @@ int main(int argc, char *argv[]) {
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Settings", settings);
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Books", books);
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Importer", importer);
+    // C7：划线/笔记单例。独立连接名 readdict_highlights（C6 支持注入），避免与
+    // Books 单例的 readdict_main 重名（同名 addDatabase 会移除旧连接，见 DatabaseManager.h）。
+    auto *highlights = new HighlightManager(appData + "/Readdict.db", QStringLiteral("readdict_highlights"));
+    qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Highlights", highlights);
+    // C7：TextEdit 行距助手（段落改 TextEdit 渲染后 lineHeight 属性不可用，见 ReaderTextHelper.h）
+    qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "ReaderText", new ReaderTextHelper);
     // C5：TTS 控制器按 settings.json 的 tts/ 分区构建引擎（system/openai），
     // reconfigure 由设置页在保存后再次调用以热切换引擎。
     auto *tts = new TtsController;

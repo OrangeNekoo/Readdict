@@ -1,19 +1,20 @@
 #pragma once
 #include <QObject>
 #include <QSqlDatabase>
-#include <QVector>
-
-struct Highlight { qint64 id=-1, bookId=0; QString chapter, text, color, note; int sentenceIndex=-1; };
+#include <QVariantList>
+#include <QVariantMap>
 
 class HighlightManager : public QObject {
     Q_OBJECT
 public:
     explicit HighlightManager(const QString &dbPath, const QString &connection = {}, QObject *parent = nullptr);
-    qint64 addHighlight(qint64 bookId, const QString &chapter, int sentenceIndex,
-                        const QString &text, const QString &color, const QString &note = {});
-    void removeHighlight(qint64 id);
-    void updateNote(qint64 id, const QString &note);
-    QVector<Highlight> highlightsForBook(qint64 bookId) const;
+    // C7：全部 Q_INVOKABLE 供 QML 直接调用；highlightsForBook 返回 QVariantList<QVariantMap>
+    // （键 id/bookId/chapter/sentenceIndex/text/color/note），QML 侧按 map 字段读取。
+    Q_INVOKABLE qint64 addHighlight(qint64 bookId, const QString &chapter, int sentenceIndex,
+                                    const QString &text, const QString &color, const QString &note = {});
+    Q_INVOKABLE void removeHighlight(qint64 id);
+    Q_INVOKABLE void updateNote(qint64 id, const QString &note);
+    Q_INVOKABLE QVariantList highlightsForBook(qint64 bookId) const;
 signals:
     void highlightsChanged(qint64 bookId);
 private:

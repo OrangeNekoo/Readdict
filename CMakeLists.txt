@@ -35,6 +35,7 @@ qt_add_executable(Readdict
     src/core/BookManager.cpp
     src/core/SettingsStore.cpp
     src/core/BookImporter.cpp
+    src/core/HighlightManager.cpp
     src/parsers/SentenceSplitter.cpp
     src/parsers/TextParser.cpp
     src/parsers/EpubParser.cpp
@@ -48,6 +49,8 @@ qt_add_executable(Readdict
     src/tts/TtsController.cpp
     src/tts/TtsController.h
     src/tts/TTSEngine.h
+    src/ui/ReaderTextHelper.cpp
+    src/ui/ReaderTextHelper.h
 )
 qt_add_qml_module(Readdict
     URI Readdict

@@ -9,12 +9,19 @@ class TestHighlights : public QObject {
 private slots:
     // QWARN duplicate connection name 'readdict_main' 已知良性（A3 同因），未改 DatabaseManager
     void init() { m_h.reset(new HighlightManager(":memory:")); }
+    // C7：highlightsForBook 返回 QVariantList<QVariantMap>（QML 友好），字段键与 QML 侧一致
+    static QVariantMap row(const QVariantList &list, int i) { return list.at(i).toMap(); }
     void addsAndLists() {
         m_h->addHighlight(1, "第一章", 3, "这是高亮文本", "#FFD54F", "笔记内容");
         const auto list = m_h->highlightsForBook(1);
         QCOMPARE(list.size(), 1);
-        QCOMPARE(list[0].text, QString("这是高亮文本"));
-        QCOMPARE(list[0].note, QString("笔记内容"));
+        QCOMPARE(row(list, 0)["text"].toString(), QString("这是高亮文本"));
+        QCOMPARE(row(list, 0)["note"].toString(), QString("笔记内容"));
+        QCOMPARE(row(list, 0)["sentenceIndex"].toInt(), 3);
+        QCOMPARE(row(list, 0)["chapter"].toString(), QString("第一章"));
+        QCOMPARE(row(list, 0)["color"].toString(), QString("#FFD54F"));
+        QVERIFY(row(list, 0)["id"].toLongLong() > 0);
+        QCOMPARE(row(list, 0)["bookId"].toLongLong(), 1);
     }
     void removes() {
         const qint64 id = m_h->addHighlight(1, "ch", 0, "t", "#FFF", "");
@@ -26,8 +33,8 @@ private slots:
         m_h->updateNote(id, "新笔记");
         const auto list = m_h->highlightsForBook(1);
         QCOMPARE(list.size(), 1);
-        QCOMPARE(list[0].note, QString("新笔记"));
-        QCOMPARE(list[0].text, QString("t")); // 仅改 note，其余字段不变
+        QCOMPARE(row(list, 0)["note"].toString(), QString("新笔记"));
+        QCOMPARE(row(list, 0)["text"].toString(), QString("t")); // 仅改 note，其余字段不变
     }
     void emitsChangedOnEveryWrite() {
         QSignalSpy spy(m_h.get(), &HighlightManager::highlightsChanged);
@@ -44,7 +51,7 @@ private slots:
         m_h->addHighlight(2, "ch", 1, "b", "#FF0", "");
         const auto list = m_h->highlightsForBook(1);
         QCOMPARE(list.size(), 1);
-        QCOMPARE(list[0].text, QString("a"));
+        QCOMPARE(row(list, 0)["text"].toString(), QString("a"));
         QCOMPARE(m_h->highlightsForBook(2).size(), 1);
     }
     // 二轮复审：连接名注入分支此前无测试覆盖（死代码）；显式连接名做基础 CRUD，
@@ -55,7 +62,7 @@ private slots:
         const qint64 id = h.addHighlight(1, "ch", 0, "t", "#FFF", "n");
         QVERIFY(id > 0);
         h.updateNote(id, "n2");
-        QCOMPARE(h.highlightsForBook(1)[0].note, QString("n2"));
+        QCOMPARE(row(h.highlightsForBook(1), 0)["note"].toString(), QString("n2"));
         h.removeHighlight(id);
         QCOMPARE(h.highlightsForBook(1).size(), 0);
         QCOMPARE(spy.count(), 3);
@@ -69,8 +76,8 @@ private slots:
                        " VALUES(1,'ch',NULL,'t','#FFF','',datetime('now'))"));
         const auto list = h.highlightsForBook(1);
         QCOMPARE(list.size(), 1);
-        QCOMPARE(list[0].sentenceIndex, -1);
-        QCOMPARE(list[0].text, QString("t"));
+        QCOMPARE(row(list, 0)["sentenceIndex"].toInt(), -1);
+        QCOMPARE(row(list, 0)["text"].toString(), QString("t"));
     }
 private:
     std::unique_ptr<HighlightManager> m_h;

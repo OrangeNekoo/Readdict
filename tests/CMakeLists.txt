@@ -168,6 +168,11 @@ qt_add_executable(tst_qml
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/BookManager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/SettingsStore.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/BookImporter.cpp
+    # C7：Highlights 单例（划线数据流冒烟）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/HighlightManager.cpp
+    # C7：TextEdit 行距助手（段落渲染用 TextEdit）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/ReaderTextHelper.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/ReaderTextHelper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/SentenceSplitter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/TextParser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/EpubParser.cpp

@@ -79,8 +79,8 @@ void HighlightManager::updateNote(qint64 id, const QString &note) {
     emit highlightsChanged(bookId);
 }
 
-QVector<Highlight> HighlightManager::highlightsForBook(qint64 bookId) const {
-    QVector<Highlight> out;
+QVariantList HighlightManager::highlightsForBook(qint64 bookId) const {
+    QVariantList out;
     QSqlQuery q(m_db);
     // sentence_index, id 双序保证阅读顺序稳定（NULL 在 SQLite 中排最前，无影响）
     q.prepare("SELECT id,book_id,chapter,sentence_index,text,color,note"
@@ -91,15 +91,15 @@ QVector<Highlight> HighlightManager::highlightsForBook(qint64 bookId) const {
         return out;
     }
     while (q.next()) {
-        Highlight h;
-        h.id = q.value(0).toLongLong();
-        h.bookId = q.value(1).toLongLong();
-        h.chapter = q.value(2).toString();
-        h.sentenceIndex = q.value(3).isNull() ? -1 : q.value(3).toInt();
-        h.text = q.value(4).toString();
-        h.color = q.value(5).toString();
-        h.note = q.value(6).toString();
-        out.append(h);
+        QVariantMap m;
+        m[QStringLiteral("id")] = q.value(0).toLongLong();
+        m[QStringLiteral("bookId")] = q.value(1).toLongLong();
+        m[QStringLiteral("chapter")] = q.value(2).toString();
+        m[QStringLiteral("sentenceIndex")] = q.value(3).isNull() ? -1 : q.value(3).toInt();
+        m[QStringLiteral("text")] = q.value(4).toString();
+        m[QStringLiteral("color")] = q.value(5).toString();
+        m[QStringLiteral("note")] = q.value(6).toString();
+        out.append(m);
     }
     return out;
 }
