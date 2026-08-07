@@ -200,7 +200,10 @@ endif()
         DEPENDS Readdict
     )
 else()
-    # 其他平台：字体装到 share/readdict/fonts（main.cpp 的 ../share/readdict/fonts 兜底路径）
+    # 其他平台（Linux/Windows）：本项目当前只产出 macOS .app 分发物，跨平台安装打包
+    # 尚未实施（无 install(TARGETS Readdict) 配套，仅装字体文件无意义）。
+    # 此处安装字体仅保证「安装目录 + main.cpp 的 ../share/readdict/fonts 兜底路径」
+    # 契约在将来补 install(TARGETS) 时直接生效；当前为 dev-only，安装打包留后续任务。
     install(FILES ${READDICT_FONT_FILES} DESTINATION share/readdict/fonts)
 endif()
 

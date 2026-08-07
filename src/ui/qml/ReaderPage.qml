@@ -66,9 +66,13 @@ Page {
             Label {
                 id: topBarTitle
                 Layout.fillWidth: true
-                // D7：顶栏显示 书名 · 章节（章节未加载时仅显示书名）
-                text: (page.book && page.book.title ? page.book.title : "")
-                      + (page.chapter && page.chapter.title ? " · " + page.chapter.title : "")
+                // D7：顶栏显示 书名 · 章节——章节标题与书名相同（TXT 单章书首章即书名）
+                // 时不再重复拼接
+                text: {
+                    const t = page.book && page.book.title ? page.book.title : ""
+                    const c = page.chapter && page.chapter.title ? page.chapter.title : ""
+                    return t + (c && c !== t ? " · " + c : "")
+                }
                 elide: Text.ElideRight
                 font.bold: true
                 color: page.bgMode === "dark" ? "#E6E6E6" : "#1A1A1A"
@@ -160,11 +164,13 @@ Page {
         }
     }
 
-    // D7：静置 3s 淡出控制栏
+    // D7：静置 3s 淡出控制栏（running 常开——滚轮/键盘翻页不动鼠标也会淡出；
+    // 鼠标移动经下方 hover 追踪 restart）
     Timer {
         id: hideControlsTimer
         interval: 3000
         repeat: false
+        running: true
         onTriggered: page.controlsVisible = false
     }
 
@@ -513,10 +519,16 @@ Page {
         jumpTimer.restart()
     }
 
-    // D7：全页 hover 追踪——声明在最后保持最顶层；acceptedButtons: Qt.NoButton 不拦截
-    // 任何点击（正文选择/按钮点击照常透传），只收鼠标移动：移动即恢复控制栏并重置静置计时
+    // D7：hover 追踪（静置计时复位）——只覆盖正文内容区（topBar 下沿 → TtsBar 上沿），
+    // 刻意排除顶栏/朗读条/控制栏：全页 NoButton hover MouseArea 会截走按钮的 hover 反馈
+    //（Qt 把 hover 路由到最顶层项），限制区域后按钮 hover 高亮保留；鼠标从正文移到
+    // 控制栏的过程中最后一次正文 onPositionChanged 已重置计时，按钮悬停 3s 内保持可见。
+    // acceptedButtons: Qt.NoButton 不拦截任何点击（正文选择/按钮点击照常透传）。
     MouseArea {
-        anchors.fill: parent
+        anchors.top: topBar.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: ttsBar.top
         acceptedButtons: Qt.NoButton
         hoverEnabled: true
         onPositionChanged: {
