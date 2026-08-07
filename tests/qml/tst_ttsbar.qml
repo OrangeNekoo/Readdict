@@ -99,8 +99,9 @@ Item {
                    || t1.indexOf("background-color:#ffd54f") >= 0,
                    "段 1 应含高亮 span，实际 " + t1)
             // 当前句应包高亮 span（C7 起段落用只读 TextEdit 渲染：text 返回序列化 HTML——
-            // 双引号属性、颜色小写、分号结尾，语义不变：当前句带 #FFD54F 背景）
-            var expectSpan = "<span style=\" background-color:#ffd54f;\">第二句！</span>"
+            // 双引号属性、颜色小写、分号结尾，语义不变：当前句带 #FFD54F 背景；
+            // B3 复审起高亮 span 追加显式深色前景 color:#212121，浅底恒深字）
+            var expectSpan = "<span style=\" color:#212121; background-color:#ffd54f;\">第二句！</span>"
             verify(t1.toLowerCase().indexOf(expectSpan) >= 0,
                    "当前句应包高亮 span，实际 " + t1)
             var t0 = c.paragraphRepeater.itemAt(0).children[0].text

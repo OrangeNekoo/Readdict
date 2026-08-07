@@ -480,7 +480,11 @@ Flickable {
                     return ""
                 }
                 // C7：单句 span——划线色优先（朗读游标叠加时划线色为底 + 下划线），
-                // 未划线且是朗读当前句 → TTS 黄底；跳转提示额外下划线
+                // 未划线且是朗读当前句 → TTS 黄底；跳转提示额外下划线。
+                // B3 复审：高亮底恒为浅色板（TTS 黄/划线黄绿粉），追加显式深色前景
+                // color:#212121——否则 dark 模式文档默认前景 #E0E0E0 浅字浅底，
+                // 对比度仅约 1.1-1.6:1；深字不随背景模式变化（浅底场景下与默认
+                // 深字一致，无视觉回归）。
                 function sentenceSpan(k, s) {
                     var mk = para.markerFor(k)
                     var isCur = para.inHighlightRange && k === para.hlInPara
@@ -488,9 +492,11 @@ Flickable {
                     var styles = []
                     if (mk && mk.color) {
                         styles.push("background-color:" + mk.color)
+                        styles.push("color:#212121")
                         if (isCur) styles.push("text-decoration:underline")
                     } else if (isCur) {
                         styles.push("background-color:" + flick.highlightColor)
+                        styles.push("color:#212121")
                     }
                     if (isFlash && styles.indexOf("text-decoration:underline") < 0)
                         styles.push("text-decoration:underline")
@@ -517,11 +523,13 @@ Flickable {
                     // 与朗读整段高亮叠加时以划线色为底（取舍：富文本段不做逐句，见 C7 报告）。
                     // 注意：外层必须用 <div>（块级）而非 <span>——Qt 富文本会丢弃包裹块级
                     // 元素的 span 背景（C5 富文本段高亮因此从未实际渲染，C7 顺带修复）。
+                    // B3 复审：高亮底恒为浅色板，追加 color:#212121 避免 dark 模式浅字浅底
+                    //（div 上的默认前景色，段内显式色 span 仍优先覆盖，同 C7 划线色保留）。
                     var mc = para.paraMarkerColor()
                     if (mc.length > 0)
-                        return "<div style='background-color:" + mc + "'>" + htmlSrc + "</div>"
+                        return "<div style='background-color:" + mc + ";color:#212121'>" + htmlSrc + "</div>"
                     if (para.inHighlightRange && htmlSrc.length > 0)
-                        return "<div style='background-color:" + flick.highlightColor + "'>" + htmlSrc + "</div>"
+                        return "<div style='background-color:" + flick.highlightColor + ";color:#212121'>" + htmlSrc + "</div>"
                     return htmlSrc
                 }
 

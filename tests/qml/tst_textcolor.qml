@@ -86,6 +86,41 @@ Item {
             loader.destroy()
         }
 
+        // dark 下高亮句对比度（B3 复审）：高亮底恒浅色板（划线黄绿粉 / TTS 黄），
+        // span 必须追加显式深色前景 color:#212121——否则继承 #E0E0E0 浅字浅底。
+        // 覆盖两条路径：划线句（marker）与朗读当前句（TTS 黄底）。
+        function test_04_darkHighlightContrast() {
+            // 前置用例可能已把 Tts 热切到系统引擎（seekTo 真实发声）：切 openai 无 key
+            //（引擎存在但不可用）→ seekTo 仅驱动高亮游标不触发朗读（同 tst_ttsbar 模式）
+            Tts.reconfigure("openai", "https://api.openai.com/v1", "", "tts-1", "nova", 1.0)
+            var loader = contentComp.createObject(root)
+            loader.width = 800; loader.height = 600
+            var c = loader.item
+            verify(c !== null, "ReaderContent 应能加载")
+            c.typography = { fontFamily: "Source Han Sans VF", fontSize: 18, lineHeight: 1.6,
+                             align: "left", pageWidth: "normal" }
+            c.chapter = root.makeChapter()
+            tryVerify(function () { return root.paraEdit(c, 0) !== null }, 2000,
+                      "段落委托应渲染完成")
+            c.textColor = "#E0E0E0"   // dark 模式：文档默认前景浅色
+            // 路径 A：划线句（段 1 全局句 1）→ 高亮 span 应含显式深色前景
+            c.highlights = [
+                { id: 31, bookId: 1, chapter: "章", sentenceIndex: 1, text: "标题", color: "#A5D6A7", note: "" }
+            ]
+            wait(50)
+            var t1 = root.paraEdit(c, 1).text.toLowerCase()
+            verify(t1.indexOf("background-color:#a5d6a7") >= 0 && t1.indexOf("color:#212121") >= 0,
+                   "dark 下划线句 span 应含 background-color 与显式 color:#212121，实际 " + t1)
+            // 路径 B：朗读当前句（段 0 全局句 0）→ TTS 黄底 span 应含深色前景
+            Tts.setSentences(["第一段正文。", "标题", "粗体句。"])
+            Tts.seekTo(0)
+            wait(50)
+            var t0 = root.paraEdit(c, 0).text.toLowerCase()
+            verify(t0.indexOf("background-color:#ffd54f") >= 0 && t0.indexOf("color:#212121") >= 0,
+                   "dark 下朗读当前句 span 应含 background-color:#ffd54f 与 color:#212121，实际 " + t0)
+            loader.destroy()
+        }
+
         // ReaderPage 绑定：bgMode=dark → textColor #E0E0E0；light/paper/image → 深字
         function test_03_readerPageBgModeBinding() {
             var loader = readerComp.createObject(root)
