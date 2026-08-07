@@ -4,11 +4,11 @@ import QtTest
 import Readdict.Backend
 
 // B4 冒烟：设置页返回导航——书架 → push SettingsPage → 点击返回按钮（生产路径
-// onClicked → goBack → StackView.pop）→ 断言回到书架。quicktest harness 不推进
-// StackView 过渡动画（见 tst_main.qml B10 注释：push/pop 亦然），pop 后栈顶
-// currentItem 同步切回书架，但被 pop 项的销毁/出栈依赖退场动画完成——depth 归位
-// 用 tryVerify 尽力断言；主断言取 currentItem 恢复（与 tst_statspage/tst_syncpage
-// 的栈断言同模式，取舍：depth 不可靠时仅 currentItem + goBack 调用路径成立）。
+// onClicked → goBack → StackView.pop）→ 断言回到书架。断言契约见 tst_main.qml:92-93：
+// quicktest harness 不推进 StackView 过渡动画（普通 push/pop 亦然），pop 后 depth
+// 归位依赖退场动画、在 canonical 环境（offscreen/非暴露窗口）确定性不成立，故 depth
+// 不可断言；pop 同步更新 currentItem（与 push 同机），主断言取 stack.currentItem 恢复
+// 书架（与 tst_statspage/tst_syncpage 的栈断言同模式，记录取舍：depth 不做断言）。
 Item {
     id: root
     width: 1100; height: 720
@@ -31,11 +31,9 @@ Item {
             verify(settingsPage.backButton !== undefined, "设置页应暴露返回按钮句柄")
             verify(settingsPage.goBack !== undefined, "设置页应暴露 goBack() 供测试")
             settingsPage.backButton.clicked()
-            // pop 同步更新 currentItem：栈顶应恢复为书架页（主断言，动画无关）
+            // pop 同步更新 currentItem：栈顶应恢复为书架页（主断言，动画无关；
+            // depth 归位依赖退场动画不可断言，见文件头注释）
             verify(stack.currentItem === shelf, "点击返回后应回到书架页")
-            // depth 归位依赖退场动画（quicktest 不推进），尽力断言；若失败按上述取舍
-            tryVerify(function () { return stack.depth === 1 }, 3000,
-                      "返回后栈深度应回到 1（书架），实际 " + stack.depth)
             stack.destroy()
         }
     }

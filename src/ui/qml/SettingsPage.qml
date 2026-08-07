@@ -199,7 +199,8 @@ Page {
         // AppData/backgrounds/ → background/imagePath + mode=image；
         // 模糊/亮度滑条即改即存 background/blur、background/brightness（阅读页打开时恢复）。
         // 注意：本分区位于 TTS 分区之后——SettingsTtsSmoke 依赖 ColumnLayout 子项索引
-        //（children[6]/[7] 为 TTS 引擎行/OpenAI 配置），在其前插入会破坏既有测试。
+        //（B4 起 children[7]/[8] 为 TTS 引擎行/OpenAI 配置；B4 的返回按钮在顶部插入
+        // 使索引较 B2 时 +1），在 TTS 分区之前插入会破坏既有测试。
         Label { text: qsTr("阅读背景"); font.bold: true }
         RowLayout {
             Label { text: qsTr("背景模式") }

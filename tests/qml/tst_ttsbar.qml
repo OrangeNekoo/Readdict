@@ -125,8 +125,9 @@ Item {
             verify(page !== null, "SettingsPage 应能加载（含 TTS 配置区）")
             var layout = page.contentItem.children[0]  // ColumnLayout
             // B2 在"外观"分区插入了封面刷新行，B4 在 ColumnLayout 顶部插入返回按钮：
-            // TTS 引擎行/OpenAI 配置现为 children[7]/[8]（索引前置项共 8 个：
-            // 返回按钮/外观标签/深色模式行/刷新封面行/提示 Timer/语言标签/语言下拉）
+            // children[0..6] = 返回按钮/外观标签/深色模式行/刷新封面行/语言标签/语言下拉/
+            // 朗读（TTS）标签（提示 Timer 是非可视 data 子项，不计入 children），
+            // 故 TTS 引擎行/OpenAI 配置为 children[7]/[8]
             var engineRow = layout.children[7]     // 朗读(TTS) 分区：引擎行
             var engineBox = engineRow.children[1]
             verify(engineBox !== undefined, "引擎 ComboBox 应存在")
