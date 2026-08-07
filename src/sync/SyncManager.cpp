@@ -237,7 +237,11 @@ bool SyncManager::applyProgressJson(const QByteArray &data) {
         QSqlQuery q(m_db);
         q.prepare(QStringLiteral("SELECT last_read_at FROM books WHERE id=?"));
         q.addBindValue(id);
-        if (!q.exec() || !q.next())
+        if (!q.exec()) {
+            ok = false; // 查询失败 ≠ 无行：不推进 adopted，失败可重试
+            continue;
+        }
+        if (!q.next())
             continue; // 本地无此书：进度不能凭空建书，跳过
         const QDateTime localTs = parseIso(q.value(0).toString());
         // 合并语义：远端 ts 有效且不晚于本地最近阅读 → 保留本地（等值重放不写，保证
@@ -285,7 +289,12 @@ bool SyncManager::applyHighlightsJson(const QByteArray &data) {
         q.addBindValue(chapter);
         q.addBindValue(sentenceIndex);
         q.addBindValue(text);
-        if (q.exec() && q.next()) {
+        if (!q.exec()) {
+            ok = false; // 六轮复审：去重查询失败 ≠ 无行——落入 INSERT 会产生重复行并
+                        // 随同步传播全设备；置失败、不推进 adopted
+            continue;
+        }
+        if (q.next()) {
             // 已存在：不重复插入；合并条件 = 远端改过 note/color 或 载荷版本更新
             // （双设备独立划线同句/删除重建：四元组同、color/note 同但 created_at 新）。
             // 版本单调追赶：载荷 createdAt 新于本地行 → 采纳（即使无字段差异），
@@ -343,14 +352,27 @@ bool SyncManager::applyBooksJson(const QByteArray &data) {
     bool ok = true;
     for (const QJsonValue &v : arr) {
         const QJsonObject o = v.toObject();
-        const qint64 id = o[QStringLiteral("id")].toVariant().toLongLong();
+        // 六轮复审：按内容键 (title, author, format) 匹配本地书——id 是各设备独立
+        // AUTOINCREMENT，按 id 匹配会把同 id 不同内容的书互相覆盖（数据丢失）
         QSqlQuery chk(m_db);
-        chk.prepare(QStringLiteral("SELECT 1 FROM books WHERE id=?"));
-        chk.addBindValue(id);
-        if (!chk.exec() || !chk.next())
-            continue; // 本地无此书：不建书（建书需导入流程/书籍文件，见报告）
-        // 只更新静态元数据；path 不覆盖（本机路径指向本机文件），progress/read_seconds
-        // 归 progress 项管理，added_at/last_read_at 归本地
+        chk.prepare(QStringLiteral("SELECT id FROM books WHERE title=? AND author=? AND format=?"));
+        chk.addBindValue(o[QStringLiteral("title")].toString());
+        chk.addBindValue(o[QStringLiteral("author")].toString());
+        chk.addBindValue(o[QStringLiteral("format")].toString());
+        if (!chk.exec()) {
+            ok = false; // SELECT 失败 ≠ 无行：不推进 adopted，失败可重试
+            continue;
+        }
+        if (!chk.next()) {
+            // 本地无此内容键的书：跳过 + log（不按 id 覆盖本地行）。
+            // 新书注册需导入流程/书籍文件，留待书籍同步专项
+            log(QStringLiteral("远端书目本地无文件体，待书籍同步后注册: %1")
+                    .arg(o[QStringLiteral("title")].toString()));
+            continue;
+        }
+        const qint64 localId = chk.value(0).toLongLong();
+        // 更新静态元数据（保留本地 id/path 与进度）；progress/read_seconds 归 progress
+        // 项管理，added_at/last_read_at 归本地
         QSqlQuery up(m_db);
         up.prepare(QStringLiteral("UPDATE books SET title=?,author=?,publisher=?,category=?,"
                                   "format=?,cover=? WHERE id=?"));
@@ -360,7 +382,7 @@ bool SyncManager::applyBooksJson(const QByteArray &data) {
         up.addBindValue(o[QStringLiteral("category")].toString());
         up.addBindValue(o[QStringLiteral("format")].toString());
         up.addBindValue(o[QStringLiteral("cover")].toString());
-        up.addBindValue(id);
+        up.addBindValue(localId);
         if (!up.exec()) {
             ok = false;
             continue;
@@ -372,7 +394,7 @@ bool SyncManager::applyBooksJson(const QByteArray &data) {
         f.addBindValue(o[QStringLiteral("title")].toString());
         f.addBindValue(o[QStringLiteral("author")].toString());
         f.addBindValue(o[QStringLiteral("publisher")].toString());
-        f.addBindValue(id);
+        f.addBindValue(localId);
         if (!f.exec())
             ok = false;
     }
@@ -588,22 +610,30 @@ static QDateTime maxContentTs(const QJsonArray &arr, const char *key) {
     return best;
 }
 
+// 六轮复审：books 匹配/合并改用内容键 (title, author, format) 而非 id——books.id 是各设备
+// 独立 AUTOINCREMENT（两端首本书都是 id=1），按 id 去重会把远端同 id 不同内容的书屏蔽
+// 丢失；按 id 覆盖会把别的书元数据写进本地行。内容键由 title/author/format 三段拼成。
+QString booksContentKey(const QJsonObject &o) {
+    return o[QStringLiteral("title")].toString() + QStringLiteral("\x1F")
+         + o[QStringLiteral("author")].toString() + QStringLiteral("\x1F")
+         + o[QStringLiteral("format")].toString();
+}
+
 // 五轮复审：books KeepLocal 上传前合并——远端载荷中本地缺失的条目原样并入载荷。
 // 无条件 PUT 本地全集会整体覆盖远端 books.json，标准多设备流程（A 同步后 B 空库首同步、
-// B 导入新书再同步 KeepLocal）会永久丢失 A 的书目元数据。按 id 合并：本地条目优先
-// （同一本书以本地为准），远端独有条目保留（其元数据继续存在于远端）。
+// B 导入新书再同步 KeepLocal）会永久丢失 A 的书目元数据。按内容键合并：本地条目优先
+// （同一本书以本地为准），远端独有内容键的条目保留（其元数据继续存在于远端）。
 static QByteArray mergeBooksPayloads(const QByteArray &remoteData, const QByteArray &localPayload) {
     const QJsonArray remoteArr =
         QJsonDocument::fromJson(remoteData).object()[QStringLiteral("books")].toArray();
     QJsonArray localArr =
         QJsonDocument::fromJson(localPayload).object()[QStringLiteral("books")].toArray();
-    QSet<qint64> seen;
+    QSet<QString> seen;
     for (const QJsonValue &v : localArr)
-        seen.insert(v.toObject()[QStringLiteral("id")].toVariant().toLongLong());
+        seen.insert(booksContentKey(v.toObject()));
     for (const QJsonValue &v : remoteArr) {
-        const qint64 id = v.toObject()[QStringLiteral("id")].toVariant().toLongLong();
-        if (!seen.contains(id))
-            localArr.append(v); // 远端独有书目：原样并入，避免覆盖丢失
+        if (!seen.contains(booksContentKey(v.toObject())))
+            localArr.append(v); // 远端独有内容键：原样并入，避免覆盖丢失
     }
     return QJsonDocument(QJsonObject{{QStringLiteral("books"), localArr}})
         .toJson(QJsonDocument::Compact);
@@ -625,23 +655,35 @@ void SyncManager::sync(WebDavClient &client, const Options &opts) {
         syncOne(client, remote, QStringLiteral("settings.json"),
                 [this] { return buildSettingsJson(); },
                 [this](const QByteArray &d) { return applySettingsJson(d); },
-                localVersion, QFile::exists(path), {},
+                localVersion, QFile::exists(path),
+                // 六轮复审：远端空载荷（无任何白名单键）且本地有内容 → 版本压到 epoch，
+                // 强制 KeepLocal 上传（内容不等时本地设置必须向空远端传播，否则拓扑死锁）；
+                // 有白名单键 → 返回无效版本、退回文件 mtime 比较（原行为）
+                [](const QByteArray &d) {
+                    const QJsonObject remote = QJsonDocument::fromJson(d).object();
+                    for (const QString &key : kSyncSections)
+                        if (remote.contains(key))
+                            return QDateTime();
+                    return QDateTime::fromMSecsSinceEpoch(0);
+                },
                 // 内容相等即 Skip（语义比较，键序无关）：两端内容趋同后不再依赖 mtime 裁决，
-                // 根治"服务器盖章 mtime → 交替 KeepLocal/TakeRemote"的不收敛循环；
-                // 空载荷/无白名单键（合法空 JSON）同样视为相等——否则 mtime 较新时每轮
-                // TakeRemote 空转（applySettingsJson 对空远端早退、无版本前进）
+                // 根治"服务器盖章 mtime → 交替 KeepLocal/TakeRemote"的不收敛循环。
+                // 空载荷对称处理：两侧都空 → Skip；远端空本地有内容 → 不等（→ 版本比较 →
+                // epoch → KeepLocal 上传，本地设置不向空远端传播即拓扑死锁）
                 [this](const QByteArray &d) {
                     const QJsonObject remote = QJsonDocument::fromJson(d).object();
-                    bool hasSyncKey = false;
-                    for (const QString &key : kSyncSections)
-                        if (remote.contains(key)) {
-                            hasSyncKey = true;
-                            break;
-                        }
-                    if (!hasSyncKey)
-                        return true;
-                    return remote
-                           == QJsonDocument::fromJson(buildSettingsJson()).object();
+                    const QJsonObject local =
+                        QJsonDocument::fromJson(buildSettingsJson()).object();
+                    bool remoteHasKey = false, localHasKey = false;
+                    for (const QString &key : kSyncSections) {
+                        if (remote.contains(key))
+                            remoteHasKey = true;
+                        if (local.contains(key))
+                            localHasKey = true;
+                    }
+                    if (!remoteHasKey)
+                        return !localHasKey;
+                    return remote == local;
                 });
     }
     if (opts.progress) {

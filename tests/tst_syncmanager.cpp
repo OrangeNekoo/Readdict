@@ -591,30 +591,32 @@ private slots:
                                     .object()["books"].toArray();
         QCOMPARE(meta.first().toObject()["addedAt"].toString(),
                  QDateTime::fromString("2026-01-01T00:00:00", Qt::ISODate).toUTC().toString(Qt::ISODate));
-        // applyBooksJson：本地无 book 2 → 不建书（建书属导入流程）；有 book 1 → 元数据可更新
-        m.applyBooksJson("{\"books\":[{\"id\":1,\"title\":\"远程标题\",\"author\":\"A\",\"publisher\":\"P\","
-                         "\"category\":\"C\",\"format\":\"EPUB\",\"path\":\"books/a.epub\",\"cover\":\"cov\"}]}");
-        QCOMPARE(countRows(db, "books"), 1); // 未新增 book 2
+        // applyBooksJson：本地无内容键匹配的书 → 不建书（建书属导入流程）并 log；
+        // 内容键 (title, author, format) 命中 → 元数据可更新（id 不参与匹配，六轮复审）
+        m.applyBooksJson("{\"books\":[{\"id\":2,\"title\":\"a\",\"author\":\"作者\","
+                         "\"publisher\":\"P\",\"category\":\"C\",\"format\":\"EPUB\","
+                         "\"path\":\"books/a.epub\",\"cover\":\"cov\"}]}");
+        QCOMPARE(countRows(db, "books"), 1); // 未新增书
         {
             QSqlDatabase seed = seedDb(db);
             QSqlQuery q(seed);
             q.prepare("SELECT title,author,publisher,category,format,cover FROM books WHERE id=1");
             QVERIFY(q.exec() && q.next());
-            QCOMPARE(q.value(0).toString(), QString("远程标题")); // 远端元数据已合并
-            QCOMPARE(q.value(1).toString(), QString("A"));
-            QCOMPARE(q.value(2).toString(), QString("P"));
+            QCOMPARE(q.value(0).toString(), QString("a"));    // 内容键命中：标题保留
+            QCOMPARE(q.value(1).toString(), QString("作者"));
+            QCOMPARE(q.value(2).toString(), QString("P"));    // 远端元数据已合并
             QCOMPARE(q.value(3).toString(), QString("C"));
             QCOMPARE(q.value(4).toString(), QString("EPUB"));
             QCOMPARE(q.value(5).toString(), QString("cov"));
         }
-        // 五轮复审：采纳元数据后 books_fts 同步维护（按新标题可全文搜索命中）
+        // 五轮复审：采纳元数据后 books_fts 同步维护（external-content 无触发器）
         {
             QSqlDatabase seed = seedDb(db);
             QSqlQuery q(seed);
             q.exec("SELECT title,author,publisher FROM books_fts WHERE rowid=1");
             QVERIFY(q.next());
-            QCOMPARE(q.value(0).toString(), QString("远程标题"));
-            QCOMPARE(q.value(1).toString(), QString("A"));
+            QCOMPARE(q.value(0).toString(), QString("a"));
+            QCOMPARE(q.value(1).toString(), QString("作者"));
             QCOMPARE(q.value(2).toString(), QString("P"));
         }
     }
@@ -919,8 +921,8 @@ private slots:
         QCOMPARE(merged.size(), 2);
     }
 
-    // ---- 补充：远端 settings 空对象（合法空 JSON）→ Skip 不空转 ----
-    void syncFlowEmptyRemoteSettingsSkips() {
+    // ---- 补充：settings 空载荷对称处理——远端空本地有内容 → KeepLocal 上传 ----
+    void syncFlowEmptyRemoteSettingsKeepsLocal() {
         QTemporaryDir dir;
         QFile f(dir.filePath("settings.json"));
         QVERIFY(f.open(QIODevice::WriteOnly));
@@ -932,11 +934,90 @@ private slots:
         SyncManager m(dir.filePath("Readdict.db"), dir.path());
         SyncManager::Options o; o.settings = true; o.progress = false;
         o.highlights = false; o.books = false;
+        // 六轮复审：远端空 + 本地有内容 → 内容不等 → 版本压 epoch → KeepLocal 上传
+        // （本地设置必须向空远端传播，否则拓扑死锁）；mtime 较新也不能 TakeRemote
         m.sync(mock, o);
-        // 空载荷视为内容相等 → Skip（否则每轮 TakeRemote 空转，apply 早退无版本前进）
-        QVERIFY(m.log().join('\n').contains("跳过 settings.json"));
+        QVERIFY(m.log().join('\n').contains("保留本地 settings.json"));
         QVERIFY(!m.log().join('\n').contains("采用远端 settings.json"));
-        QCOMPARE(mock.putNames.size(), 0);
+        QCOMPARE(mock.putNames, QStringList({"settings.json"}));
+        QCOMPARE(QJsonDocument::fromJson(mock.files["settings.json"]).object()
+                     ["theme"].toObject()["mode"].toString(),
+                 QString("dark")); // 空远端已被本地设置填上
+        // 再次同步：内容一致 → Skip（收敛）
+        m.sync(mock, o);
+        QVERIFY(m.log().join('\n').contains("跳过 settings.json"));
+        // 两侧都空 → Skip（对称）
+        QTemporaryDir dir2;
+        QFile f2(dir2.filePath("settings.json"));
+        QVERIFY(f2.open(QIODevice::WriteOnly));
+        QVERIFY(f2.write("{}") > 0);
+        f2.close();
+        MockWebDavClient mock2;
+        mock2.files["settings.json"] = "{}";
+        mock2.mtimes["settings.json"] = QDateTime::currentDateTimeUtc().addSecs(3600);
+        SyncManager m2(dir2.filePath("Readdict.db"), dir2.path(), "readdict_sync_2");
+        m2.sync(mock2, o);
+        QVERIFY(m2.log().join('\n').contains("跳过 settings.json"));
+        QVERIFY(mock2.putNames.isEmpty());
+    }
+
+    // ---- 补充：books 同 id 不同内容键（六轮复审：内容键匹配，id 不参与） ----
+    void syncFlowBooksSameIdDifferentContent() {
+        QTemporaryDir dirA, dirB;
+        const QString dbA = dirA.filePath("a.db"), dbB = dirB.filePath("b.db");
+        {
+            QSqlDatabase seed = seedDb(dbA);
+            QSqlQuery q(seed);
+            // A 的书 X：id=1（两台设备各自首本书都是 id=1）
+            QVERIFY2(q.exec("INSERT INTO books(id,title,author,format,path,added_at,progress)"
+                            " VALUES(1,'X','甲','EPUB','/lib/books/x.epub',"
+                            "'2026-01-01T00:00:00',0.0)"),
+                     qPrintable(q.lastError().text()));
+            QVERIFY2(q.exec("INSERT INTO books_fts(rowid,title,author,publisher)"
+                            " VALUES(1,'X','甲','')"),
+                     qPrintable(q.lastError().text()));
+        }
+        {
+            QSqlDatabase seed = seedDb(dbB);
+            QSqlQuery q(seed);
+            // B 的书 Y：同样 id=1，但内容键不同
+            QVERIFY2(q.exec("INSERT INTO books(id,title,author,format,path,added_at,progress)"
+                            " VALUES(1,'Y','乙','EPUB','/lib/books/y.epub',"
+                            "'2026-07-01T00:00:00',0.0)"),
+                     qPrintable(q.lastError().text()));
+        }
+        MockWebDavClient mock;
+        // 远端：A 已同步的 X（id=1，addedAt 01-01）
+        mock.files["books.json"] =
+            "{\"books\":[{\"id\":1,\"title\":\"X\",\"author\":\"甲\",\"publisher\":\"\","
+            "\"category\":\"\",\"format\":\"EPUB\",\"path\":\"books/x.epub\",\"cover\":\"\","
+            "\"addedAt\":\"2026-01-01T00:00:00Z\"}]}";
+        SyncManager mB(dbB, dirB.path());
+        SyncManager::Options o; o.settings = false; o.progress = false;
+        o.highlights = false; o.books = true;
+        // B（新书 Y，07-01）KeepLocal：内容键去重——X 与 Y 内容键不同 → X 并入不丢失
+        mB.sync(mock, o);
+        QVERIFY(mB.log().join('\n').contains("保留本地 books.json"));
+        const QJsonArray merged =
+            QJsonDocument::fromJson(mock.files["books.json"]).object()["books"].toArray();
+        QSet<QString> titles;
+        for (const QJsonValue &v : merged)
+            titles.insert(v.toObject()["title"].toString());
+        QVERIFY(titles.contains("Y"));
+        QVERIFY(titles.contains("X")); // 同 id 不同内容键：A 的书不被 B 覆盖丢失
+        // A 随后同步：下载合并载荷（含 Y）→ applyBooksJson 内容键匹配——Y 与本地 X
+        // 内容键不同 → 跳过 + log，绝不按 id=1 覆盖 X 的元数据
+        SyncManager mA(dbA, dirA.path(), "readdict_sync_a");
+        mA.sync(mock, o);
+        {
+            QSqlDatabase seed = seedDb(dbA);
+            QSqlQuery q(seed);
+            q.prepare("SELECT title,author FROM books WHERE id=1");
+            QVERIFY(q.exec() && q.next());
+            QCOMPARE(q.value(0).toString(), QString("X")); // 未被 Y 覆盖
+            QCOMPARE(q.value(1).toString(), QString("甲"));
+        }
+        QVERIFY(mA.log().join('\n').contains("待书籍同步后注册")); // 未命中跳过已 log
     }
 };
 QTEST_MAIN(TestSync)
