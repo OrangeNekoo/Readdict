@@ -239,6 +239,8 @@ qt_add_resources(tst_qml "qml_ui"
         ../src/ui/qml/ReaderBackground.qml
         ../src/ui/qml/TtsBar.qml
         ../src/ui/qml/PdfReaderPage.qml
+        # B5：eink 纸纹纹理——与 app 资源同路径（/qt/qml/Readdict/ui/qml/paper/paper_texture.png）
+        ../src/ui/qml/paper/paper_texture.png
 )
 add_test(NAME tst_qml COMMAND tst_qml)
 

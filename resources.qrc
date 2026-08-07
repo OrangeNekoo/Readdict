@@ -1,4 +1,6 @@
 <RCC>
   <qresource prefix="/">
+    <!-- B5：彩色墨水屏纸纹纹理（eink 背景层平铺用，与 qml 模块同前缀便于 app/测试共用路径） -->
+    <file alias="qt/qml/Readdict/ui/qml/paper/paper_texture.png">src/ui/qml/paper/paper_texture.png</file>
   </qresource>
 </RCC>

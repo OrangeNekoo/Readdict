@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Readdict.Backend
 
-// 阅读页主组件：背景四态（浅/深/米白/自定义图片）+ 章节渲染 + 底部控制栏 + 目录 Dialog。
+// 阅读页主组件：背景五态（浅/深/米白/彩色墨水屏 eink/自定义图片）+ 章节渲染 + 底部控制栏 + 目录 Dialog。
 // typography 由 Settings 的 typography/ 分区组合（QML 侧组合，避免跨单例依赖），
 // 背景由 Settings 的 background/ 分区恢复（mode/imagePath/blur/brightness，onCompleted 读取；
 // Settings.value 无变更信号，页面属性作响应层，与 typography 同模式）；
@@ -39,14 +39,16 @@ Page {
         brightness: page.bgBrightness
     }
 
-    // 顶部章节条：返回 + 当前章名
+    // B5：Kindle 化顶栏——细条极简（36px）：返回 + 书名 · 章节，去加粗装饰。
+    // 颜色随背景模式：dark 深底浅字、eink 纸色底墨字、其余浅底深字。
     Rectangle {
         id: topBar
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: 44
-        color: page.bgMode === "dark" ? "#E6121212" : "#E6FFFFFF"
+        height: 36
+        color: page.bgMode === "dark" ? "#E6121212"
+             : (page.bgMode === "eink" ? "#E6F2E8D5" : "#E6FFFFFF")
         Rectangle {
             anchors.bottom: parent.bottom
             anchors.left: parent.left
@@ -58,9 +60,10 @@ Page {
             anchors.fill: parent
             anchors.leftMargin: 8
             anchors.rightMargin: 12
-            spacing: 8
+            spacing: 6
             ToolButton {
                 text: qsTr("返回")
+                font.pixelSize: 13
                 onClicked: page.StackView.view.pop()
             }
             Label {
@@ -74,8 +77,9 @@ Page {
                     return t + (c && c !== t ? " · " + c : "")
                 }
                 elide: Text.ElideRight
-                font.bold: true
-                color: page.bgMode === "dark" ? "#E6E6E6" : "#1A1A1A"
+                font.pixelSize: 13
+                color: page.bgMode === "dark" ? "#CCCCCC"
+                     : (page.bgMode === "eink" ? "#3A3A3A" : "#555555")
             }
         }
     }
@@ -88,9 +92,11 @@ Page {
         anchors.bottom: ttsBar.top
         chapter: page.chapter
         typography: page.typography
-        // B3：正文前景色随背景模式——dark 传浅色 #E0E0E0，其余（light/paper/image）
-        // 视为浅底用深字 #212121（image 模式内容区域透明露出自定义图片，按浅色处理）
-        textColor: page.bgMode === "dark" ? "#E0E0E0" : "#212121"
+        // B3：正文前景色随背景模式——dark 传浅色 #E0E0E0；B5：eink 传墨色 #3A3A3A；
+        // 其余（light/paper/image）视为浅底用深字 #212121（image 模式内容区域透明露出自定义图片，按浅色处理）
+        bgMode: page.bgMode
+        textColor: page.bgMode === "dark" ? "#E0E0E0"
+                 : (page.bgMode === "eink" ? "#3A3A3A" : "#212121")
         // C7：划线上下文——bookId 供 addHighlight，highlights 供逐句渲染查表
         bookId: (page.book && page.book.id) || -1
         highlights: page.highlights
@@ -481,20 +487,22 @@ Page {
     }
 
     function cycleBackground() {
-        // 四态循环（浅→米白→深→图片）；未选图片时跳过 image，避免切到"无图可显"的态
-        const order = page.bgImagePath ? ["light", "paper", "dark", "image"]
-                                       : ["light", "paper", "dark"]
+        // 五态循环（浅→米白→深→彩色墨水屏 eink→图片）；未选图片时跳过 image，
+        // 避免切到"无图可显"的态
+        const order = page.bgImagePath ? ["light", "paper", "dark", "eink", "image"]
+                                       : ["light", "paper", "dark", "eink"]
         const cur = Math.max(0, order.indexOf(page.bgMode))
         page.bgMode = order[(cur + 1) % order.length]
         Settings.setValue("background/mode", page.bgMode)
     }
 
-    // D5：启动恢复——从 Settings 的 background/ 分区读四态背景参数（含钳制）。
+    // D5：启动恢复——从 Settings 的 background/ 分区读背景参数（含钳制）。
     // 旧版 reader/background 键的迁移在 SettingsStore 构造函数预置默认分区时完成
     //（QML 加载前），此处只读新键，不再有迁移分支。
     function backgroundFromSettings() {
         const mode = Settings.value("background/mode")
-        page.bgMode = (mode === "light" || mode === "paper" || mode === "dark" || mode === "image") ? mode : "light"
+        // B5：五态含 eink
+        page.bgMode = (mode === "light" || mode === "paper" || mode === "dark" || mode === "eink" || mode === "image") ? mode : "light"
         page.bgImagePath = Settings.value("background/imagePath") || ""
         const blur = Number(Settings.value("background/blur")) || 0.0
         page.bgBlur = Math.max(0, Math.min(1, blur))

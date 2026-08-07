@@ -4,8 +4,9 @@ import Readdict.Backend
 import Readdict.Test 1.0
 
 // D5：阅读背景冒烟——真实图片导入路径（copyToBackgrounds → backgrounds/）、
-// ReaderBackground 四态（浅/深/米白/自定义图片 + MultiEffect 模糊/亮度）、
-// ReaderPage 从 Settings background/ 分区恢复、控制栏四态循环、设置页单选/滑条持久化。
+// ReaderBackground 五态（浅/深/米白/彩色墨水屏 eink/自定义图片 + MultiEffect 模糊/亮度 +
+// eink 纸纹层）、ReaderPage 从 Settings background/ 分区恢复、控制栏五态循环、
+// 设置页单选/滑条持久化。
 // 不打开原生 FileDialog（测试环境无窗口系统交互），导入路径直接调 Settings.copyToBackgrounds。
 // 结构约定（与 tst_main/tst_ttsbar 一致）：根为带尺寸的 Item，TestCase 是其子项，
 // 组件经 createObject(root) 挂到该 Item 下——挂在 TestCase 下时其 visible=false，
@@ -45,7 +46,8 @@ Item {
         }
 
         function test_02_backgroundModes() {
-            // 四态模式切换：底色随 mode 变化，image 态显示 Image 与 MultiEffect
+            // 五态模式切换：底色随 mode 变化，image 态显示 Image 与 MultiEffect，
+            // eink 态显示纸纹层（children[3]，B5 追加在尾部不动既有 0..2 索引）
             var loader = bgComp.createObject(root)
             verify(loader.item !== null, "ReaderBackground 应能加载（含 QtQuick.Effects import 编译检查）")
             var b = loader.item
@@ -56,11 +58,20 @@ Item {
             compare(String(b.children[0].color), "#121212")
             b.mode = "paper"
             compare(String(b.children[0].color), "#f5efe0")
+            b.mode = "eink"
+            compare(String(b.children[0].color), "#f2e8d5", "eink 底色应为浅彩纸色 #F2E8D5")
+            verify(b.children[3].visible, "eink 态应显示纸纹层（children[3]）")
+            tryVerify(function () { return b.children[3].status === Image.Ready }, 3000,
+                      "纸纹纹理资源应能加载为 Ready（qrc 路径），实际 status="
+                      + b.children[3].status)
+            verify(!b.children[1].visible && !b.children[2].visible,
+                   "eink 态不应显示 Image/MultiEffect（仅纸纹层）")
             b.mode = "image"
             // 无图（imagePath 空）时：Image 层显示但 MultiEffect 依赖图片就绪态，
             // 未就绪 → 效果层隐藏，露出底色 Rectangle（D5 复审兜底行为）
             verify(b.children[1].visible, "image 态应显示 Image 层")
             verify(!b.children[2].visible, "无图时 MultiEffect 应隐藏（等待 Image.Ready）")
+            verify(!b.children[3].visible, "非 eink 态纸纹层应隐藏")
             b.mode = "light"
             verify(!b.children[1].visible && !b.children[2].visible, "非 image 态应隐藏 Image 与 MultiEffect")
             loader.destroy()
@@ -126,7 +137,7 @@ Item {
         }
 
         function test_05_cycleBackground() {
-            // 控制栏"背景"循环：有图四态 浅→米白→深→图片→浅；无图三态跳过 image
+            // 控制栏"背景"循环：有图五态 浅→米白→深→eink→图片→浅；无图四态跳过 image
             var dest = Settings.copyToBackgrounds(TestEnv.backgroundImage)
             Settings.setValue("background/imagePath", dest)
             Settings.setValue("background/mode", "light")
@@ -139,19 +150,21 @@ Item {
             page.cycleBackground()
             compare(page.bgMode, "dark")
             page.cycleBackground()
+            compare(page.bgMode, "eink", "dark 后应切到彩色墨水屏 eink")
+            page.cycleBackground()
             compare(page.bgMode, "image")
             page.cycleBackground()
-            compare(page.bgMode, "light", "有图时四态循环应回到 light")
+            compare(page.bgMode, "light", "有图时五态循环应回到 light")
             loader.destroy()
-            // 无图：三态循环
+            // 无图：四态循环（eink 之后回到 light，跳过 image）
             Settings.setValue("background/imagePath", "")
-            Settings.setValue("background/mode", "dark")
+            Settings.setValue("background/mode", "eink")
             loader = readerComp.createObject(root)
             loader.setSource("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: {} })
             page = loader.item
-            compare(page.bgMode, "dark")
+            compare(page.bgMode, "eink", "恢复 eink 模式")
             page.cycleBackground()
-            compare(page.bgMode, "light", "无图时 dark 后应回 light（跳过 image）")
+            compare(page.bgMode, "light", "无图时 eink 后应回 light（跳过 image）")
             loader.destroy()
         }
 
@@ -165,13 +178,23 @@ Item {
             var page = loader.item
             verify(page !== null, "SettingsPage 应能加载")
             verify(page.bgImageRadio.checked && !page.bgLightRadio.checked
-                   && !page.bgDarkRadio.checked && !page.bgPaperRadio.checked,
+                   && !page.bgDarkRadio.checked && !page.bgPaperRadio.checked
+                   && !page.bgEinkRadio.checked,
                    "恢复后应恰好选中 image（其余未选）")
             compare(page.bgBlurSlider.value, 0.6, "模糊滑条应恢复 0.6")
             compare(page.bgBrightnessSlider.value, 0.9, "亮度滑条应恢复 0.9")
             // 单选切换用 mouseClick 模拟真实点击（程序化 checked=true 不触发 onToggled，Qt 6.11 实测）→ background/mode
             mouseClick(page.bgLightRadio, page.bgLightRadio.width / 2, page.bgLightRadio.height / 2)
             compare(Settings.value("background/mode"), "light", "点浅色应写 background/mode")
+            // B5：eink 单选——恢复 + 点击两路径都验证
+            Settings.setValue("background/mode", "eink")
+            loader.destroy()
+            loader = settingsComp.createObject(root)
+            page = loader.item
+            verify(page.bgEinkRadio.checked && !page.bgImageRadio.checked,
+                   "恢复 eink 后应恰好选中彩色墨水屏（其余未选）")
+            mouseClick(page.bgEinkRadio, page.bgEinkRadio.width / 2, page.bgEinkRadio.height / 2)
+            compare(Settings.value("background/mode"), "eink", "点彩色墨水屏应写 background/mode")
             mouseClick(page.bgImageRadio, page.bgImageRadio.width / 2, page.bgImageRadio.height / 2)
             compare(Settings.value("background/mode"), "image")
             // 滑条值变更（onValueChanged 经 setBgBlur/setBgBrightness）→ 持久化 + 钳制

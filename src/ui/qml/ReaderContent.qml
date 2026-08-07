@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Effects
 import QtQuick.Layouts
 import Readdict.Backend
 
@@ -30,6 +31,10 @@ Flickable {
     // B3：正文前景色——浅色/米白背景默认深字；深色背景由 ReaderPage 按 bgMode 传浅色。
     // TextEdit.color 作为 QTextDocument 默认前景色，h1-h6 等无显式色的富文本继承。
     property color textColor: "#212121"
+    // B5：背景模式（light|dark|paper|eink|image）——eink 态下纯图段图片经 imgFx
+    // MultiEffect 降饱和+对比度仿 E-ink 印刷（混合段内嵌 <img> 走 RichText 无法逐图
+    // 处理，取舍见 B5 报告）
+    property string bgMode: "light"
     // B10：滚动位置恢复——ReaderPage 打开时赋保存的 scrollY（>=0），内容高度就绪后应用；
     // 默认 -1 表示"本次打开无需恢复"，避免内容高度变化时反复设置。
     // 应用时机：内容高度**收敛**（200ms 无变化）后——含图片段章节的首趟高度在图片
@@ -455,6 +460,18 @@ Flickable {
                     height: imgPara.implicitWidth > 0 ? parent.width * imgPara.implicitHeight / imgPara.implicitWidth : 0
                     fillMode: Image.PreserveAspectFit
                     source: modelData.imagePath ? "file://" + modelData.imagePath : ""
+                }
+                // B5：eink 图片类纸化——纯图段在 eink 态下叠加 MultiEffect 降饱和（-0.55）
+                // + 对比度（0.12），仿 E-ink 低彩度印刷质感。效果层与源图同几何覆盖其上
+                // （MultiEffect 渲染源内容 + 效果，源图仍在原位，见 ReaderBackground 同模式）。
+                // 委托子项布局：children[0]=txt（TextEdit）、[1]=imgPara、[2]=imgFx。
+                MultiEffect {
+                    id: imgFx
+                    anchors.fill: imgPara
+                    visible: para.pureImage && flick.bgMode === "eink"
+                    source: imgPara
+                    saturation: -0.55
+                    contrast: 0.12
                 }
 
                 // 段内是否含真实行内标记（b/i/em/strong/hN/img/br——解析器实际输出集）：
