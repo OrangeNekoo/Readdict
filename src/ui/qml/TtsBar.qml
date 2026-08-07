@@ -8,7 +8,10 @@ import Readdict.Backend
 // 无内部状态：信号上报 ReaderPage 处理（play/pause/stop/prev/next/rate/voice），
 // playing/errorText 由 ReaderPage 从 Tts 单例同步；引擎可用性直接读 Tts。
 // C2：visible 由宿主（ReaderPage.ttsBarVisible）门控——默认隐藏，仅朗读会话激活时
-// 显示；本组件不自行管理可见性（C3 统一显隐框架继续沿用该宿主门控）。
+// 显示；本组件不自行管理可见性。
+// C3 决策：阅读控件唤出/自动隐藏框架只作用于底部控制栏（ReaderPage.controlsVisible），
+// 朗读条显隐仍仅由 state 门控单独决定——朗读中唤出不带出、控制栏隐藏不影响
+// 朗读条（暂停/停止随时可达）。宿主侧实现，本组件不参与。
 Rectangle {
     id: bar
     property bool playing: false

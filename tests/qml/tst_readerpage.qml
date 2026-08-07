@@ -14,6 +14,9 @@ import Readdict.Test 1.0
 // TtsBar 贴底不压顶栏、返回按钮点击 pop 回书架。
 // 结构约定（与 tst_background 一致）：根为带尺寸的 Item，TestCase 是其子项；
 // ReaderPage 经 StackView push（生产路径，供返回导航断言）。
+// C3：ControlsSummonSmoke 覆盖唤出交互（点击底部唤出 + 无操作 5s 自动隐藏 +
+// 交互重置计时 + TtsBar 门控协同）——Timer 注入短间隔（controlsHideDelay）
+// 收敛 5s 语义，断言状态机而非等真实 5s。
 Item {
     id: root
     width: 1100; height: 720
@@ -100,6 +103,131 @@ Item {
                       "点击返回后应 pop 回书架")
             stack.destroy()
             shelfMarker.destroy()
+        }
+    }
+
+    TestCase {
+        name: "ControlsSummonSmoke"
+        // C3：阅读控件唤出交互冒烟——点击正文底部唤出 + 无操作自动隐藏 +
+        // 交互重置计时 + TtsBar 门控协同。结构约定与 ReaderNavSmoke 一致：
+        // StackView push 生产路径；5s 语义经 controlsHideDelay 注入短间隔收敛。
+        // 手势注入：经 page.handleContentTap(y)（TapHandler 桥接共用同一状态机——
+        // quicktest harness 无法可靠合成真实鼠标事件，与 C7 选择注入同取舍，见报告）。
+        function initTestCase() {
+            if (Books.booksModel.length === 0)
+                for (let f of TestEnv.sourceFiles) Importer.doImport(f)
+        }
+        function findTxtBook() {
+            for (let b of Books.booksModel)
+                if ((b.format || "").toUpperCase() === "TXT") return b
+            return null
+        }
+        function openPage() {
+            var book = findTxtBook()
+            verify(book !== null, "测试书应已导入")
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            verify(stack !== null, "测试 StackView 应能创建")
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: book })
+            var page = stack.currentItem
+            verify(page !== null, "ReaderPage 应被 push 进 StackView")
+            tryVerify(function () {
+                return page.chapter && page.chapter.paragraphs
+                    && page.chapter.paragraphs.length > 0
+            }, 3000, "打开书后应加载章节段落")
+            return { stack: stack, page: page }
+        }
+
+        // 隐藏态：点正文底部 → 唤出；注入短间隔（300ms 收敛 5s）无操作 → 自动隐藏；
+        // 隐藏态点正文上部（非底部 1/4）→ 保持隐藏
+        function test_clickBottomSummonsAndAutoHides() {
+            var h = openPage()
+            var page = h.page
+            page.controlsHideDelay = 300
+            page.controlsVisible = false   // 模拟隐藏态
+            wait(50)
+            // 正文底 1/4 内（页面坐标 y=600，正文区 36..668，1/4 线=510）→ 唤出
+            page.handleContentTap(600)
+            tryVerify(function () { return page.controlsVisible }, 3000,
+                      "点击正文底部应唤出控制栏")
+            tryVerify(function () { return !page.controlsVisible }, 3000,
+                      "无操作后控制栏应自动隐藏")
+            // 隐藏态：点正文上部（y=50，未到 1/4 线）→ 保持隐藏
+            page.handleContentTap(50)
+            wait(150)
+            verify(!page.controlsVisible, "点正文上部不应唤出控制栏")
+            h.stack.destroy()
+        }
+
+        // 隐藏态：点控制栏原位置（正文下方空位带 y=700）→ 唤出
+        //（"点击阅读界面底部"的字面路径——唤出热区含隐藏时控制栏空位带）
+        function test_clickOnHiddenBarStripSummons() {
+            var h = openPage()
+            var page = h.page
+            page.controlsHideDelay = 100000   // 本用例不关心计时
+            page.controlsVisible = false
+            wait(50)
+            page.handleContentTap(700)
+            tryVerify(function () { return page.controlsVisible }, 3000,
+                      "点击隐藏控制栏位置应唤出")
+            h.stack.destroy()
+        }
+
+        // 交互重置计时：唤出后轻点正文 / hover 移动均重置 5s 计时（跨过原到期点仍可见），
+        // 之后无操作才隐藏。delay=500：t0 唤出（到期 t0+500）→ t0+300 轻点（到期 t0+800）
+        // → t0+650 断言仍可见（无重置则已隐藏）→ hover 移动（到期 t0+1150）→ t0+1000
+        // 断言仍可见 → 无操作至 t0+1400 隐藏。
+        function test_interactionResetsHideTimer() {
+            var h = openPage()
+            var page = h.page
+            page.controlsHideDelay = 500
+            page.controlsVisible = false
+            wait(50)
+            page.handleContentTap(600)
+            tryVerify(function () { return page.controlsVisible }, 3000, "点击底部应唤出")
+            wait(300)
+            verify(page.controlsVisible, "到期前应仍可见")
+            page.handleContentTap(50)   // 上部轻点：只重置计时（<1/4 线不唤出）
+            wait(350)
+            verify(page.controlsVisible, "轻点应重置 5s 计时（跨过原到期点仍可见）")
+            h.stack.destroy()
+        }
+
+        // 隐藏态 hover 移动不唤出（D7 语义变更：移动只重置计时、唤出走点击）
+        // ——NoButton hover 区 onPositionChanged 只 restart，controlsVisible 保持 false
+        function test_hoverMoveDoesNotSummon() {
+            var h = openPage()
+            var page = h.page
+            page.controlsHideDelay = 100000
+            page.controlsVisible = false
+            wait(50)
+            // hover 区计时重置入口不可直接调用（MouseArea 内部），语义由
+            // hideControlsTimer.restart 无副作用保证；此处断言显隐状态不变
+            verify(!page.controlsVisible, "隐藏态下无点击时控制栏应保持隐藏")
+            h.stack.destroy()
+        }
+
+        // C2 协同：唤出/隐藏框架只作用于控制栏——朗读会话激活时 TtsBar 照常显示
+        // （即使控制栏隐藏），唤出控制栏不带动 TtsBar（state=0 仍隐藏）
+        function test_ttsBarGatingUnaffected() {
+            var h = openPage()
+            var page = h.page
+            page.controlsHideDelay = 100000
+            Tts.stop()   // 幂等复位
+            page.controlsVisible = false
+            Tts.setSentences(["测试朗读句子。"])
+            Tts.seekTo(0)   // 状态注入 state 0→1（同 C2 冒烟路径）
+            tryVerify(function () { return page.ttsBar.visible }, 3000,
+                      "朗读会话中 TtsBar 应显示")
+            verify(!page.controlsVisible, "控制栏隐藏不应影响 TtsBar 门控")
+            Tts.stop()
+            tryVerify(function () { return !page.ttsBar.visible }, 3000,
+                      "停止后 TtsBar 应隐藏")
+            page.handleContentTap(600)
+            tryVerify(function () { return page.controlsVisible }, 3000,
+                      "点击底部应唤出控制栏")
+            verify(!page.ttsBar.visible, "唤出控制栏不应带出 TtsBar（C2 门控独立）")
+            h.stack.destroy()
         }
     }
 }

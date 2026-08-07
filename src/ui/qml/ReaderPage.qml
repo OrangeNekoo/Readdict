@@ -166,10 +166,16 @@ Page {
         onTriggered: page.saveScroll()
     }
 
-    // D7：底部控制栏自动隐藏——鼠标静置 3s 淡出，移动恢复。
-    // C2：朗读条不再常显（默认隐藏，仅朗读会话激活时显示，见 ttsBarVisible 门控），
-    // 会话中播放/暂停/停止随时可达。opacity 动画不改变布局（内容区锚点不动，无跳动）。
+    // C3：底部控制栏显隐框架——点击正文底部 1/4 唤出；5s 无操作淡出隐藏
+    // （用户反馈 BUG ⑤：D7 的 hover 恢复在隐藏后无法唤出，改点击唤出）。
+    // 鼠标移动/轻点只重置 5s 计时（不再唤出），隐藏后计时停止。
+    // opacity 动画不改变布局（内容区锚点不动，无跳动）。
+    // C2 协同决策：本框架只作用于控制栏；TtsBar 显隐仍由 ttsBarVisible
+    // （C2 门控，state!=0 显示）单独决定，唤出不带出、隐藏不影响朗读条
+    // （朗读中暂停/停止随时可达）。见 task-C3-report。
     property bool controlsVisible: true
+    // C3：无操作自动隐藏延迟（ms）——冒烟测试注入短间隔收敛 5s 语义
+    property int controlsHideDelay: 5000
 
     Item {
         id: controlsHost
@@ -202,14 +208,20 @@ Page {
         }
     }
 
-    // D7：静置 3s 淡出控制栏（running 常开——滚轮/键盘翻页不动鼠标也会淡出；
-    // 鼠标移动经下方 hover 追踪 restart）
+    // C3：无操作 5s 自动隐藏控制栏——显示后启动、隐藏后停止（running 不绑定声明式
+    // 表达式：restart()/start() 的命令式写入会与绑定纠缠，改由 onControlsVisibleChanged
+    // 显式启停，状态单一）。计时重置入口：正文 hover 移动（下方 MouseArea）、
+    // 任意轻点（下方 TapHandler）。
     Timer {
         id: hideControlsTimer
-        interval: 3000
+        interval: page.controlsHideDelay
         repeat: false
-        running: true
+        running: false
         onTriggered: page.controlsVisible = false
+    }
+    onControlsVisibleChanged: {
+        if (page.controlsVisible) hideControlsTimer.start()
+        else hideControlsTimer.stop()
     }
 
     // C7：划线增删改（addHighlight/removeHighlight/updateNote）后从 Highlights 重载，
@@ -578,11 +590,13 @@ Page {
         jumpTimer.restart()
     }
 
-    // D7：hover 追踪（静置计时复位）——只覆盖正文内容区（topBar 下沿 → 朗读条上沿，
+    // C3：hover 追踪（5s 计时复位）——只覆盖正文内容区（topBar 下沿 → 朗读条上沿，
     // C2 起与正文同界：朗读条隐藏时扩展到控制栏顶，该区域在隐藏时是正文），
     // 刻意排除顶栏/朗读条/控制栏：全页 NoButton hover MouseArea 会截走按钮的 hover 反馈
-    //（Qt 把 hover 路由到最顶层项），限制区域后按钮 hover 高亮保留；鼠标从正文移到
-    // 控制栏的过程中最后一次正文 onPositionChanged 已重置计时，按钮悬停 3s 内保持可见。
+    //（Qt 把 hover 路由到最顶层项），限制区域后按钮 hover 高亮保留（D7b 修复不回归）。
+    // 语义变更：移动只重置计时、不再唤出（唤出走点击 TapHandler，隐藏态计时已停，
+    // restart 为空操作）；鼠标从正文移到控制栏的过程中最后一次 onPositionChanged
+    // 已重置计时，按钮操作在 5s 内保持可见。
     // acceptedButtons: Qt.NoButton 不拦截任何点击（正文选择/按钮点击照常透传）。
     MouseArea {
         anchors.top: topBar.bottom
@@ -592,12 +606,37 @@ Page {
         acceptedButtons: Qt.NoButton
         hoverEnabled: true
         onPositionChanged: {
-            page.controlsVisible = true
-            hideControlsTimer.restart()
+            // 只在显示态重置（restart 会启动停止态的计时器，隐藏态禁止——见 handleContentTap 注释）
+            if (page.controlsVisible)
+                hideControlsTimer.restart()
         }
     }
 
+    // C3：点击唤出热区——TapHandler 观察页面内全部轻点（DragThreshold 手势策略：
+    // 按下后位移超过阈值即取消，正文拖拽选择/滚动不受影响；观察模式不拦截任何
+    // 按钮的 hover 与点击，D7b 区域限定修复不回归。同 PdfReaderPage 双击检测模式）。
+    // 语义：任意轻点重置 5s 计时；控件隐藏时轻点正文底部 1/4（content.y + 0.75*高
+    // 至控制栏顶，含隐藏时控制栏空位带）→ 唤出控制栏。TtsBar 显隐由 C2 门控独立
+    // 决定，本框架不作用于朗读条（决策见 task-C3-report）。
+    // 状态机收敛在 handleContentTap（页面坐标 y）——TapHandler 手势桥接 + 冒烟
+    // 注入共用同一入口（quicktest harness 无法可靠合成鼠标事件，见 C7 同款取舍）。
+    // 注意：Timer.restart() 对停止态的计时器会重新启动（Qt 语义），隐藏态禁止
+    // 调用——否则违反"隐藏后计时停止"；重置只发生在显示态。
+    function handleContentTap(y) {
+        if (page.controlsVisible) {
+            hideControlsTimer.restart()   // 显示态：任意轻点重置 5s 计时
+        } else {
+            const summonBottom = content.y + content.height * 0.75
+            if (y >= summonBottom)
+                page.controlsVisible = true   // 隐藏态：底部轻点唤出（启动经 onControlsVisibleChanged）
+        }
+    }
+    TapHandler {
+        onTapped: page.handleContentTap(point.position.y)
+    }
+
     Component.onCompleted: {
+        hideControlsTimer.start()   // C3：初始可见 → 5s 无操作自动隐藏
         page.typography = page.typographyFromSettings()
         page.backgroundFromSettings()
         // 恢复：定位到保存的章节（progress/<bookId>），滚动偏移交给 ReaderContent
