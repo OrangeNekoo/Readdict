@@ -222,9 +222,18 @@ Item {
             // 列宽钳制：1400 宽 × normal(0.7) = 980 > 700 → 应钳到 700 并居中
             var col = c.contentItem.children[0]   // Column（Flickable contentItem 首子项）
             tryVerify(function () { return Math.abs(col.width - 700) < 1 }, 2000,
-                      "正文列宽应钳制在 700px 上限，实际 " + col.width)
+                      "正文列宽应钳制在 normal 档 700px 上限，实际 " + col.width)
             verify(Math.abs(col.x + col.width / 2 - c.width / 2) < 1,
                    "正文列应水平居中于窗口")
+            // C5 复审：档位上限递增（520/700/880）——宽窗下三档仍可区分（页宽切换不失效）
+            c.typography = { fontFamily: "思源宋体 VF", fontSize: 18, lineHeight: 1.6,
+                             align: "left", pageWidth: "wide" }
+            tryVerify(function () { return Math.abs(col.width - 880) < 1 }, 2000,
+                      "wide 档应钳到 880px，实际 " + col.width)
+            c.typography = { fontFamily: "思源宋体 VF", fontSize: 18, lineHeight: 1.6,
+                             align: "left", pageWidth: "narrow" }
+            tryVerify(function () { return Math.abs(col.width - 520) < 1 }, 2000,
+                      "narrow 档应钳到 520px，实际 " + col.width)
             loader.destroy()
         }
     }

@@ -469,7 +469,7 @@ Page {
     // 从 Settings 组合排版参数；fontFamily 经 Books.resolveFontFamily 映射到已安装字族
     function typographyFromSettings() {
         return {
-            fontFamily: Books.resolveFontFamily(Settings.value("typography/fontFamily") || "思源黑体 VF"),
+            fontFamily: Books.resolveFontFamily(Settings.value("typography/fontFamily") || "思源宋体 VF"),
             fontSize: Settings.value("typography/fontSize") || 18,
             lineHeight: Settings.value("typography/lineHeight") || 1.6,
             align: Settings.value("typography/align") || "left",

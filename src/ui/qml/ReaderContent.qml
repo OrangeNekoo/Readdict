@@ -376,12 +376,14 @@ Flickable {
         easing.type: Easing.OutCubic
     }
 
-    // C5：正文列 Kindle 化——页宽系数外再设 700px 上限：宽窗口下正文列不再无限拉宽，
-    // 保持"书本栏"比例（Kindle 桌面版同样固定阅读列宽，居中于窗口）。
+    // C5：正文列 Kindle 化——页宽系数外再设**档位相关**上限：宽窗口下正文列不再无限
+    // 拉宽，保持"书本栏"比例（Kindle 桌面版同样固定阅读列宽，居中于窗口）。
+    // 档位上限随页宽档递增（narrow 520 / normal 700 / wide 880），宽窗下三档仍保持
+    // 可区分（页宽切换在任意窗宽都生效；窄窗由系数主导，上限只约束宽窗）。
     Column {
         id: col
         anchors.horizontalCenter: parent.horizontalCenter
-        width: Math.min(flick.width * flick.pageWidthFactor(), flick.width - 48, 700)
+        width: Math.min(flick.width * flick.pageWidthFactor(), flick.width - 48, flick.pageWidthCap())
         spacing: 8
         Repeater {
             id: rep
@@ -701,5 +703,9 @@ Flickable {
 
     function pageWidthFactor() {
         return {narrow: 0.55, normal: 0.7, wide: 0.85}[flick.typography.pageWidth ?? "normal"]
+    }
+    // C5：页宽档位对应的列宽上限（px）——宽窗下保持档位差异（见 col.width 注释）
+    function pageWidthCap() {
+        return {narrow: 520, normal: 700, wide: 880}[flick.typography.pageWidth ?? "normal"]
     }
 }
