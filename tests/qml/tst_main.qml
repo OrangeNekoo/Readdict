@@ -347,8 +347,8 @@ Item {
         }
         // 规格 §7：章末自动续章——滚动接近底部触发 requestNextChapter（ReaderContent 信号层）。
         // 独立实例化 ReaderContent 并显式设置宽高（HighlightSmoke 同模式；ReaderPage 的锚定
-        // 布局在无头测试环境高度不可靠），避免环境布局差异：高内容章滚动到距底部阈值内触发、
-        // 顶部不触发、同一章内只触发一次（去重）。
+        // 布局在无头测试环境高度不可靠），避免环境布局差异。覆盖：顶部不触发、距底阈值内
+        // 触发、同章去重、maxY<=阈值（短章）不触发、阈值带精确。
         function test_scrollAutoNextSignal() {
             var loader = contentComp.createObject(root)
             loader.width = 800
@@ -381,6 +381,120 @@ Item {
             c.contentY = Math.max(0, c.contentHeight - c.height - 50)
             wait(100)
             compare(fires, 1, "同一章内 requestNextChapter 应只触发一次")
+            // 短章语义：maxY <= 阈值带（内容仅超出视口 1..200px）时任何 contentY>0
+            // 都落在带内——不得触发（否则首个小滚动即误换章、连翻多章）
+            c.nextChapterRequested = false
+            c.autoNextThreshold = 10000   // 阈值大于 maxY → 模拟短章
+            c.contentY = 10
+            wait(50)
+            c.contentY = Math.max(0, c.contentHeight - c.height - 50)
+            wait(100)
+            compare(fires, 1, "maxY 小于等于阈值时滚动触底不应触发")
+            // 阈值带精确：阈值 10px → 距底 50px（带外）不触发、距底 5px（带内）触发
+            c.nextChapterRequested = false
+            c.autoNextThreshold = 10
+            c.contentY = 10
+            wait(50)
+            c.contentY = Math.max(0, c.contentHeight - c.height - 50)
+            wait(100)
+            compare(fires, 1, "距底超过阈值不应触发")
+            c.contentY = 10
+            wait(50)
+            c.contentY = Math.max(0, c.contentHeight - c.height - 5)
+            wait(100)
+            compare(fires, 2, "距底 5px（小于阈值 10px）应触发")
+            loader.destroy()
+        }
+
+        // 规格 §7 门控：TTS 朗读会话活动（播放 state==1 或暂停 state==2）期间滚动触底
+        // 不触发自动续章——暂停会话若被滚动换章打断，loadChapter 的 Tts.stop() 会丢弃
+        // 暂停进度且不续读；停止（state==0）后滚动续章恢复。
+        function test_scrollAutoNextTtsPauseGate() {
+            var loader = contentComp.createObject(root)
+            loader.width = 800
+            loader.height = 600
+            var c = loader.item
+            c.typography = { fontFamily: "Source Han Sans VF", fontSize: 18, lineHeight: 1.6,
+                             align: "left", pageWidth: "normal" }
+            var paras = []
+            for (var i = 0; i < 80; i++)
+                paras.push({ text: "第" + i + "段第一句。",
+                             html: "第" + i + "段第一句。",
+                             level: 0, imagePath: "",
+                             sentences: ["第" + i + "段第一句。"] })
+            c.chapter = { title: "章", paragraphs: paras }
+            tryVerify(function () { return c.contentHeight > c.height + 400 }, 5000,
+                      "内容高度应远大于视口，实际 " + c.contentHeight)
+            var fires = 0
+            c.requestNextChapter.connect(function () { fires++ })
+            // TTS 暂停（state==2）：滚动触底不触发（暂停会话不应被丢弃）
+            Tts.pause()
+            c.contentY = Math.max(0, c.contentHeight - c.height - 50)
+            wait(150)
+            compare(fires, 0, "TTS 暂停中滚动触底不应触发 requestNextChapter")
+            // TTS 停止（state==0）：滚动续章恢复
+            Tts.stop()
+            c.contentY = 10
+            wait(50)
+            c.contentY = Math.max(0, c.contentHeight - c.height - 50)
+            tryVerify(function () { return fires >= 1 }, 3000,
+                      "TTS 停止后滚动触底应触发 requestNextChapter")
+            loader.destroy()
+        }
+
+        // 规格 §7 门控：程序化/动画滚动（搜索跳转 scrollToParagraph、朗读跟随
+        // followSentence）不触发自动续章——目标在底部阈值带内时动画中途换章会毁掉
+        // 跳转上下文。动画结束停在章末也不触发（无用户滚动）；随后用户手动滚动才触发。
+        function test_scrollAutoNextProgrammaticScroll() {
+            var loader = contentComp.createObject(root)
+            loader.width = 800
+            loader.height = 600
+            var c = loader.item
+            c.typography = { fontFamily: "Source Han Sans VF", fontSize: 18, lineHeight: 1.6,
+                             align: "left", pageWidth: "normal" }
+            var paras = []
+            for (var i = 0; i < 80; i++)
+                paras.push({ text: "第" + i + "段第一句。",
+                             html: "第" + i + "段第一句。",
+                             level: 0, imagePath: "",
+                             sentences: ["第" + i + "段第一句。"] })
+            c.chapter = { title: "章", paragraphs: paras }
+            tryVerify(function () { return c.contentHeight > c.height + 400 }, 5000,
+                      "内容高度应远大于视口，实际 " + c.contentHeight)
+            var fires = 0
+            c.requestNextChapter.connect(function () { fires++ })
+            // 朗读跟随动画滚向章末（末段目标被钳制在 maxY 阈值带内）：
+            // 动画进行中（contentY 途经阈值带）与结束后（停在带内）都不触发
+            c.followSentence(79)
+            wait(600) // 动画 320ms + 余量，期间每帧 contentY 变化都会进 checkAutoNext
+            compare(fires, 0, "动画滚动到章末不应触发 requestNextChapter")
+            // 用户手动滚动（先上移再回到底部）→ 触发
+            c.contentY = Math.max(0, c.contentHeight - c.height - 100)
+            wait(50)
+            c.contentY = Math.max(0, c.contentHeight - c.height - 20)
+            tryVerify(function () { return fires >= 1 }, 3000,
+                      "用户手动滚动到章末应触发 requestNextChapter")
+            loader.destroy()
+        }
+
+        // 规格 §7 端到端绑定：ReaderContent 的 requestNextChapter 信号必须经 ReaderPage 的
+        // onRequestNextChapter 绑定调用 autoNextChapter 换章（断绑则滚动续章静默失效）。
+        // 直接 emit 信号（QML 信号可作方法调用）锁定该一行绑定，不依赖无头环境的锚定布局。
+        function test_scrollAutoNextBinding() {
+            var book = findBook("TXT", "multibook")
+            if (!book) skip("未导入多章节长书")
+            var loader = openReader(book)
+            var page = loader.item
+            tryVerify(function () { return page.chapter.paragraphs && page.chapter.paragraphs.length > 0 }, 5000,
+                      "打开应加载章节")
+            page.loadChapter(0) // 显式定位首章（此前测试可能已保存其他章节）
+            tryVerify(function () { return page.chapter.paragraphs.length === 100 }, 5000,
+                      "首章应加载 100 段")
+            compare(Books.currentChapter, 0, "初始应在第 1 章")
+            page.contentView.requestNextChapter()
+            tryVerify(function () { return Books.currentChapter === 1 }, 3000,
+                      "requestNextChapter 应经绑定触发 autoNextChapter 换章，实际 " + Books.currentChapter)
+            compare(page.chapter.title, "第二章")
             loader.destroy()
         }
 
@@ -394,7 +508,10 @@ Item {
             if (!book) skip("未导入多章节长书")
             var loader = openReader(book)
             var page = loader.item
-            tryVerify(function () { return page.chapter.paragraphs && page.chapter.paragraphs.length === 100 }, 5000,
+            tryVerify(function () { return page.chapter.paragraphs && page.chapter.paragraphs.length > 0 }, 5000,
+                      "打开应加载章节")
+            page.loadChapter(0) // 显式定位首章（本用例即后续用例的 saved 章节基准）
+            tryVerify(function () { return page.chapter.paragraphs.length === 100 }, 5000,
                       "首章应加载 100 段")
             // 滚动续章入口：非末章 → 换下一章
             page.autoNextChapter()

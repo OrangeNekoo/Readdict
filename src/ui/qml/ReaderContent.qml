@@ -44,9 +44,10 @@ Flickable {
     signal requestNextChapter()
     property int autoNextThreshold: 200
     property bool nextChapterRequested: false
-    // TTS 播放中滚动位置由 followSentence 驱动（非用户意图）：自动续章改走
-    // ReaderPage 的 Tts.chapterCompleted 路径，滚动触发在播放中停用
-    property bool ttsPlaying: false
+    // TTS 朗读会话活动（state != 0，含暂停）：活动期间滚动位置由 followSentence 驱动
+    //（非用户意图）；且暂停会话若被滚动换章打断，loadChapter 的 Tts.stop() 会丢弃暂停
+    // 进度且不续读——自动续章改走 ReaderPage 的 Tts.chapterCompleted 路径，活动中停用
+    property bool ttsActive: false
     // C5：每段起始句子全局索引（sentenceStarts[i] = 前 i 段句子总数），与
     // ReaderPage 拍平喂给 Tts.setSentences 的顺序一致；totalSentences 供测试断言。
     property var sentenceStarts: []
@@ -110,7 +111,8 @@ Flickable {
 
     // 规格 §7：章末自动续章——距底部 autoNextThreshold 内（且用户已实际滚动，contentY>0）
     // 触发 requestNextChapter。恢复窗口内不触发（恢复把用户拽到保存位置，非主动滚动）；
-    // TTS 播放中滚动位置由 followSentence 驱动，同样不触发（朗读续章走 chapterCompleted 路径）。
+    // TTS 会话活动（播放/暂停）与动画滚动（搜索跳转/朗读跟随）中同样不触发——
+    // 朗读续章走 chapterCompleted 路径，暂停会话不应被滚动换章打断丢弃。
     onContentYChanged: {
         if (flick.restoreApplied && flick.restoreAppliedY >= 0
                 && Math.abs(flick.contentY - flick.restoreAppliedY) > 1)
@@ -120,9 +122,14 @@ Flickable {
 
     function checkAutoNext() {
         if (flick.nextChapterRequested || flick.restorePending || flick.restoreApplied
-                || flick.ttsPlaying || flick.contentHeight <= 0 || flick.height <= 0)
+                || flick.ttsActive || followAnim.running
+                || flick.contentHeight <= 0 || flick.height <= 0)
             return
-        // contentY > 0：整章放得下视口的短章（maxY<=0 或极小）停在顶部时不触发；
+        // 可滚动范围必须大于阈值带：maxY <= autoNextThreshold 的短章（内容仅超出视口
+        // 1..200px）任何 contentY>0 都落在带内，首个小滚动即误换章、连翻多章——不触发
+        if (flick.contentHeight - flick.height <= flick.autoNextThreshold)
+            return
+        // contentY > 0：整章放得下视口的短章（maxY<=0）停在顶部时不触发；
         // 短章读者已看到全部内容，不应被自动拽走
         if (flick.contentY > 0 && flick.contentY >= flick.contentHeight - flick.height - flick.autoNextThreshold) {
             flick.nextChapterRequested = true   // 去重：同一章只发一次，换章（onChapterChanged）复位
@@ -350,7 +357,7 @@ Flickable {
     Connections {
         target: Tts
         function onSentenceChanged(index) { flick.followSentence(index) }
-        function onStateChanged(state) { flick.ttsPlaying = state === 1 }
+        function onStateChanged(state) { flick.ttsActive = state !== 0 }
     }
 
     NumberAnimation {
