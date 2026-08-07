@@ -166,7 +166,11 @@ Page {
                 id: catList
                 Layout.preferredWidth: 160
                 Layout.fillHeight: true
+                clip: true
                 model: Books.categoriesModel
+                // C4：分类侧栏小窗滚动——分类多时列表超高，滚动条 AsNeeded
+                //（与网格 ScrollBar 同策略；GridView 已有 ScrollBar.vertical）
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                 delegate: ItemDelegate {
                     width: ListView.view.width
                     text: modelData

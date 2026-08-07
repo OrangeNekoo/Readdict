@@ -6,6 +6,12 @@ import Readdict.Backend
 ApplicationWindow {
     id: root
     width: 1100; height: 720
+    // C4：最小窗口尺寸——800 宽保证书架分类侧栏(160) + 封面网格(单元格 184，
+    // 至少 1 列) + 工具栏在窗口内可读；600 高保证设置页分组卡片（外观/语言/
+    // TTS/背景/同步/统计）顶部内容可见，超高部分由 SettingsPage 的 ScrollView
+    // 滚动兜底（最小尺寸取值与各页滚动方案见 .superpowers/sdd/task-C4-report.md）
+    minimumWidth: 800
+    minimumHeight: 600
     visible: true
     title: qsTr("Readdict")
 

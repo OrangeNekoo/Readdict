@@ -123,7 +123,7 @@ Item {
             var loader = settingsComp.createObject(root)
             var page = loader.item
             verify(page !== null, "SettingsPage 应能加载（含 TTS 配置区）")
-            var layout = page.contentItem.children[0]  // ColumnLayout
+            var layout = page.settingsLayout     // ColumnLayout（C4 起包于 ScrollView，经句柄访问）
             // B5 设置页分组卡片化后：children[0]=返回按钮 [1]=外观卡 [2]=语言卡
             // [3]=朗读(TTS)卡 [4]=阅读背景卡 [5]=同步卡 [6]=统计卡 [7]=版本标签
             // （提示 Timer 是非可视 data 子项，不计入 children）；

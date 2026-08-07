@@ -29,6 +29,11 @@ Page {
     property alias refreshCoversHint: refreshCoversHint
     // B4：返回按钮测试句柄（QML 冒烟经此模拟返回书架导航，onClicked 即 goBack）
     property alias backButton: backButton
+    // C4：设置页滚动句柄（QML 冒烟经 settingsScroll 断言最小窗口下可滚动到底；
+    // settingsLayout 供 SettingsTtsSmoke 访问卡片索引——B5 起布局索引随卡片化变化，
+    // C4 起 ColumnLayout 包入 ScrollView，经此句柄访问不受包装层级影响）
+    property alias settingsLayout: settingsLayout
+    property alias settingsScroll: settingsScroll
     // 当前背景分区状态（onCompleted 从 Settings 恢复；导入后更新）
     property string bgImagePath: ""
     property real bgBlur: 0.0
@@ -65,8 +70,21 @@ Page {
         }
     }
 
-    ColumnLayout {
-        anchors.fill: parent; anchors.margins: 24; spacing: 12
+    // C4：整页滚动——最小窗口高度(600)下分组卡片总高可能超高（B5 卡片化后
+    // 返回行 + 外观/语言/朗读/背景/同步/统计 6 张卡 + 版本标签），包 ScrollView
+    // 使内容可滚动到底（底部同步/统计入口与版本标签小窗可达）。ColumnLayout
+    // 不再 anchors.fill：width 绑 availableWidth（视图区宽度，避免横向滚动条），
+    // 高度由 ScrollView 按内容 implicit 高度自动追踪 contentHeight（Qt 6.11 实测）。
+    // 滚动条样式统一 AsNeeded：内容不超高时不占用空间。
+    ScrollView {
+        id: settingsScroll
+        anchors.fill: parent
+        anchors.margins: 24
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+        ColumnLayout {
+            id: settingsLayout
+            width: settingsScroll.availableWidth
+            spacing: 12
         // B4：返回书架——顶部返回按钮（SyncPage/StatsPage 同款导航位），
         // onClicked 走 goBack()（抽函数暴露供 QML 冒烟驱动）
         ToolButton {
@@ -381,6 +399,7 @@ Page {
         }
 
         Label { text: qsTr("版本 0.1.0"); color: Material.secondaryTextColor }
+        }
     }
     // B4：返回上一页（书架）。SyncPage/StatsPage 内联 pop()，此处抽函数暴露供
     // QML 冒烟测试驱动（返回按钮 onClicked 即此路径，等价于点击）
