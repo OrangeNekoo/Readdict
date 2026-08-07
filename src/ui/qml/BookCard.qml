@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
+import QtQuick.Effects
 import QtQuick.Layouts
 import Readdict.Backend
 
@@ -11,20 +12,40 @@ Item {
     width: 180
     height: 280
 
+    // D7：悬停上浮——scale 1.03 + Behavior 缓动（Material 卡片悬停反馈）
+    scale: cardMouse.hovered ? 1.03 : 1.0
+    Behavior on scale {
+        NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+    }
+
     Rectangle {
         anchors.fill: parent
         radius: 8
         color: Material.background
         border.color: Material.dividerColor
+        // D7：轻阴影（Material elevation）——layer 化后按圆角形状投影，随悬停缩放联动
+        layer.enabled: true
+        layer.effect: MultiEffect {
+            shadowEnabled: true
+            shadowBlur: 0.4
+            shadowColor: "#3D000000"
+            shadowVerticalOffset: 2
+        }
 
-        Image {
+        // D7：封面圆角——Rectangle 圆角 + clip 裁剪（Image 无 radius 属性）
+        Rectangle {
             id: coverImg
             anchors.top: parent.top
             anchors.horizontalCenter: parent.horizontalCenter
             width: 120
             height: 160
-            source: card.book.cover ? "file://" + card.book.cover : ""
-            fillMode: Image.PreserveAspectCrop
+            radius: 6
+            clip: true
+            Image {
+                anchors.fill: parent
+                source: card.book.cover ? "file://" + card.book.cover : ""
+                fillMode: Image.PreserveAspectCrop
+            }
         }
 
         Text {
@@ -46,8 +67,11 @@ Item {
         }
 
         MouseArea {
+            id: cardMouse
             anchors.fill: parent
             acceptedButtons: Qt.LeftButton | Qt.RightButton
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
             onClicked: (mouse) => {
                 if (mouse.button === Qt.RightButton)
                     cardMenu.popup()

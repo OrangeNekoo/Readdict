@@ -66,7 +66,9 @@ Page {
             Label {
                 id: topBarTitle
                 Layout.fillWidth: true
-                text: page.chapter.title ?? ""
+                // D7：顶栏显示 书名 · 章节（章节未加载时仅显示书名）
+                text: (page.book && page.book.title ? page.book.title : "")
+                      + (page.chapter && page.chapter.title ? " · " + page.chapter.title : "")
                 elide: Text.ElideRight
                 font.bold: true
                 color: page.bgMode === "dark" ? "#E6E6E6" : "#1A1A1A"
@@ -126,22 +128,44 @@ Page {
         onTriggered: page.saveScroll()
     }
 
-    ReaderControls {
-        id: controls
+    // D7：底部控制栏自动隐藏——鼠标静置 3s 淡出，移动恢复；朗读条（TtsBar）常显不隐藏，
+    // 保证播放中暂停/停止随时可达。opacity 动画不改变布局（内容区锚点不动，无跳动）。
+    property bool controlsVisible: true
+
+    Item {
+        id: controlsHost
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        bgMode: page.bgMode
-        fontSize: page.typography.fontSize ?? 18
-        onPrevChapter: page.loadChapter(Books.currentChapter - 1)
-        onNextChapter: page.loadChapter(Books.currentChapter + 1)
-        onChangeFontSize: (size) => page.setFontSize(size)
-        onToggleBackground: page.cycleBackground()
-        onToggleAlign: page.cycleAlign()
-        onTogglePageWidth: page.cyclePageWidth()
-        onOpenToc: tocDialog.open()
-        onOpenNotes: notesDlg.open()
-        onOpenSearch: searchDlg.open()
+        height: 52
+        opacity: page.controlsVisible ? 1.0 : 0.0
+        visible: page.controlsVisible || opacity > 0.01
+        Behavior on opacity {
+            NumberAnimation { duration: 200; easing.type: Easing.OutQuad }
+        }
+        ReaderControls {
+            id: controls
+            anchors.fill: parent
+            bgMode: page.bgMode
+            fontSize: page.typography.fontSize ?? 18
+            onPrevChapter: page.loadChapter(Books.currentChapter - 1)
+            onNextChapter: page.loadChapter(Books.currentChapter + 1)
+            onChangeFontSize: (size) => page.setFontSize(size)
+            onToggleBackground: page.cycleBackground()
+            onToggleAlign: page.cycleAlign()
+            onTogglePageWidth: page.cyclePageWidth()
+            onOpenToc: tocDialog.open()
+            onOpenNotes: notesDlg.open()
+            onOpenSearch: searchDlg.open()
+        }
+    }
+
+    // D7：静置 3s 淡出控制栏
+    Timer {
+        id: hideControlsTimer
+        interval: 3000
+        repeat: false
+        onTriggered: page.controlsVisible = false
     }
 
     // C7：划线增删改（addHighlight/removeHighlight/updateNote）后从 Highlights 重载，
@@ -487,6 +511,18 @@ Page {
         page.loadChapter(ci)
         jumpTimer.targetIndex = hl.sentenceIndex
         jumpTimer.restart()
+    }
+
+    // D7：全页 hover 追踪——声明在最后保持最顶层；acceptedButtons: Qt.NoButton 不拦截
+    // 任何点击（正文选择/按钮点击照常透传），只收鼠标移动：移动即恢复控制栏并重置静置计时
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.NoButton
+        hoverEnabled: true
+        onPositionChanged: {
+            page.controlsVisible = true
+            hideControlsTimer.restart()
+        }
     }
 
     Component.onCompleted: {

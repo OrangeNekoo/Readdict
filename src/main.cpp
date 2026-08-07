@@ -5,7 +5,9 @@
 #include <QLocale>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QFontDatabase>
+#include <QPair>
 #include <QStandardPaths>
 #include <QTimer>
 #include <qqml.h>
@@ -19,25 +21,36 @@
 #include "ui/ReaderTextHelper.h"
 #include "ui/LanguageController.h"
 
-// B8：加载 fronts/ 下的可变字体（思源黑体 VF / 思源宋体 VF / 得意黑）。
-// 开发期从仓库根 fronts/ 相对当前工作目录加载（构建目录启动时 CWD 为仓库根），
-// 兜底应用包 Resources/fronts（D7 打包完善）；失败仅告警不崩溃。
+// D7：加载 fronts/ 下的可变字体（思源黑体 VF / 思源宋体 VF / 得意黑）。
+// 三组路径互备，失败仅告警不崩溃：
+//  1. 开发期——仓库根 fronts/ 相对当前工作目录（构建目录启动时 CWD 为仓库根，嵌套布局）
+//  2. 打包态（macOS）——.app 内 Contents/Resources/fonts（扁平布局，CMake POST_BUILD 拷入）
+//  3. 打包态（其他平台）——安装目录 ../share/readdict/fonts（扁平布局，install(FILES)）
 static void loadBundledFonts() {
-    const QStringList baseDirs = {
-        QDir::currentPath() + "/fronts",                                 // 从仓库根启动（开发）
-        QCoreApplication::applicationDirPath() + "/../Resources/fronts", // .app bundle（D7 打包）
-    };
-    const QStringList rels = {
+    // 仓库内嵌套布局（与 fronts/ 实际文件路径一致）
+    const QStringList devRels = {
         QStringLiteral("02_SourceHanSans-VF/02_SourceHanSans-VF/Variable/SourceHanSans-VF.otf.ttc"),
         QStringLiteral("02_SourceHanSans-VF/02_SourceHanSans-VF/Variable/SourceHanSansHW-VF.otf.ttc"),
         QStringLiteral("02_SourceHanSerif-VF/02_SourceHanSerif-VF/Variable/SourceHanSerif-VF.otf.ttc"),
         QStringLiteral("smiley-sans-v2.0.1/SmileySans-Oblique.otf"),
     };
+    // bundle/安装目录扁平布局（CMake 以实际文件名拷贝）
+    const QStringList flatRels = {
+        QStringLiteral("SourceHanSans-VF.otf.ttc"),
+        QStringLiteral("SourceHanSansHW-VF.otf.ttc"),
+        QStringLiteral("SourceHanSerif-VF.otf.ttc"),
+        QStringLiteral("SmileySans-Oblique.otf"),
+    };
+    const QList<QPair<QString, QStringList>> dirs = {
+        { QDir::currentPath() + "/fronts", devRels },
+        { QCoreApplication::applicationDirPath() + "/../Resources/fonts", flatRels },
+        { QCoreApplication::applicationDirPath() + "/../share/readdict/fonts", flatRels },
+    };
     int loaded = 0;
     QStringList seen; // 规范路径去重：CWD 兜底与绝对路径兜底可能指向同一文件
-    for (const QString &base : baseDirs) {
-        for (const QString &rel : rels) {
-            const QString path = base + "/" + rel;
+    for (const auto &dir : dirs) {
+        for (const QString &rel : dir.second) {
+            const QString path = dir.first + "/" + rel;
             const QString canon = QFileInfo(path).canonicalFilePath();
             if (canon.isEmpty() || seen.contains(canon)) continue;
             seen.append(canon);
@@ -51,8 +64,8 @@ static void loadBundledFonts() {
         }
     }
     if (loaded == 0)
-        qWarning() << "未找到任何 bundled 字体，检查路径:" << baseDirs
-                   << "（开发期从仓库根运行 ./build/Readdict 以命中 CWD 下的 fronts/）";
+        qWarning() << "未找到任何 bundled 字体，检查路径:" << dirs
+                   << "（开发期从仓库根运行 build/Readdict.app/Contents/MacOS/Readdict 以命中 CWD 下的 fronts/）";
     else
         qInfo() << "字体加载完成，共" << loaded << "个字体文件";
 }

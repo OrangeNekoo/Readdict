@@ -17,6 +17,12 @@ ApplicationWindow {
                    : root.theme === "light" ? Material.Light
                    : Material.System
 
+    // D7：Material 主题主色——浅色 #3D5AFE（靛蓝 A200）；深色模式调暗为靛蓝 600，
+    // 在深色背景上降低高饱和主色的刺眼度，同时保证按钮/进度条等主色控件的对比度。
+    // accent 同族微调，保证选中态（复选框/滑块/搜索框焦点）与主色协调。
+    Material.primary: root.theme === "dark" ? "#3949AB" : "#3D5AFE"
+    Material.accent: root.theme === "dark" ? "#5C6BC0" : "#536DFE"
+
     // 启动时从 settings.json 恢复上次主题选择（SettingsStore 默认值即 auto）
     Component.onCompleted: {
         const mode = Settings.value("theme/mode")

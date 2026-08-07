@@ -4,34 +4,34 @@
 <context>
     <name>BookCard</name>
     <message>
-        <location filename="../qml/BookCard.qml" line="63"/>
-        <location filename="../qml/BookCard.qml" line="70"/>
-        <location filename="../qml/BookCard.qml" line="63"/>
-        <location filename="../qml/BookCard.qml" line="70"/>
+        <location filename="../qml/BookCard.qml" line="84"/>
+        <location filename="../qml/BookCard.qml" line="91"/>
+        <location filename="../qml/BookCard.qml" line="84"/>
+        <location filename="../qml/BookCard.qml" line="91"/>
         <source>设置分类</source>
         <translation>设置分类</translation>
     </message>
     <message>
-        <location filename="../qml/BookCard.qml" line="77"/>
-        <location filename="../qml/BookCard.qml" line="77"/>
+        <location filename="../qml/BookCard.qml" line="98"/>
+        <location filename="../qml/BookCard.qml" line="98"/>
         <source>选择已有分类</source>
         <translation>选择已有分类</translation>
     </message>
     <message>
-        <location filename="../qml/BookCard.qml" line="94"/>
-        <location filename="../qml/BookCard.qml" line="94"/>
+        <location filename="../qml/BookCard.qml" line="115"/>
+        <location filename="../qml/BookCard.qml" line="115"/>
         <source>或新建分类</source>
         <translation>或新建分类</translation>
     </message>
     <message>
-        <location filename="../qml/BookCard.qml" line="99"/>
-        <location filename="../qml/BookCard.qml" line="99"/>
+        <location filename="../qml/BookCard.qml" line="120"/>
+        <location filename="../qml/BookCard.qml" line="120"/>
         <source>输入新分类名称…</source>
         <translation>输入新分类名称…</translation>
     </message>
     <message>
-        <location filename="../qml/BookCard.qml" line="102"/>
-        <location filename="../qml/BookCard.qml" line="102"/>
+        <location filename="../qml/BookCard.qml" line="123"/>
+        <location filename="../qml/BookCard.qml" line="123"/>
         <source>清除分类</source>
         <translation>清除分类</translation>
     </message>
@@ -166,89 +166,89 @@
         <translation>返回</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="159"/>
-        <location filename="../qml/ReaderPage.qml" line="159"/>
+        <location filename="../qml/ReaderPage.qml" line="183"/>
+        <location filename="../qml/ReaderPage.qml" line="183"/>
         <source>目录</source>
         <translation>目录</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="189"/>
+        <location filename="../qml/ReaderPage.qml" line="213"/>
         <location filename="../../../tests/tst_language.cpp" line="26"/>
         <location filename="../../../tests/tst_language.cpp" line="45"/>
-        <location filename="../qml/ReaderPage.qml" line="189"/>
+        <location filename="../qml/ReaderPage.qml" line="213"/>
         <source>笔记</source>
         <translation>笔记</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="231"/>
-        <location filename="../qml/ReaderPage.qml" line="231"/>
+        <location filename="../qml/ReaderPage.qml" line="255"/>
+        <location filename="../qml/ReaderPage.qml" line="255"/>
         <source>笔记：</source>
         <translation>笔记：</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="231"/>
-        <location filename="../qml/ReaderPage.qml" line="231"/>
+        <location filename="../qml/ReaderPage.qml" line="255"/>
+        <location filename="../qml/ReaderPage.qml" line="255"/>
         <source>（无笔记）</source>
         <translation>（无笔记）</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="239"/>
-        <location filename="../qml/ReaderPage.qml" line="239"/>
+        <location filename="../qml/ReaderPage.qml" line="263"/>
+        <location filename="../qml/ReaderPage.qml" line="263"/>
         <source>跳转</source>
         <translation>跳转</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="244"/>
-        <location filename="../qml/ReaderPage.qml" line="244"/>
+        <location filename="../qml/ReaderPage.qml" line="268"/>
+        <location filename="../qml/ReaderPage.qml" line="268"/>
         <source>编辑</source>
         <translation>编辑</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="253"/>
-        <location filename="../qml/ReaderPage.qml" line="253"/>
+        <location filename="../qml/ReaderPage.qml" line="277"/>
+        <location filename="../qml/ReaderPage.qml" line="277"/>
         <source>删除</source>
         <translation>删除</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="268"/>
-        <location filename="../qml/ReaderPage.qml" line="268"/>
+        <location filename="../qml/ReaderPage.qml" line="292"/>
+        <location filename="../qml/ReaderPage.qml" line="292"/>
         <source>编辑笔记</source>
         <translation>编辑笔记</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="277"/>
-        <location filename="../qml/ReaderPage.qml" line="277"/>
+        <location filename="../qml/ReaderPage.qml" line="301"/>
+        <location filename="../qml/ReaderPage.qml" line="301"/>
         <source>修改这条划线的笔记：</source>
         <translation>修改这条划线的笔记：</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="284"/>
-        <location filename="../qml/ReaderPage.qml" line="284"/>
+        <location filename="../qml/ReaderPage.qml" line="308"/>
+        <location filename="../qml/ReaderPage.qml" line="308"/>
         <source>写下你的想法…</source>
         <translation>写下你的想法…</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="298"/>
+        <location filename="../qml/ReaderPage.qml" line="322"/>
         <location filename="../../../tests/tst_language.cpp" line="36"/>
-        <location filename="../qml/ReaderPage.qml" line="298"/>
+        <location filename="../qml/ReaderPage.qml" line="322"/>
         <source>书内搜索</source>
         <translation>书内搜索</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="309"/>
-        <location filename="../qml/ReaderPage.qml" line="309"/>
+        <location filename="../qml/ReaderPage.qml" line="333"/>
+        <location filename="../qml/ReaderPage.qml" line="333"/>
         <source>输入关键词…</source>
         <translation>输入关键词…</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="336"/>
-        <location filename="../qml/ReaderPage.qml" line="336"/>
+        <location filename="../qml/ReaderPage.qml" line="360"/>
+        <location filename="../qml/ReaderPage.qml" line="360"/>
         <source>无标题</source>
         <translation>无标题</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="337"/>
-        <location filename="../qml/ReaderPage.qml" line="337"/>
+        <location filename="../qml/ReaderPage.qml" line="361"/>
+        <location filename="../qml/ReaderPage.qml" line="361"/>
         <source>第%1段</source>
         <translation>第%1段</translation>
     </message>
@@ -590,8 +590,14 @@
         <translation>全部</translation>
     </message>
     <message>
-        <location filename="../qml/ShelfPage.qml" line="222"/>
-        <location filename="../qml/ShelfPage.qml" line="222"/>
+        <location filename="../qml/ShelfPage.qml" line="219"/>
+        <location filename="../qml/ShelfPage.qml" line="219"/>
+        <source>导入你的第一本书</source>
+        <translation>导入你的第一本书</translation>
+    </message>
+    <message>
+        <location filename="../qml/ShelfPage.qml" line="235"/>
+        <location filename="../qml/ShelfPage.qml" line="235"/>
         <source>未知书籍</source>
         <translation>未知书籍</translation>
     </message>

@@ -211,6 +211,19 @@ Page {
         }
     }
 
+    // D7：空状态——书库无书（且无搜索词/分类筛选）时居中提示。
+    // 用 booksModel.length（过滤后）判断空网格，但仅当无搜索词且无筛选时
+    // 才显示"导入第一本书"文案，避免搜索 0 命中时出现误导性提示。
+    Label {
+        anchors.centerIn: parent
+        text: qsTr("导入你的第一本书")
+        font.pixelSize: 22
+        color: "#999999"
+        visible: Books.booksModel.length === 0
+                 && shelf.searchEdit.text.length === 0
+                 && catList.currentIndex < 0
+    }
+
     // ---- C8：全文搜索结果辅助 ----
     function bookById(id) {
         for (let b of Books.booksModel)
