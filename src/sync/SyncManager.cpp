@@ -50,6 +50,39 @@ QString SyncManager::settingsPath() const {
     return QFileInfo(m_dbPath).absoluteDir().filePath(QStringLiteral("settings.json"));
 }
 
+// ---- 同步状态（libraryDir/.readdict_sync.json）----
+// 记录"已采纳的远端版本"（books 用）：applyBooksJson 无法把载荷版本写进数据列
+// （远端新书本地无行），版本时钟（MAX(added_at)）追不上载荷 → 每次 TakeRemote 下载
+// 后 apply 无版本前进、重复下载永不 Skip。adopted 与数据 max 取大作为本地版本，
+// 上传/下载后 adopted 对齐"远端文件当前实际内容"的版本，保证三端收敛。
+
+QString SyncManager::syncStatePath() const {
+    return m_libraryDir + QStringLiteral("/.readdict_sync.json");
+}
+
+QDateTime SyncManager::adoptedVersion(const QString &item) const {
+    QFile f(syncStatePath());
+    if (!f.open(QIODevice::ReadOnly))
+        return QDateTime();
+    const QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
+    return parseIso(root.value(item).toObject().value(QStringLiteral("adopted")).toString());
+}
+
+void SyncManager::setAdoptedVersion(const QString &item, const QDateTime &v) {
+    if (!v.isValid())
+        return;
+    QJsonObject root;
+    QFile f(syncStatePath());
+    if (f.open(QIODevice::ReadOnly))
+        root = QJsonDocument::fromJson(f.readAll()).object();
+    root.insert(item, QJsonObject{{QStringLiteral("adopted"), v.toString(Qt::ISODate)}});
+    QDir().mkpath(QFileInfo(syncStatePath()).absolutePath());
+    QFile w(syncStatePath());
+    if (!w.open(QIODevice::WriteOnly))
+        return;
+    w.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+}
+
 void SyncManager::log(const QString &line) {
     m_log.append(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))
                  + QStringLiteral(" ") + line);
@@ -118,7 +151,9 @@ QByteArray SyncManager::buildHighlightsJson() const {
                 {"text", q.value(4).isNull() ? QJsonValue() : QJsonValue(q.value(4).toString())},
                 {"color", q.value(5).toString()},
                 {"note", q.value(6).toString()},
-                {"createdAt", created.isValid() ? created.toUTC().toString(Qt::ISODate)
+                // 毫秒精度序列化：编辑端 bump 用 ISODateWithMs，载荷必须同样保留毫秒，
+                // 否则同秒两次编辑在载荷中截断成同一版本、第二次编辑不同步
+                {"createdAt", created.isValid() ? created.toUTC().toString(Qt::ISODateWithMs)
                                                 : q.value(7).toString()},
             });
         }
@@ -235,34 +270,38 @@ void SyncManager::applyHighlightsJson(const QByteArray &data) {
         // 去重键 (bookId, chapter, sentenceIndex, text)：id 不参与（跨设备 id 不可信）。
         // IS 匹配正确处理 NULL 字段（chapter/sentence_index 可空）。
         QSqlQuery q(m_db);
-        q.prepare(QStringLiteral("SELECT id,color,note FROM highlights WHERE book_id IS ?"
+        q.prepare(QStringLiteral("SELECT id,color,note,created_at FROM highlights WHERE book_id IS ?"
                                  " AND chapter IS ? AND sentence_index IS ? AND text IS ?"));
         q.addBindValue(bookId);
         q.addBindValue(chapter);
         q.addBindValue(sentenceIndex);
         q.addBindValue(text);
         if (q.exec() && q.next()) {
-            // 已存在：不重复插入；但远端对同一划线修改过 note/color 时合并过来
-            // （LWW：远端为准；无差异不写，保持幂等）。
-            // 合并更新时 created_at 取载荷 createdAt（转本地格式），绝不前移到
-            // currentDateTime：采用端版本 == 载荷版本 → 下次比较即 Skip；若前移 T+ε 会
-            // 超越原编辑端版本 T，导致原编辑端恒 TakeRemote 循环下载（三端收敛见报告）
+            // 已存在：不重复插入；合并条件 = 远端改过 note/color 或 载荷版本更新
+            // （双设备独立划线同句/删除重建：四元组同、color/note 同但 created_at 新）。
+            // 版本单调追赶：载荷 createdAt 新于本地行 → 采纳（即使无字段差异），
+            // 否则本地 MAX 低于载荷 max 则永 TakeRemote 空转。
             const QString rColor = o[QStringLiteral("color")].toString();
             const QString rNote = o[QStringLiteral("note")].toString();
-            if (q.value(1).toString() != rColor || q.value(2).toString() != rNote) {
+            const QDateTime adopted = parseIso(o[QStringLiteral("createdAt")].toString());
+            const QDateTime rowCreated = parseIso(q.value(3).toString());
+            const bool versionAhead =
+                adopted.isValid() && (!rowCreated.isValid() || adopted > rowCreated);
+            if (q.value(1).toString() != rColor || q.value(2).toString() != rNote
+                || versionAhead) {
                 QSqlQuery up(m_db);
-                const QDateTime adopted = parseIso(o[QStringLiteral("createdAt")].toString());
-                if (adopted.isValid()) {
+                // created_at 取载荷 createdAt（转本地格式，毫秒精度），绝不前移到
+                // currentDateTime：采用端版本 == 载荷版本 → 下次比较即 Skip；前移 T+ε
+                // 会超越原编辑端版本，导致其恒 TakeRemote 循环下载（三端收敛见报告）
+                if (adopted.isValid())
                     up.prepare(QStringLiteral("UPDATE highlights SET color=?,note=?,created_at=?"
                                               " WHERE id=?"));
-                } else {
-                    // 载荷无有效时间戳：不动版本（保留本地 created_at），避免无谓前移
+                else
                     up.prepare(QStringLiteral("UPDATE highlights SET color=?,note=? WHERE id=?"));
-                }
                 up.addBindValue(rColor);
                 up.addBindValue(rNote);
                 if (adopted.isValid())
-                    up.addBindValue(adopted.toLocalTime().toString(Qt::ISODate));
+                    up.addBindValue(adopted.toLocalTime().toString(Qt::ISODateWithMs));
                 up.addBindValue(q.value(0).toLongLong());
                 up.exec();
             }
@@ -277,11 +316,11 @@ void SyncManager::applyHighlightsJson(const QByteArray &data) {
         ins.addBindValue(text);
         ins.addBindValue(o[QStringLiteral("color")].toString());
         ins.addBindValue(o[QStringLiteral("note")].toString());
-        // 载荷 createdAt 为 UTC 串 → 转本地无时区格式存储（与 addHighlight 一致，
-        // 保证 MAX(created_at) 字典序/解析语义统一）；无效则用当前时刻
+        // 载荷 createdAt 为 UTC 串 → 转本地无时区格式存储（毫秒精度，与 addHighlight/编辑
+        // bump 一致，MAX(created_at) 字典序/解析语义统一）；无效则用当前时刻
         const QDateTime created = parseIso(o[QStringLiteral("createdAt")].toString());
-        ins.addBindValue(created.isValid() ? created.toLocalTime().toString(Qt::ISODate)
-                                           : QDateTime::currentDateTime().toString(Qt::ISODate));
+        ins.addBindValue(created.isValid() ? created.toLocalTime().toString(Qt::ISODateWithMs)
+                                           : QDateTime::currentDateTime().toString(Qt::ISODateWithMs));
         ins.exec();
     }
 }
@@ -338,7 +377,8 @@ void SyncManager::syncOne(WebDavClient &client, const QVector<DavEntry> &remote,
                           const std::function<void(const QByteArray &)> &apply,
                           const QDateTime &localVersion, bool hasLocalData,
                           const std::function<QDateTime(const QByteArray &)> &remoteVersionOf,
-                          const std::function<bool(const QByteArray &)> &sameAsLocal) {
+                          const std::function<bool(const QByteArray &)> &sameAsLocal,
+                          const std::function<void(const QByteArray &)> &onAdopt) {
     const DavEntry *remoteEntry = nullptr;
     for (const DavEntry &e : remote) {
         if (e.name == name) {
@@ -362,19 +402,27 @@ void SyncManager::syncOne(WebDavClient &client, const QVector<DavEntry> &remote,
         return;
     }
     if (!hasLocalData) {
-        // 本地无数据：下载并应用（新设备首次同步）
+        // 本地无数据：下载并应用（新设备首次同步）。远端损坏同样不下载空转
         const QByteArray data = client.get(name);
         if (!client.lastError().isEmpty()) {
             log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
             return;
         }
+        QJsonParseError parseErr;
+        const QJsonDocument doc = QJsonDocument::fromJson(data, &parseErr);
+        if (parseErr.error != QJsonParseError::NoError || !doc.isObject()) {
+            log(QStringLiteral("跳过 %1: 远端数据不可解析").arg(name));
+            return;
+        }
         apply(data);
+        if (onAdopt)
+            onAdopt(data); // 新设备首次采纳：记录版本，避免后续重复下载
         log(QStringLiteral("下载 %1").arg(name));
         return;
     }
     // 两边都有：先取远端载荷（内容比较项需要）。内容一致 → Skip（settings 的收敛关键：
     // 两端内容趋同后不再依赖 mtime 裁决，杜绝"各自盖章 mtime"的交替 KeepLocal/TakeRemote）。
-    // 内容类项目随后用载荷内 max ts 与本地同钟比较；载荷无法解析时退回文件 mtime。
+    // 内容类项目随后用载荷内 max ts 与本地同钟比较；远端载荷不可解析 → log 跳过（不空转）。
     QByteArray remoteData;
     if (remoteVersionOf || sameAsLocal) {
         remoteData = client.get(name);
@@ -410,10 +458,13 @@ void SyncManager::syncOne(WebDavClient &client, const QVector<DavEntry> &remote,
                 log(QStringLiteral("跳过 %1: 本地数据不可解析").arg(name));
                 return;
             }
-            if (client.put(name, payload))
+            if (client.put(name, payload)) {
+                if (onAdopt)
+                    onAdopt(payload); // 上传后远端即含本地内容：adopted 对齐本地数据版本
                 log(QStringLiteral("保留本地 %1").arg(name));
-            else
+            } else {
                 log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
+            }
         }
         break;
     case TakeRemote: {
@@ -424,6 +475,8 @@ void SyncManager::syncOne(WebDavClient &client, const QVector<DavEntry> &remote,
             return;
         }
         apply(remoteData);
+        if (onAdopt)
+            onAdopt(remoteData); // 采用远端：adopted 对齐载荷版本，本地版本时钟随之追赶
         log(QStringLiteral("采用远端 %1").arg(name));
         break;
     }
@@ -486,7 +539,7 @@ void SyncManager::syncBookBodies(WebDavClient &client, const QVector<DavEntry> &
 }
 
 // 从载荷数组取最大内容时间戳（progress 的 ts / highlights 的 createdAt / books 的 addedAt）；
-// 无效（数组空或全无时间戳）→ 返回无效 QDateTime，syncOne 退回文件 mtime 比较
+// 无效（数组空或全无时间戳）→ 返回无效 QDateTime，syncOne 以远端文件 mtime 兜底比较
 static QDateTime maxContentTs(const QJsonArray &arr, const char *key) {
     QDateTime best;
     for (const QJsonValue &v : arr) {
@@ -570,6 +623,11 @@ void SyncManager::sync(WebDavClient &client, const Options &opts) {
             if (d.isValid())
                 localVersion = d;
         }
+        // 本地版本 = max(数据 max added_at, 已采纳的远端版本)：数据不足时用 adopted 追赶，
+        // 否则版本低于远端的设备每次 TakeRemote 下载后 apply 无版本前进、重复下载永不 Skip
+        const QDateTime adopted = adoptedVersion(QStringLiteral("books"));
+        if (adopted.isValid() && (!localVersion.isValid() || adopted > localVersion))
+            localVersion = adopted;
         bool hasData = false;
         if (q.exec(QStringLiteral("SELECT COUNT(*) FROM books")) && q.next())
             hasData = q.value(0).toLongLong() > 0;
@@ -581,6 +639,15 @@ void SyncManager::sync(WebDavClient &client, const Options &opts) {
                     return maxContentTs(QJsonDocument::fromJson(d).object()
                                             [QStringLiteral("books")].toArray(),
                                         "addedAt");
+                }, {},
+                // 采纳钩子：上传/下载后 adopted 对齐"远端文件当前实际内容"的版本
+                // （TakeRemote → 载荷 max；KeepLocal/首次下载 → 本地数据 max），
+                // 保证三端收敛且远端回退时不循环
+                [this](const QByteArray &d) {
+                    setAdoptedVersion(QStringLiteral("books"),
+                                      maxContentTs(QJsonDocument::fromJson(d).object()
+                                                       [QStringLiteral("books")].toArray(),
+                                                   "addedAt"));
                 });
         syncBookBodies(client, remote);
     }

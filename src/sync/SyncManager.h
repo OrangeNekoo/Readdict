@@ -56,8 +56,17 @@ private:
                  const std::function<void(const QByteArray &)> &apply,
                  const QDateTime &localVersion, bool hasLocalData,
                  const std::function<QDateTime(const QByteArray &)> &remoteVersionOf = {},
-                 const std::function<bool(const QByteArray &)> &sameAsLocal = {});
+                 const std::function<bool(const QByteArray &)> &sameAsLocal = {},
+                 // 采纳钩子（books 用）：TakeRemote/下载/KeepLocal 上传成功后，把已确认的
+                 // 载荷版本记入同步状态（adopted = 载荷 max addedAt），本地版本时钟随之
+                 // 追赶——否则版本低于远端的设备每次 TakeRemote 下载后 apply 无版本前进，
+                 // 重复下载永不 Skip
+                 const std::function<void(const QByteArray &)> &onAdopt = {});
     void syncBookBodies(WebDavClient &client, const QVector<DavEntry> &remote);
+    // ---- 同步状态（libraryDir/.readdict_sync.json）：记录已采纳的远端版本 ----
+    QString syncStatePath() const;
+    QDateTime adoptedVersion(const QString &item) const;
+    void setAdoptedVersion(const QString &item, const QDateTime &v);
     QString m_dbPath, m_libraryDir;
     QSqlDatabase m_db;
     QStringList m_log;
