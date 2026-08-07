@@ -12,6 +12,15 @@ Item {
     property alias deleteDialog: deleteDialog
     property alias deleteFilesCheck: deleteFilesCheck
     property alias deleteWarning: deleteWarning
+    // B2：封面兜底测试句柄——封面图/占位块/首字文本供冒烟断言互斥显示
+    property alias coverImage: coverImage
+    property alias coverPlaceholder: coverPlaceholder
+    property alias coverLetterText: coverLetterText
+    // B2：空封面或加载失败时显示品牌色占位。Image 无 source 时 status 是 Null
+    // 而非 Error，故条件由「cover 非空」与「status 非 Error」双重构成：空 cover
+    // 走第一支短路为 true；有 source 但文件缺失/解码失败（Error）走第二支。
+    // Loading/Ready 期间占位隐藏，真实封面淡入。
+    readonly property bool showPlaceholder: !card.book.cover || coverImage.status === Image.Error
     signal clicked()
     width: 180
     height: 280
@@ -49,9 +58,26 @@ Item {
             radius: 6
             clip: true
             Image {
+                id: coverImage
                 anchors.fill: parent
                 source: card.book.cover ? "file://" + card.book.cover : ""
                 fillMode: Image.PreserveAspectCrop
+                visible: !card.showPlaceholder
+            }
+            // B2：Kindle 风格占位——品牌色底 + 白色首字；与封面图互斥显示
+            Rectangle {
+                id: coverPlaceholder
+                anchors.fill: parent
+                visible: card.showPlaceholder
+                color: "#3D5AFE"
+                Text {
+                    id: coverLetterText
+                    anchors.centerIn: parent
+                    text: (card.book.title ?? "") !== "" ? card.book.title[0] : "?"
+                    color: "white"
+                    font.pixelSize: 56
+                    font.bold: true
+                }
             }
         }
 

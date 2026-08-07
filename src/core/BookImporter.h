@@ -36,6 +36,10 @@ public:
 signals:
     void imported();
     void importFailed(const QString &message, const QString &fileName);
+    // B2：refreshCovers 实际更新了封面（updated>0）后发出——importer 内部
+    // BookManager 的 updateCover 只发自身 booksChanged，UI 的 Books 单例（独立
+    // 连接）收不到，需经本信号由 main 重新 emit books->booksChanged()。
+    void coversRefreshed();
 private:
     // 回填队列的逐本处理（经 QTimer::singleShot 调度）
     void backfillNext();

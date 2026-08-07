@@ -34,6 +34,10 @@ Item {
         id: pdfReaderComp
         Loader { source: "qrc:/qt/qml/Readdict/ui/qml/PdfReaderPage.qml" }
     }
+    Component {
+        id: settingsComp
+        Loader { source: "qrc:/qt/qml/Readdict/ui/qml/SettingsPage.qml" }
+    }
     TestCase {
         name: "PdfReaderSmoke"
         function test_pdfReaderLoads() {
@@ -679,6 +683,75 @@ Item {
                       "重开应加载章节")
             compare(page2.chapter.title, t3, "重开应恢复到第 3 章（" + t3 + "）")
             loader2.destroy()
+        }
+    }
+    TestCase {
+        name: "CoverSmoke"
+        // B2：BookCard 空封面/加载失败兜底——封面图与品牌色占位互斥显示。
+        // 注意 Image 无 source 时 status 为 Null 而非 Error：空 cover 走「cover 为空」
+        // 分支，坏路径走 Image.Error 分支，两种状态都必须落入占位。
+        function test_placeholderStates() {
+            var loader = cardComp.createObject(root)
+            var card = loader.item
+            verify(card !== null, "BookCard 应能加载")
+            // 空 cover：占位可见、Image 隐藏、首字取自书名
+            card.book = { id: 101, title: "空封面书", cover: "", progress: 0 }
+            compare(card.showPlaceholder, true, "空 cover 应显示占位")
+            verify(card.coverPlaceholder.visible === true, "空 cover 占位块应可见")
+            verify(card.coverImage.visible === false, "空 cover 封面图应隐藏")
+            compare(card.coverLetterText.text, "空", "占位首字应为书名首字，实际 " + card.coverLetterText.text)
+            // cover 指向不存在文件：Image 异步进入 Error → 占位可见
+            card.book = { id: 102, title: "坏封面书", cover: "/nonexistent/definitely_missing.png", progress: 0 }
+            tryVerify(function () { return card.showPlaceholder === true }, 3000,
+                      "坏封面应显示占位（Image.Error），实际 status=" + card.coverImage.status)
+            verify(card.coverPlaceholder.visible === true, "坏封面占位块应可见")
+            verify(card.coverImage.visible === false, "坏封面封面图应隐藏")
+            loader.destroy()
+        }
+    }
+    TestCase {
+        name: "RefreshCoversSmoke"
+        // B2：封面刷新数据流——设置页按钮 → Importer.refreshCovers() →
+        // coversRefreshed → Books.booksChanged → booksModel 恢复真实封面。
+        // fixture：TestEnv 合成带封面 EPUB（标题 coverepub，OPF 声明红图）。
+        function findCoverBook() {
+            for (let b of Books.booksModel)
+                if (b.title === "coverepub") return b
+            return null
+        }
+        function test_refreshCoversDataFlow() {
+            if (TestEnv.coverEpubSource.length === 0)
+                skip("coverEpubSource 未生成，跳过封面刷新冒烟")
+            Importer.doImport(TestEnv.coverEpubSource)
+            tryVerify(function () { return findCoverBook() !== null }, 3000, "封面书应导入")
+            var book = findCoverBook()
+            verify((book.cover || "").indexOf("cover_") >= 0,
+                   "导入后应有真实封面，实际 " + book.cover)
+            // 模拟早期导入：cover 改回占位（空串）→ 卡片应显示占位
+            Books.updateCover(book.id, "")
+            tryVerify(function () { return (findCoverBook().cover || "") === "" }, 3000, "cover 应已清空")
+            var cardLoader = cardComp.createObject(root)
+            var card = cardLoader.item
+            card.book = findCoverBook()
+            tryVerify(function () { return card.showPlaceholder === true }, 3000,
+                      "空 cover 卡片应显示占位，实际 " + card.showPlaceholder)
+            // 设置页按钮触发刷新 → 恢复真实封面 + 提示文案
+            var settingsLoader = settingsComp.createObject(root)
+            var page = settingsLoader.item
+            verify(page !== null, "SettingsPage 应能加载")
+            verify(page.refreshCoversButton !== undefined, "刷新封面按钮应暴露句柄")
+            page.refreshCoversButton.clicked()
+            tryVerify(function () { return (findCoverBook().cover || "").indexOf("cover_") >= 0 }, 5000,
+                      "按钮点击后 cover 应恢复为真实封面")
+            var hint = page.refreshCoversHint.text || ""
+            verify(hint.indexOf("已刷新") >= 0, "提示应含已刷新本数，实际 " + hint)
+            // 卡片同步回到真实封面（占位隐藏）
+            card.book = findCoverBook()
+            tryVerify(function () { return card.showPlaceholder === false }, 3000,
+                      "真实封面恢复后占位应隐藏")
+            verify(card.coverImage.visible === true, "真实封面恢复后封面图应可见")
+            cardLoader.destroy()
+            settingsLoader.destroy()
         }
     }
 }

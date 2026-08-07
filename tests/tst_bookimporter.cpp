@@ -333,6 +333,71 @@ private slots:
         QCOMPARE(se.search(id, "魔女")[0].paragraphIndex, 0);
     }
 
+    // B2：refreshCovers 存量书封面刷新——导入带封面 EPUB（真实封面 cover_*.png）
+    // → 把 cover 字段改回占位（模拟早期导入落库的占位封面）→ refreshCovers()
+    // 应重提真实封面：返回 ≥1、cover 变回 cover_*.png 且文件存在、可加载 300x400。
+    // 用文件 db（":memory:" 各连接独立，外部 BookManager 改不动 importer 的库）。
+    void refreshCoversRestoresRealCover() {
+        QTemporaryDir libDir;
+        QTemporaryDir srcDir;
+        const QString epubPath = makeCoverEpub(srcDir.path() + "/rc.epub");
+        QVERIFY(!epubPath.isEmpty());
+        const QString dbPath = libDir.path() + "/lib.db";
+        BookImporter imp(libDir.path(), dbPath);
+        QVERIFY(imp.importFile(epubPath, true).isEmpty());
+        QCOMPARE(imp.books().size(), 1);
+        const QString realCover = imp.books()[0].cover;
+        QVERIFY(QFileInfo(realCover).fileName().startsWith(QStringLiteral("cover_")));
+        // 模拟早期导入：独立连接把 cover 改回占位（空串即无封面，卡片显示占位）
+        BookManager mgr(dbPath, "readdict_refresh_test");
+        const qint64 id = imp.books()[0].id;
+        mgr.updateCover(id, QString());
+        QVERIFY(imp.books()[0].cover.isEmpty());
+        const int updated = imp.refreshCovers();
+        QVERIFY(updated >= 1);
+        const QString cover = imp.books()[0].cover;
+        const QFileInfo fi(cover);
+        QVERIFY(fi.fileName().startsWith(QStringLiteral("cover_")));
+        QVERIFY(fi.fileName().endsWith(QStringLiteral(".png")));
+        QVERIFY(QFile::exists(cover));
+        QImage img(cover);
+        QVERIFY(!img.isNull());
+        QCOMPARE(img.size(), QSize(300, 400));
+    }
+    // B2：幂等性——已持有真实封面时 refreshCovers 重提取同路径（按书文件 md5 命名），
+    // newCover == b.cover 跳过 updateCover，返回 0、封面文件不动。
+    void refreshCoversIdempotent() {
+        QTemporaryDir libDir;
+        QTemporaryDir srcDir;
+        const QString epubPath = makeCoverEpub(srcDir.path() + "/idem.epub");
+        QVERIFY(!epubPath.isEmpty());
+        BookImporter imp(libDir.path(), ":memory:");
+        QVERIFY(imp.importFile(epubPath, true).isEmpty());
+        const QString cover = imp.books()[0].cover;
+        QVERIFY(QFileInfo(cover).fileName().startsWith(QStringLiteral("cover_")));
+        QCOMPARE(imp.refreshCovers(), 0);
+        QCOMPARE(imp.books()[0].cover, cover);
+    }
+    // B2：非 EPUB/PDF 不刷新——TXT（占位封面）与无法加载的 PDF（提取失败回退占位）
+    // 都不该被 refreshCovers 改动：返回 0、cover 原样保留。
+    void refreshCoversSkipsNonEpubPdf() {
+        QTemporaryDir libDir;
+        QTemporaryDir srcDir;
+        QFile txt(srcDir.path() + "/无封面书.txt");
+        QVERIFY(txt.open(QIODevice::WriteOnly)); txt.write("正文"); txt.close();
+        QFile badPdf(srcDir.path() + "/fake.pdf");
+        QVERIFY(badPdf.open(QIODevice::WriteOnly)); badPdf.write("not a pdf"); badPdf.close();
+        BookImporter imp(libDir.path(), ":memory:");
+        QVERIFY(imp.importFile(txt.fileName(), true).isEmpty());
+        QVERIFY(imp.importFile(badPdf.fileName(), true).isEmpty());
+        QCOMPARE(imp.books().size(), 2);
+        const QString txtCover = imp.books()[0].cover;
+        const QString pdfCover = imp.books()[1].cover;
+        QCOMPARE(imp.refreshCovers(), 0);
+        QCOMPARE(imp.books()[0].cover, txtCover);
+        QCOMPARE(imp.books()[1].cover, pdfCover);
+    }
+
     // C8：真实 EPUB 验证——导入 Re从零… 后，从正文提取实际出现的词断言命中
     void realEpubFulltext() {
         const QString real = qEnvironmentVariable("READDICT_REAL_EPUB");

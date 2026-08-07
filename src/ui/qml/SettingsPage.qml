@@ -22,6 +22,9 @@ Page {
     property alias bgBrightnessSlider: bgBrightnessSlider
     // D6：语言下拉测试句柄（QML 冒烟经此驱动三语切换）
     property alias languageBox: languageBox
+    // B2：封面刷新按钮/提示测试句柄（QML 冒烟经此触发 refreshCovers 数据流）
+    property alias refreshCoversButton: refreshCoversButton
+    property alias refreshCoversHint: refreshCoversHint
     // 当前背景分区状态（onCompleted 从 Settings 恢复；导入后更新）
     property string bgImagePath: ""
     property real bgBlur: 0.0
@@ -46,6 +49,30 @@ Page {
                     Window.window.applyTheme(mode)
                 }
             }
+        }
+        // B2：存量书籍封面刷新——EPUB/PDF 重提真实封面覆盖早期导入的占位。
+        // 同步调用（逐本提取，大书库可能数百 ms～秒级，属一次性维护操作，可接受）。
+        // 更新经 Importer.coversRefreshed → Books.booksChanged 使书架封面即时生效。
+        RowLayout {
+            Button {
+                id: refreshCoversButton
+                text: qsTr("刷新封面")
+                onClicked: {
+                    const n = Importer.refreshCovers()
+                    refreshCoversHint.text = qsTr("已刷新 %1 本书的封面").arg(n)
+                    refreshCoversHintTimer.restart()
+                }
+            }
+            Label {
+                id: refreshCoversHint
+                text: ""
+                color: Material.secondaryTextColor
+            }
+        }
+        Timer {
+            id: refreshCoversHintTimer
+            interval: 4000
+            onTriggered: refreshCoversHint.text = ""
         }
         Label { text: qsTr("语言"); font.bold: true }
         ComboBox {
@@ -163,7 +190,7 @@ Page {
         // AppData/backgrounds/ → background/imagePath + mode=image；
         // 模糊/亮度滑条即改即存 background/blur、background/brightness（阅读页打开时恢复）。
         // 注意：本分区位于 TTS 分区之后——SettingsTtsSmoke 依赖 ColumnLayout 子项索引
-        //（children[5]/[6] 为 TTS 引擎行/OpenAI 配置），在其前插入会破坏既有测试。
+        //（children[6]/[7] 为 TTS 引擎行/OpenAI 配置），在其前插入会破坏既有测试。
         Label { text: qsTr("阅读背景"); font.bold: true }
         RowLayout {
             Label { text: qsTr("背景模式") }

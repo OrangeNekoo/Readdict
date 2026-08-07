@@ -440,5 +440,6 @@ int BookImporter::refreshCovers() {
         m_books->updateCover(b.id, newCover);
         ++updated;
     }
+    if (updated > 0) emit coversRefreshed();
     return updated;
 }

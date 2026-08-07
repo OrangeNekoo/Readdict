@@ -116,6 +116,9 @@ int main(int argc, char *argv[]) {
     auto *importer = new BookImporter(appData, appData + "/Readdict.db");
     // 导入成功（importer.imported）后驱动 Books 单例刷新，UI 的 booksModel 依赖其 booksChanged。
     QObject::connect(importer, &BookImporter::imported, books, [books] { emit books->booksChanged(); });
+    // B2：refreshCovers 更新了封面后同样驱动 Books 单例刷新（importer 内部连接
+    // 的 updateCover 不会触发 UI 的 booksChanged），书架封面即时生效。
+    QObject::connect(importer, &BookImporter::coversRefreshed, books, [books] { emit books->booksChanged(); });
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Settings", settings);
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Books", books);
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Importer", importer);

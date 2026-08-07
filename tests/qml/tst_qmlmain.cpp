@@ -4,6 +4,7 @@
 // Qt 6.11 公开 CMake API 中不存在），QUICK_TEST_SOURCE_DIR 宏由 tests/CMakeLists.txt
 // 通过 target_compile_definitions 定义为 tests/qml 的绝对路径。
 #include <QColor>
+#include <QBuffer>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -16,6 +17,9 @@
 #include <QtQuickTest/quicktest.h>
 #include <qqml.h>
 
+#include <zip.h>   // minizip 写端：合成带封面 EPUB（B2 封面刷新冒烟 fixture）
+#include <zlib.h>
+
 #include "core/BookImporter.h"
 #include "core/BookManager.h"
 #include "core/HighlightManager.h"
@@ -25,6 +29,65 @@
 #include "tts/TtsController.h"
 #include "ui/ReaderTextHelper.h"
 #include "ui/LanguageController.h"
+
+// B2：合成带真实封面的最小 EPUB（OPF <meta name="cover"> 指向纯红图 850x1214，
+// 与 tst_bookimporter 的 makeCoverEpub 同构）——封面刷新冒烟 fixture。
+// 标题即文件名 coverepub（completeBaseName 语义与导入流程一致）。
+static bool writeCoverEpub(const QString &zipPath) {
+    const QByteArray container =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">"
+        "<rootfiles><rootfile full-path=\"OEBPS/content.opf\" "
+        "media-type=\"application/oebps-package+xml\"/></rootfiles></container>";
+    const QByteArray opf =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<package xmlns=\"http://www.idpf.org/2007/opf\" unique-identifier=\"id\" version=\"2.0\">"
+        "<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">"
+        "<dc:title>封面刷新书</dc:title><dc:creator>测试作者</dc:creator>"
+        "<meta name=\"cover\" content=\"cover-img\"/>"
+        "</metadata>"
+        "<manifest>"
+        "<item href=\"Text/cover.xhtml\" id=\"cover.xhtml\" media-type=\"application/xhtml+xml\"/>"
+        "<item href=\"Images/coverA.png\" id=\"cover-img\" media-type=\"image/png\"/>"
+        "</manifest>"
+        "<spine toc=\"ncx\"><itemref idref=\"cover.xhtml\"/></spine>"
+        "</package>";
+    const QByteArray coverXhtml =
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>Cover</title></head>"
+        "<body><p>封面刷新测试正文。</p></body></html>";
+    QImage img(850, 1214, QImage::Format_RGB32);
+    img.fill(QColor("#E00000"));
+    QByteArray png;
+    QBuffer buf(&png);
+    buf.open(QIODevice::WriteOnly);
+    img.save(&buf, "PNG");
+    buf.close();
+    zipFile zf = zipOpen64(zipPath.toUtf8().constData(), APPEND_STATUS_CREATE);
+    if (!zf) return false;
+    struct Entry { const char *name; QByteArray data; };
+    const Entry entries[] = {
+        {"META-INF/container.xml", container},
+        {"OEBPS/content.opf", opf},
+        {"OEBPS/Text/cover.xhtml", coverXhtml},
+        {"OEBPS/Images/coverA.png", png},
+    };
+    bool ok = true;
+    for (const Entry &e : entries) {
+        zip_fileinfo zi = {};
+        if (zipOpenNewFileInZip(zf, e.name, &zi, nullptr, 0, nullptr, 0, nullptr,
+                                Z_DEFLATED, Z_DEFAULT_COMPRESSION) != ZIP_OK) {
+            ok = false; break;
+        }
+        if (zipWriteInFileInZip(zf, e.data.constData(),
+                                static_cast<unsigned>(e.data.size())) != ZIP_OK) {
+            ok = false; break;
+        }
+        zipCloseFileInZip(zf);
+    }
+    zipClose(zf, nullptr);
+    return ok;
+}
 
 // 仅测试进程可见：在临时目录预生成 TXT 源书，QML 侧经 Importer.doImport 导入。
 class TestEnv : public QObject {
@@ -50,6 +113,9 @@ class TestEnv : public QObject {
     // B1：删除冒烟专属书源（标题 delme）——不与共享的 zeta/alpha/mike 混用，
     // 删除用例可安全删书+删文件而不影响其他用例
     Q_PROPERTY(QString deleteSource READ deleteSource CONSTANT)
+    // B2：带真实封面的 EPUB（标题 coverepub，OPF cover 声明指向红图）——
+    // 封面刷新冒烟：导入 → cover 改回占位 → refreshCovers 恢复真实封面
+    Q_PROPERTY(QString coverEpubSource READ coverEpubSource CONSTANT)
 public:
     explicit TestEnv(const QString &workDir, QObject *parent = nullptr) : QObject(parent) {
         QDir srcDir(workDir + "/src");
@@ -121,6 +187,10 @@ public:
             dlf.close();
             m_deleteSource = QUrl::fromLocalFile(delPath).toString();
         }
+        // B2：带真实封面的 EPUB（标题 coverepub）——封面刷新冒烟 fixture
+        const QString coverEpubPath = srcDir.filePath("coverepub.epub");
+        if (writeCoverEpub(coverEpubPath))
+            m_coverEpubSource = QUrl::fromLocalFile(coverEpubPath).toString();
     }
     QStringList sourceFiles() const { return m_files; }
     // B1：删除冒烟断言书库文件真实消失（QML 侧无文件系统 API）
@@ -143,6 +213,7 @@ public:
     QString multiSource() const { return m_multiSource; }
     QString backgroundImage() const { return m_backgroundImage; }
     QString deleteSource() const { return m_deleteSource; }
+    QString coverEpubSource() const { return m_coverEpubSource; }
 private:
     QStringList m_files;
     QString m_longSource;
@@ -150,6 +221,7 @@ private:
     QString m_dupTitlesSource;
     QString m_backgroundImage;
     QString m_deleteSource;
+    QString m_coverEpubSource;
 };
 
 int main(int argc, char *argv[]) {
@@ -168,6 +240,8 @@ int main(int argc, char *argv[]) {
     // 与 Books 单例的 readdict_main 不冲突；指向同一 db 文件，行为与生产一致。
     auto *importer = new BookImporter(appData, appData + "/t.db");
     QObject::connect(importer, &BookImporter::imported, books, [books] { emit books->booksChanged(); });
+    // B2：refreshCovers 更新封面后驱动 Books 单例刷新（同生产 main.cpp 接线）
+    QObject::connect(importer, &BookImporter::coversRefreshed, books, [books] { emit books->booksChanged(); });
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Settings", settings);
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Books", books);
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Importer", importer);
