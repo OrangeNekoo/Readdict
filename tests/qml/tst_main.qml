@@ -146,6 +146,52 @@ Item {
         }
     }
     TestCase {
+        name: "DeleteSmoke"
+        // B1：删除书籍冒烟——requestDelete 打开确认对话框 → 勾选删文件 accept →
+        // 书从 booksModel 消失、书库文件被删、共享占位封面保留。
+        // 专属书源（delme.txt）由 TestEnv 生成，删它不影响共享的 zeta/alpha/mike。
+        function findDeleteBook() {
+            for (let b of Books.booksModel)
+                if (b.title === "delme") return b
+            return null
+        }
+        function test_deleteDialogRemovesBookAndFiles() {
+            Importer.doImport(TestEnv.deleteSource)
+            tryVerify(function () { return findDeleteBook() !== null }, 3000, "delme 书应导入")
+            var book = findDeleteBook()
+            var path = book.path
+            var cover = book.cover
+            verify(TestEnv.fileExists(path), "导入的书文件应在书库")
+            verify(cover.length > 0, "TXT 导入应生成占位封面")
+
+            // 对话框是 Popup，需真实 Window 才能打开；Loader 必须创建在 Window 内
+            var win = Qt.createQmlObject('import QtQuick; Window { width: 800; height: 600; visible: true }', root)
+            verify(win !== null, "测试 Window 应能创建")
+            var loader = cardComp.createObject(win)
+            var card = loader.item
+            verify(card !== null, "BookCard 应能加载")
+            card.book = book
+            wait(50)
+
+            card.requestDelete()
+            tryVerify(function () { return card.deleteDialog.opened === true }, 2000,
+                      "requestDelete 应打开确认对话框")
+            compare(card.deleteFilesCheck.checked, false, "默认不勾选删文件（防误触）")
+            verify((card.deleteDialog.title || "").indexOf("delme") >= 0,
+                   "对话框标题应含书名，实际 " + card.deleteDialog.title)
+            verify((card.deleteWarning.text || "").length > 0, "应有警告文案")
+
+            card.deleteFilesCheck.checked = true
+            card.deleteDialog.accept()
+            wait(100)
+            verify(card.deleteDialog.opened === false, "accept 后对话框应关闭")
+            tryVerify(function () { return findDeleteBook() === null }, 3000, "书应从 booksModel 消失")
+            verify(!TestEnv.fileExists(path), "书库文件应被删除")
+            verify(TestEnv.fileExists(cover), "共享占位封面应保留（不随单本删除）")
+            win.destroy()
+        }
+    }
+    TestCase {
         name: "FulltextSmoke"
         // C8：书架全文搜索——e2e 已导入含"第二行内容"的 TXT 书（本文件在其后执行），
         // 切到"全文"模式输入词，应命中并带 snippet。

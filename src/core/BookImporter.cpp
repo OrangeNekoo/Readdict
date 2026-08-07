@@ -420,3 +420,25 @@ void BookImporter::doImport(const QUrl &url) {
     }
     emit imported();
 }
+
+int BookImporter::refreshCovers() {
+    // 刷新全部书籍封面：EPUB/PDF 重新提取真实封面（覆盖旧占位封面），
+    // 成功且路径有变才 updateCover；TXT/MD/FB2/MOBI 无内嵌封面保留原封面不动。
+    // 真实封面按书文件路径 md5 命名（covers/cover_<md5>.png），重提取同路径幂等。
+    const QString coverDir = m_libraryDir + "/covers/";
+    int updated = 0;
+    const QVector<Book> books = m_books->books();
+    for (const Book &b : books) {
+        QString newCover;
+        if (b.format == "EPUB")
+            newCover = extractEpubCover(b.path, coverDir);
+        else if (b.format == "PDF")
+            newCover = extractPdfCover(b.path, coverDir);
+        else
+            continue;
+        if (newCover.isEmpty() || newCover == b.cover) continue;
+        m_books->updateCover(b.id, newCover);
+        ++updated;
+    }
+    return updated;
+}

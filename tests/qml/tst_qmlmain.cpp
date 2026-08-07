@@ -47,6 +47,9 @@ class TestEnv : public QObject {
     // 真实背景图片（64x64 PNG，file:// URL）：D5 冒烟经此验证 copyToBackgrounds 导入路径
     // 与 ReaderBackground 图片加载/模糊亮度渲染
     Q_PROPERTY(QString backgroundImage READ backgroundImage CONSTANT)
+    // B1：删除冒烟专属书源（标题 delme）——不与共享的 zeta/alpha/mike 混用，
+    // 删除用例可安全删书+删文件而不影响其他用例
+    Q_PROPERTY(QString deleteSource READ deleteSource CONSTANT)
 public:
     explicit TestEnv(const QString &workDir, QObject *parent = nullptr) : QObject(parent) {
         QDir srcDir(workDir + "/src");
@@ -110,8 +113,18 @@ public:
         bgImg.fill(QColor(0x3a, 0x7d, 0xbd));
         if (bgImg.save(bgPath))
             m_backgroundImage = QUrl::fromLocalFile(bgPath).toString();
+        // B1：删除冒烟专属 TXT 书（标题 delme）
+        const QString delPath = srcDir.filePath("delme.txt");
+        QFile dlf(delPath);
+        if (dlf.open(QIODevice::WriteOnly)) {
+            dlf.write(QStringLiteral("待删除测试书的内容行。\n第二行内容。\n").toUtf8());
+            dlf.close();
+            m_deleteSource = QUrl::fromLocalFile(delPath).toString();
+        }
     }
     QStringList sourceFiles() const { return m_files; }
+    // B1：删除冒烟断言书库文件真实消失（QML 侧无文件系统 API）
+    Q_INVOKABLE bool fileExists(const QString &path) const { return QFile::exists(path); }
     QString dupTitlesSource() const { return m_dupTitlesSource; }
     QString pdfSource() const {
         const QString p = qEnvironmentVariable("READDICT_REAL_PDF");
@@ -129,12 +142,14 @@ public:
     QString longSource() const { return m_longSource; }
     QString multiSource() const { return m_multiSource; }
     QString backgroundImage() const { return m_backgroundImage; }
+    QString deleteSource() const { return m_deleteSource; }
 private:
     QStringList m_files;
     QString m_longSource;
     QString m_multiSource;
     QString m_dupTitlesSource;
     QString m_backgroundImage;
+    QString m_deleteSource;
 };
 
 int main(int argc, char *argv[]) {

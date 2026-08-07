@@ -8,6 +8,10 @@ import Readdict.Backend
 Item {
     id: card
     property var book: ({})
+    // 测试/外部句柄（QML 冒烟经此驱动删除对话框交互，对齐 ShelfPage/SettingsPage 模式）
+    property alias deleteDialog: deleteDialog
+    property alias deleteFilesCheck: deleteFilesCheck
+    property alias deleteWarning: deleteWarning
     signal clicked()
     width: 180
     height: 280
@@ -17,6 +21,9 @@ Item {
     Behavior on scale {
         NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
     }
+
+    // B1：删除入口——右键菜单触发（亦供 QML 冒烟测试/复用直接调用）
+    function requestDelete() { deleteDialog.open() }
 
     Rectangle {
         anchors.fill: parent
@@ -87,6 +94,10 @@ Item {
             text: qsTr("设置分类")
             onTriggered: categoryDialog.open()
         }
+        MenuItem {
+            text: qsTr("删除")
+            onTriggered: card.requestDelete()
+        }
     }
 
     Dialog {
@@ -145,5 +156,30 @@ Item {
             if (name.length > 0)
                 Books.setCategory(card.book.id, name)
         }
+    }
+
+    // B1：删除确认对话框——破坏性操作必须有确认；默认不勾选删文件（防误触）
+    Dialog {
+        id: deleteDialog
+        title: qsTr("删除书籍") + (card.book.title ? " — " + card.book.title : "")
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        width: 360
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label {
+                id: deleteWarning
+                text: qsTr("删除后无法恢复，确定要删除这本书吗？")
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            CheckBox {
+                id: deleteFilesCheck
+                text: qsTr("同时删除书库中的文件")
+            }
+        }
+        // 每次打开复位为不删文件，避免上次勾选状态误伤
+        onOpened: deleteFilesCheck.checked = false
+        onAccepted: Books.removeBookWithFiles(card.book.id, deleteFilesCheck.checked)
     }
 }

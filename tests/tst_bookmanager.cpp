@@ -1,4 +1,7 @@
 #include <QtTest>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QSet>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -54,6 +57,43 @@ private slots:
         m_mgr->removeBook(1);
         QCOMPARE(m_mgr->books().size(), 1);
         QCOMPARE(m_mgr->search("红楼梦").size(), 0); // FTS 索引同步清理
+    }
+    void removeBookWithFilesDeletesDbAndFiles() {
+        // B1：删书+删文件——DB 行、书文件、真实封面（cover_ 前缀）一并删除且发 booksChanged
+        const QString bookFile = m_tmp->path() + "/books/delete_me.txt";
+        const QString coverFile = m_tmp->path() + "/covers/cover_abc.png";
+        QVERIFY(QDir().mkpath(QFileInfo(bookFile).absolutePath()));
+        QVERIFY(QDir().mkpath(QFileInfo(coverFile).absolutePath()));
+        QFile bf(bookFile); QVERIFY(bf.open(QIODevice::WriteOnly)); bf.write("待删内容"); bf.close();
+        QFile cf(coverFile); QVERIFY(cf.open(QIODevice::WriteOnly)); cf.write("PNG"); cf.close();
+        const qint64 id = m_mgr->addBook(Book{-1, "删书测试", "作者", "社", "", "TXT", bookFile, coverFile, 0.0});
+        QVERIFY(id > 0);
+        QSignalSpy spy(m_mgr.get(), &BookManager::booksChanged);
+        m_mgr->removeBookWithFiles(id, true);
+        QCOMPARE(m_mgr->bookById(id).id, -1);          // DB 行已删
+        QCOMPARE(m_mgr->search("删书测试").size(), 0); // FTS 索引同步清理
+        QVERIFY(!QFile::exists(bookFile));             // 书文件已删
+        QVERIFY(!QFile::exists(coverFile));            // 真实封面已删
+        QCOMPARE(spy.count(), 1);                      // 书架刷新信号
+    }
+    void removeBookWithFilesKeepsPlaceholderCover() {
+        // B1：占位封面（<hash6>.png，非 cover_ 前缀）按书名哈希共享——删书不删文件
+        const QString placeholder = m_tmp->path() + "/covers/abc123.png";
+        QVERIFY(QDir().mkpath(QFileInfo(placeholder).absolutePath()));
+        QFile pf(placeholder); QVERIFY(pf.open(QIODevice::WriteOnly)); pf.write("PNG"); pf.close();
+        const qint64 id = m_mgr->addBook(Book{-1, "共享封面书", "作者", "社", "", "TXT",
+                                              m_tmp->path() + "/x.txt", placeholder, 0.0});
+        QVERIFY(id > 0);
+        m_mgr->removeBookWithFiles(id, true);
+        QCOMPARE(m_mgr->bookById(id).id, -1);
+        QVERIFY(QFile::exists(placeholder)); // 共享占位封面保留
+    }
+    void updateCoverUpdatesAndSignals() {
+        // B1：updateCover 更新 cover 字段并发出 booksChanged
+        QSignalSpy spy(m_mgr.get(), &BookManager::booksChanged);
+        m_mgr->updateCover(1, "/tmp/new_cover.png");
+        QCOMPARE(m_mgr->bookById(1).cover, QString("/tmp/new_cover.png"));
+        QCOMPARE(spy.count(), 1);
     }
     void removeBookClearsFulltextIndex() {
         // C8：removeBook 应同步清理 SearchEngine 的 fts_content 行（表存在时）。

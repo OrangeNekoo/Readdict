@@ -30,6 +30,9 @@ public:
     // 主程序连接刷新 Books 单例（本实例内部 BookManager 用独立连接名，booksChanged
     // 不会到达 UI 绑定的 Books 单例）；失败发 importFailed(message, fileName) 供 UI 提示。
     Q_INVOKABLE void doImport(const QUrl &url);
+    // 刷新全部书籍封面：对 EPUB/PDF 重新提取真实封面（覆盖旧占位封面），
+    // 返回成功更新的本数；TXT/MD/FB2/MOBI 无内嵌封面，保留原封面不动。
+    Q_INVOKABLE int refreshCovers();
 signals:
     void imported();
     void importFailed(const QString &message, const QString &fileName);

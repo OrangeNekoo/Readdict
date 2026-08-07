@@ -10,6 +10,8 @@
 #include <QFontDatabase>
 #include <QJsonValue>
 #include <QSet>
+#include <QFile>
+#include <QFileInfo>
 
 BookManager::BookManager(const QString &dbPath, const QString &connection, QObject *parent)
     : QObject(parent) {
@@ -65,6 +67,39 @@ void BookManager::removeBook(qint64 id) {
             qWarning() << "removeBook: 全文索引清理失败:" << fts.lastError().text();
     }
     m_docCache.remove(id); // 阅读器文档缓存一并失效
+    emit booksChanged();
+}
+
+void BookManager::removeBookWithFiles(qint64 id, bool deleteFiles) {
+    QString path, cover;
+    if (deleteFiles) {
+        QSqlQuery q(m_db);
+        q.prepare("SELECT path, cover FROM books WHERE id=?");
+        q.addBindValue(id);
+        if (q.exec() && q.next()) {
+            path = q.value(0).toString();
+            cover = q.value(1).toString();
+        }
+    }
+    removeBook(id);
+    if (!deleteFiles) return;
+    // 真实封面命名 cover_<md5>.png（B7）；占位封面 <hash6>.png 按书名哈希共享（A5），
+    // 同书名多本书共用，删它会影响其他书——只删真实封面。
+    if (!path.isEmpty())
+        QFile::remove(path);
+    if (!cover.isEmpty() && QFileInfo(cover).fileName().startsWith("cover_"))
+        QFile::remove(cover);
+}
+
+void BookManager::updateCover(qint64 id, const QString &cover) {
+    QSqlQuery q(m_db);
+    q.prepare("UPDATE books SET cover=? WHERE id=?");
+    q.addBindValue(cover);
+    q.addBindValue(id);
+    if (!q.exec()) {
+        qWarning() << "updateCover 失败:" << q.lastError().text();
+        return;
+    }
     emit booksChanged();
 }
 

@@ -23,6 +23,10 @@ public:
     explicit BookManager(const QString &dbPath, const QString &connection = "readdict_main", QObject *parent = nullptr);
     qint64 addBook(const Book &book);
     Q_INVOKABLE void removeBook(qint64 id);
+    // 删除书籍并可选删除书库文件（books.path + 真实封面 cover_*.png；占位封面共享不删）
+    Q_INVOKABLE void removeBookWithFiles(qint64 id, bool deleteFiles);
+    // 更新书籍封面路径（封面刷新/重提取用；成功后发 booksChanged）
+    Q_INVOKABLE void updateCover(qint64 id, const QString &cover);
     QVector<Book> books() const;
     Book bookById(qint64 id) const;
     Q_INVOKABLE void setProgress(qint64 id, double progress);
