@@ -197,6 +197,49 @@ private slots:
         QVERIFY2(err.isEmpty(), "成功同步 error 应为空");
         QVERIFY2(!ctl.running(), "同步结束后 running 应为 false");
     }
+
+    // D3 复审回归：books 信息行可含书名/文件名里的"失败"字（如《失败的逻辑》），
+    // 不得误判为同步失败——失败判定只看时间戳后紧跟"失败"的消息
+    void bookTitleContainingFailureWordStillSucceeds() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        // 真实书籍文件（文件名含"失败"）
+        const QString bookPath = dir.filePath("失败的逻辑.txt");
+        QFile bookFile(bookPath);
+        QVERIFY(bookFile.open(QIODevice::WriteOnly));
+        bookFile.write("内容");
+        bookFile.close();
+        {
+            DatabaseManager dbm(dir.path() + "/t.db",
+                                QStringLiteral("synccontroller_dbm") + QTest::currentTestFunction());
+            QSqlQuery q(dbm.database());
+            QVERIFY2(q.exec("INSERT INTO books(title,format,path,added_at) "
+                            "VALUES('失败的逻辑','TXT','" + bookPath + "','2026-08-07T09:00:00Z')"),
+                     q.lastError().text().toUtf8());
+        }
+        EmptyDav server;
+        QVERIFY2(server.listen(QHostAddress::LocalHost, 0), "mock 服务器应能监听");
+        SettingsStore st(dir.path() + "/settings.json");
+        st.setValue("webdav/url",
+                    QStringLiteral("http://127.0.0.1:%1/dav/").arg(server.serverPort()));
+        st.save();
+        SyncController ctl(dir.path() + "/t.db", dir.path(),
+                           QStringLiteral("synccontroller_conn") + QTest::currentTestFunction());
+
+        bool got = false, ok = false;
+        QString err;
+        QObject::connect(&ctl, &SyncController::finished,
+                         [&](bool o, const QString &e) { got = true; ok = o; err = e; });
+        ctl.run(false, false, false, true); // 仅 books 同步（含文件体上传）
+
+        QVERIFY2(got, "finished 信号应到达");
+        QVERIFY2(ok, ("书名/文件名含'失败'的成功同步应判定成功，error=" + err).toUtf8());
+        QVERIFY2(err.isEmpty(), "成功同步 error 应为空");
+        const QString logText = ctl.log().join(QLatin1Char('\n'));
+        QVERIFY2(logText.contains(QStringLiteral("失败的逻辑")),
+                 ("日志应含书籍文件上传行，实际:\n" + logText).toUtf8());
+        QVERIFY2(!ctl.running(), "同步结束后 running 应为 false");
+    }
 };
 
 QTEST_MAIN(TestSyncController)

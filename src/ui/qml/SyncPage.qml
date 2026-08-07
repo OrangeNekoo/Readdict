@@ -112,10 +112,17 @@ Page {
                 width: ListView.view.width
                 wrapMode: Text.Wrap
                 font.pixelSize: 12
-                color: text.indexOf("失败") >= 0 ? "#C62828" : Material.secondaryTextColor
+                // 失败行 = 时间戳后紧跟"失败"的消息（books 信息行可能含书名里的"失败"字）
+                color: page.isFailureLine(modelData) ? "#C62828" : Material.secondaryTextColor
             }
             ScrollBar.vertical: ScrollBar {}
         }
+    }
+
+    // 日志行是否真实失败：SyncManager::log 格式 "yyyy-MM-dd HH:mm:ss <消息>"，
+    // 只认消息起始为"失败"（与 SyncController::doSync 的判定同源）
+    function isFailureLine(line) {
+        return line.length > 20 && line.substring(20).startsWith("失败")
     }
 
     // 保存配置并立即同步（SettingsPage.saveTts 同模式：函数可被测试直接调用）

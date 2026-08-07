@@ -58,11 +58,14 @@ void SyncController::doSync(const SyncManager::Options &opts) {
     m_log = m_mgr.log();
     emit logChanged();
 
-    // 失败判定：SyncManager 失败路径统一 log "… 失败 <name>: <error>"
-    // （见 syncOne），成功/跳过路径无"失败"字样。收集失败行作为 error 文本。
+    // 失败判定：SyncManager 失败路径统一 log "… 失败 <name>: <error>"（见 syncOne），
+    // 行格式固定为 "yyyy-MM-dd HH:mm:ss <消息>"（19 字符时间戳 + 空格，见 SyncManager::log）。
+    // 只认时间戳后紧跟"失败"的消息——books 路径的信息行（"上传书籍 b<id>_<文件名>"、
+    // "远端书目本地无文件体，待书籍同步后注册: <书名>"）可能含书名/文件名里的"失败"字
+    // （如《失败的逻辑》），子串匹配会误判成功同步为失败。
     QStringList failed;
     for (const QString &line : m_log)
-        if (line.contains(QStringLiteral("失败")))
+        if (line.mid(20).startsWith(QStringLiteral("失败")))
             failed.append(line);
     const QString error = failed.join(QLatin1Char('\n'));
 
