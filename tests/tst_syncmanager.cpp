@@ -607,8 +607,13 @@ private slots:
             QCOMPARE(q.value(2).toString(), QString("P"));    // 远端元数据已合并
             QCOMPARE(q.value(3).toString(), QString("C"));
             QCOMPARE(q.value(4).toString(), QString("EPUB"));
-            QCOMPARE(q.value(5).toString(), QString("cov"));
+            // 七轮复审：cover 不随载荷同步——本机生成路径，采纳端保留本地封面
+            QCOMPARE(q.value(5).toString(), QString(""));
         }
+        // 七轮复审：载荷不含 cover（本机绝对路径跨设备无意义）
+        const QJsonObject metaFirst = QJsonDocument::fromJson(m.buildBooksJson())
+                                          .object()["books"].toArray().first().toObject();
+        QVERIFY(!metaFirst.contains("cover"));
         // 五轮复审：采纳元数据后 books_fts 同步维护（external-content 无触发器）
         {
             QSqlDatabase seed = seedDb(db);

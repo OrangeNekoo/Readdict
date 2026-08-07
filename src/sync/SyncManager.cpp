@@ -170,10 +170,14 @@ QByteArray SyncManager::buildBooksJson() const {
     QJsonArray arr;
     QSqlQuery q(m_db);
     if (q.exec(QStringLiteral(
-            "SELECT id,title,author,publisher,category,format,path,cover,added_at FROM books"))) {
+            "SELECT id,title,author,publisher,category,format,path,added_at FROM books"))) {
         while (q.next()) {
-            // addedAt 转 UTC 序列化（跨设备时区不偏移；本地 added_at 为无时区本地串）
-            const QDateTime added = parseIso(q.value(8).toString());
+            // addedAt 转 UTC 序列化（跨设备时区不偏移；本地 added_at 为无时区本地串）。
+            // 七轮复审：cover 不随载荷同步——cover 是各设备本机生成的绝对路径（BookImporter
+            // 生成于本机 covers/ 目录），跨设备采纳指向他机路径、UI file:// 加载失效且会
+            // 永久替换本机真实封面（path 已相对化而 cover 无法相对化，简报元数据列表本无
+            // cover）
+            const QDateTime added = parseIso(q.value(7).toString());
             arr.append(QJsonObject{
                 {"id", q.value(0).toLongLong()},
                 {"title", q.value(1).toString()},
@@ -182,9 +186,8 @@ QByteArray SyncManager::buildBooksJson() const {
                 {"category", q.value(4).toString()},
                 {"format", q.value(5).toString()},
                 {"path", QDir(m_libraryDir).relativeFilePath(q.value(6).toString())},
-                {"cover", q.value(7).toString()},
                 {"addedAt", added.isValid() ? added.toUTC().toString(Qt::ISODate)
-                                            : q.value(8).toString()},
+                                            : q.value(7).toString()},
             });
         }
     }
@@ -371,17 +374,16 @@ bool SyncManager::applyBooksJson(const QByteArray &data) {
             continue;
         }
         const qint64 localId = chk.value(0).toLongLong();
-        // 更新静态元数据（保留本地 id/path 与进度）；progress/read_seconds 归 progress
-        // 项管理，added_at/last_read_at 归本地
+        // 更新静态元数据（保留本地 id/path/cover——cover 是本机生成路径，不可跨设备采纳）；
+        // progress/read_seconds 归 progress 项管理，added_at/last_read_at 归本地
         QSqlQuery up(m_db);
         up.prepare(QStringLiteral("UPDATE books SET title=?,author=?,publisher=?,category=?,"
-                                  "format=?,cover=? WHERE id=?"));
+                                  "format=? WHERE id=?"));
         up.addBindValue(o[QStringLiteral("title")].toString());
         up.addBindValue(o[QStringLiteral("author")].toString());
         up.addBindValue(o[QStringLiteral("publisher")].toString());
         up.addBindValue(o[QStringLiteral("category")].toString());
         up.addBindValue(o[QStringLiteral("format")].toString());
-        up.addBindValue(o[QStringLiteral("cover")].toString());
         up.addBindValue(localId);
         if (!up.exec()) {
             ok = false;
@@ -612,7 +614,11 @@ static QDateTime maxContentTs(const QJsonArray &arr, const char *key) {
 
 // 六轮复审：books 匹配/合并改用内容键 (title, author, format) 而非 id——books.id 是各设备
 // 独立 AUTOINCREMENT（两端首本书都是 id=1），按 id 去重会把远端同 id 不同内容的书屏蔽
-// 丢失；按 id 覆盖会把别的书元数据写进本地行。内容键由 title/author/format 三段拼成。
+// 丢失；按 id 覆盖会把别的书元数据写进本地行。
+// 七轮复审（已知取舍，已记录报告）：同名同作者同格式的不同版本书（如不同出版社公版书）
+// 会被视为同一本书——mergeBooksPayloads 本地优先丢弃远端条目、applyBooksJson 覆盖另一
+// 版本元数据。publisher 不入键：它是 applyBooksJson 会更新的可变字段，入键会使出版社
+// 修改后内容键漂移、两端失配而不再传播；身份键应取稳定字段（title/author/format）。
 QString booksContentKey(const QJsonObject &o) {
     return o[QStringLiteral("title")].toString() + QStringLiteral("\x1F")
          + o[QStringLiteral("author")].toString() + QStringLiteral("\x1F")
