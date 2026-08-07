@@ -131,6 +131,14 @@ Item {
             var ttsCard = layout.children[3]     // 朗读(TTS) 分区卡片
             verify(ttsCard !== undefined, "TTS 分区卡片应存在")
             var ttsBody = ttsCard.children[0]    // 卡内 ColumnLayout
+            // C5：Kindle 风格分组标题——小字（13px）灰、非加粗、底部细分隔线
+            // （分隔线经 Label.background，不进入 body children，卡内索引不受影响）
+            var titleLabel = ttsBody.children[0]
+            verify(titleLabel !== undefined, "分组标题应存在（body.children[0]）")
+            compare(titleLabel.font.pixelSize, 13, "分组标题应为 Kindle 小字 13px，实际 "
+                    + titleLabel.font.pixelSize)
+            verify(titleLabel.font.bold === false, "分组标题应非加粗")
+            verify(titleLabel.background !== null, "分组标题应有底部细分隔线（background）")
             var engineRow = ttsBody.children[1]  // 引擎行
             var engineBox = engineRow.children[1]
             verify(engineBox !== undefined, "引擎 ComboBox 应存在")

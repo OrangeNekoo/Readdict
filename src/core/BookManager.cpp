@@ -436,13 +436,25 @@ void BookManager::setCurrentChapter(int index) {
 QString BookManager::resolveFontFamily(const QString &preferred) const {
     if (preferred.isEmpty() || QFontDatabase::hasFamily(preferred)) return preferred;
     // 思源 VF 字族在 CoreText 下可能只暴露英文族名（name 表含 "Source Han Sans VF" 等），
-    // 按优先级回退到已安装族；全部未命中则返回首选值交给 Qt 系统字体兜底。
-    const QStringList fallbacks = {
-        QStringLiteral("Source Han Sans VF"),
-        QStringLiteral("Source Han Sans SC VF"),
-        QStringLiteral("Source Han Sans SC"),
-        QStringLiteral("思源黑体 VF"),
-    };
+    // 按首选字体（衬线宋体 / 无衬线黑体）选择对应回退链；全部未命中则返回首选值
+    // 交给 Qt 系统字体兜底。C5：默认字体为思源宋体 VF，衬线链不回退到黑体（避免
+    // CoreText 只暴露英文族名时衬线默认被悄悄替换成无衬线）。
+    const bool serif = preferred.contains(QStringLiteral("宋体"))
+                       || preferred.contains(QStringLiteral("Serif"), Qt::CaseInsensitive);
+    const QStringList fallbacks = serif
+        ? QStringList{
+            QStringLiteral("Source Han Serif VF"),
+            QStringLiteral("Source Han Serif SC VF"),
+            QStringLiteral("Source Han Serif SC"),
+            QStringLiteral("思源宋体 VF"),
+            QStringLiteral("Songti SC"),
+          }
+        : QStringList{
+            QStringLiteral("Source Han Sans VF"),
+            QStringLiteral("Source Han Sans SC VF"),
+            QStringLiteral("Source Han Sans SC"),
+            QStringLiteral("思源黑体 VF"),
+          };
     for (const QString &f : fallbacks)
         if (QFontDatabase::hasFamily(f)) return f;
     return preferred;

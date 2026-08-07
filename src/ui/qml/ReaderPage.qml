@@ -176,13 +176,24 @@ Page {
     property bool controlsVisible: true
     // C3：无操作自动隐藏延迟（ms）——冒烟测试注入短间隔收敛 5s 语义
     property int controlsHideDelay: 5000
+    // C5：阅读进度（0..1，章节粒度）——驱动控制栏底部 Kindle 式进度细条与
+    // 百分比；按章节序（currentChapter+1）/总章数，末章封顶 1（与书架进度条
+    // 同语义：读完即满）。无书/无章节信息时为 0。
+    property real chapterProgress: {
+        const id = page.book ? page.book.id : -1
+        if (id <= 0) return 0
+        const n = Books.chapterTitles(id).length
+        return n > 0 ? Math.min(1, (Books.currentChapter + 1) / n) : 0
+    }
 
     Item {
         id: controlsHost
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: 52
+        // C5：46px 与 TtsBar 同高——控制栏更细条（Kindle 底部工具栏为细条），
+        // tst_readerpage 的几何断言（正文高 = 总高 - 36 顶栏 - 46 控制栏）同步更新
+        height: 46
         opacity: page.controlsVisible ? 1.0 : 0.0
         visible: page.controlsVisible || opacity > 0.01
         Behavior on opacity {
@@ -193,6 +204,7 @@ Page {
             anchors.fill: parent
             bgMode: page.bgMode
             fontSize: page.typography.fontSize ?? 18
+            chapterProgress: page.chapterProgress
             onPrevChapter: page.loadChapter(Books.currentChapter - 1)
             onNextChapter: page.loadChapter(Books.currentChapter + 1)
             onChangeFontSize: (size) => page.setFontSize(size)

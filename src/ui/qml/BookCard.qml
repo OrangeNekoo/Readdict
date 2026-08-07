@@ -23,8 +23,12 @@ Item {
     readonly property bool showPlaceholder: !card.book.cover || coverImage.status === Image.Error
     signal clicked()
     // B5：Kindle 主页风格——封面主导（近满宽）、标题下置（小号非加粗）、进度细条
-    width: 176
-    height: 274
+    // C5：封面墙强化——封面占比更大（宽 -12、高 176、顶距 8）、新增作者行（小字灰，
+    // 有作者才显示），卡片 180×280（网格 cell 190×294，见 ShelfPage）。
+    width: 180
+    height: 280
+    // C5：作者行句柄（冒烟断言有作者显示/无作者隐藏）
+    property alias authorLabel: authorLabel
 
     // D7：悬停上浮——scale 1.03 + Behavior 缓动（Material 卡片悬停反馈）
     scale: cardMouse.hovered ? 1.03 : 1.0
@@ -54,9 +58,9 @@ Item {
             id: coverImg
             anchors.top: parent.top
             anchors.horizontalCenter: parent.horizontalCenter
-            anchors.topMargin: 10
-            width: parent.width - 16
-            height: 172
+            anchors.topMargin: 8
+            width: parent.width - 12
+            height: 176
             radius: 6
             clip: true
             Image {
@@ -84,6 +88,7 @@ Item {
         }
 
         Text {
+            id: titleText
             anchors.top: coverImg.bottom
             anchors.left: parent.left
             anchors.right: parent.right
@@ -94,6 +99,22 @@ Item {
             elide: Text.ElideRight
             font.pixelSize: 13
             color: Material.theme === Material.Dark ? "#CCCCCC" : "#333333"
+        }
+
+        // C5：作者行（Kindle 主页封面下 标题 + 作者 双行）——小字灰色，仅书有作者时显示
+        Text {
+            id: authorLabel
+            anchors.top: titleText.bottom
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.leftMargin: 8
+            anchors.rightMargin: 8
+            anchors.topMargin: 2
+            text: card.book.author ?? ""
+            visible: (card.book.author ?? "").length > 0
+            elide: Text.ElideRight
+            font.pixelSize: 11
+            color: Material.theme === Material.Dark ? "#888888" : "#8A8A8A"
         }
 
         // B5：进度细条（Kindle 主页风格）——细 3px 圆角线替代 ProgressBar

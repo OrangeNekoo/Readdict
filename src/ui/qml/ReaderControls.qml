@@ -11,6 +11,8 @@ Rectangle {
     id: controls
     property int fontSize: 18
     property string bgMode: "light"   // 随阅读背景切换前景/底色，保证深色下可读
+    // C5：阅读进度（0..1，章节粒度，ReaderPage 注入）——驱动底部 Kindle 式进度细条
+    property real chapterProgress: 0
     signal prevChapter()
     signal nextChapter()
     signal changeFontSize(int size)
@@ -27,7 +29,9 @@ Rectangle {
     // C2：朗读按钮句柄（ReaderPage 冒烟测试经此点击；同一文档内 alias，供外部实例访问）
     property alias readAloudBtn: readBtn
 
-    height: 52
+    // C5：46px 细条（与 TtsBar 同高、比旧 52px 更 Kindle）；ReaderPage 的
+    // controlsHost 同高，tst_readerpage 几何断言同步（52→46）。
+    height: 46
     color: controls.bgMode === "dark" ? "#F2121212" : "#F2FFFFFF"
     property color fgColor: controls.bgMode === "dark" ? "#E6E6E6" : "#1A1A1A"
 
@@ -87,6 +91,22 @@ Rectangle {
             id: readBtn
             iconChar: "▶"; lbl: qsTr("朗读"); tip: qsTr("开始朗读")
             onClicked: controls.readAloud()
+        }
+    }
+
+    // C5：Kindle 式底部进度细条——2px 琥珀色进度线贴工具栏底边（Kindle 阅读页
+    // 底部进度线同构）。声明在 RowLayout 之后（children[2]），children[0]=分隔线、
+    // [1]=RowLayout 索引不变（ControlsSmoke 依赖）。宽 = chapterProgress × 全宽。
+    Rectangle {
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: 2
+        color: controls.bgMode === "dark" ? "#33FFFFFF" : "#14000000"
+        Rectangle {
+            width: Math.max(0, Math.min(1, controls.chapterProgress)) * parent.width
+            height: parent.height
+            color: "#E8993D"   // Kindle 琥珀橙进度色（深浅背景均可见）
         }
     }
 }

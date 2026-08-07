@@ -60,7 +60,7 @@ Item {
             // 段落真实渲染：内容总高 > 0（有可滚动内容）
             tryVerify(function () { return page.contentView.contentHeight > 0 }, 3000,
                       "内容总高度应 > 0，实际 " + page.contentView.contentHeight)
-            // 回归源精确锁定：TtsBar 应贴底（y ≈ 高 - 52 控制栏 - 46 朗读条），
+            // 回归源精确锁定：TtsBar 应贴底（y ≈ 高 - 46 控制栏 - 46 朗读条），
             // 而非 y=0 压住顶栏（锚失效回归，见 ttsBar 锚注释）；C2 起默认隐藏，
             // 隐藏时 y 仍按锚定位（anchors 与可见性无关），断言依然成立
             verify(page.ttsBar !== undefined, "ReaderPage 应暴露 ttsBar 句柄")
@@ -68,9 +68,10 @@ Item {
                       "TtsBar 应位于页面下部，实际 y=" + page.ttsBar.y + "（y=0 即锚失效回归）")
             // C2：朗读条门控——默认隐藏（无朗读会话，用户反馈 BUG ②），正文占满到底部控制栏
             Tts.stop()   // 幂等复位（loadChapter 已 stop；前置用例可能留 state!=0）
-            // 先等锚求值稳定到隐藏态（隐藏态正文高 = 720-36-52=632，显示态 586）再捕获基线
+            // 先等锚求值稳定到隐藏态（隐藏态正文高 = 720-36-46=638，显示态 592）再捕获基线
+            // （C5：控制栏 52→46 细条化，几何断言同步）
             tryVerify(function () {
-                return !page.ttsBar.visible && page.contentView.height >= root.height - 36 - 52
+                return !page.ttsBar.visible && page.contentView.height >= root.height - 36 - 46
             }, 3000, "TtsBar 应隐藏且正文占满，实际 height=" + page.contentView.height)
             var hiddenH = page.contentView.height
             // 状态注入：setSentences + seekTo 驱动 state 0→1（与 TtsBar 播放键的 Tts.play()

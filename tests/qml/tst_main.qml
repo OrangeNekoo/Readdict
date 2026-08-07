@@ -311,6 +311,27 @@ Item {
             compare(got, 17, "A− 应发 changeFontSize(fontSize-1)")
             loader.destroy()
         }
+        // C5：Kindle 式底部进度细条——children[2]（[0]=分隔线 [1]=RowLayout 索引不变），
+        // 宽度 = chapterProgress × 全宽，超界钳制；细条 2px 贴底。
+        function test_progressStrip() {
+            var loader = controlsComp.createObject(root)
+            var ctl = loader.item
+            verify(ctl !== null, "ReaderControls 应能加载")
+            ctl.width = 200
+            verify(ctl.children[0] !== undefined && ctl.children[1] !== undefined,
+                   "分隔线与 RowLayout 索引应保持（children[0]/[1]）")
+            var strip = ctl.children[2]
+            verify(strip !== undefined, "进度细条应存在（children[2]）")
+            compare(strip.height, 2, "进度细条应为 2px")
+            var fill = strip.children[0]
+            ctl.chapterProgress = 0.5
+            compare(Math.round(fill.width), 100, "进度 0.5 时细条填充应为半宽，实际 " + fill.width)
+            ctl.chapterProgress = 0
+            compare(fill.width, 0, "进度 0 时细条填充应为 0")
+            ctl.chapterProgress = 1.25
+            compare(fill.width, 200, "进度超 1 应钳制到全宽，实际 " + fill.width)
+            loader.destroy()
+        }
     }
     TestCase {
         name: "ReaderRestore"
@@ -706,6 +727,21 @@ Item {
                       "坏封面应显示占位（Image.Error），实际 status=" + card.coverImage.status)
             verify(card.coverPlaceholder.visible === true, "坏封面占位块应可见")
             verify(card.coverImage.visible === false, "坏封面封面图应隐藏")
+            loader.destroy()
+        }
+        // C5：Kindle 主页封面墙——作者行（封面下 标题+作者 双行）有作者显示/无作者隐藏
+        function test_authorLine() {
+            var loader = cardComp.createObject(root)
+            var card = loader.item
+            verify(card !== null, "BookCard 应能加载")
+            verify(card.authorLabel !== undefined, "作者行应暴露句柄 authorLabel")
+            // 有作者：显示且文本即作者
+            card.book = { id: 103, title: "测试书", author: "测试作者", cover: "", progress: 0 }
+            compare(card.authorLabel.visible, true, "有作者时作者行应显示")
+            compare(card.authorLabel.text, "测试作者", "作者行文本应为作者，实际 " + card.authorLabel.text)
+            // 无作者：隐藏（不占位）
+            card.book = { id: 104, title: "无作者书", cover: "", progress: 0 }
+            compare(card.authorLabel.visible, false, "无作者时作者行应隐藏")
             loader.destroy()
         }
     }

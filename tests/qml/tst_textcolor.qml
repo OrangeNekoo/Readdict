@@ -204,5 +204,28 @@ Item {
             verify(d0.children[2].visible === false, "切回 light 后效果层应隐藏")
             loader.destroy()
         }
+
+        // C5：Kindle 默认衬线感 + 书本栏宽——未指定 typography.fontFamily 时正文回退
+        // 思源宋体（衬线）；正文列宽有 700px 上限（宽窗口保持书本比例，居中于窗口）。
+        function test_06_kindleSerifDefault() {
+            var loader = contentComp.createObject(root)
+            loader.width = 1400; loader.height = 600
+            var c = loader.item
+            verify(c !== null, "ReaderContent 应能加载")
+            // 不设 typography（保持默认 {}）→ fontFamily 缺省回退衬线
+            c.chapter = root.makeChapter()
+            tryVerify(function () { return root.paraEdit(c, 0) !== null }, 2000,
+                      "段落委托应渲染完成")
+            var t0 = root.paraEdit(c, 0)
+            compare(t0.font.family, "思源宋体 VF",
+                    "未指定字体时正文应回退思源宋体（Kindle 衬线感），实际 " + t0.font.family)
+            // 列宽钳制：1400 宽 × normal(0.7) = 980 > 700 → 应钳到 700 并居中
+            var col = c.contentItem.children[0]   // Column（Flickable contentItem 首子项）
+            tryVerify(function () { return Math.abs(col.width - 700) < 1 }, 2000,
+                      "正文列宽应钳制在 700px 上限，实际 " + col.width)
+            verify(Math.abs(col.x + col.width / 2 - c.width / 2) < 1,
+                   "正文列应水平居中于窗口")
+            loader.destroy()
+        }
     }
 }

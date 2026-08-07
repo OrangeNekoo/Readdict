@@ -376,10 +376,12 @@ Flickable {
         easing.type: Easing.OutCubic
     }
 
+    // C5：正文列 Kindle 化——页宽系数外再设 700px 上限：宽窗口下正文列不再无限拉宽，
+    // 保持"书本栏"比例（Kindle 桌面版同样固定阅读列宽，居中于窗口）。
     Column {
         id: col
         anchors.horizontalCenter: parent.horizontalCenter
-        width: Math.min(flick.width * flick.pageWidthFactor(), flick.width - 48)
+        width: Math.min(flick.width * flick.pageWidthFactor(), flick.width - 48, 700)
         spacing: 8
         Repeater {
             id: rep
@@ -419,7 +421,9 @@ Flickable {
                     text: para.buildText()
                     // B3：默认前景色随 flick.textColor（富文本 h1-h6 等无显式色的文本继承）
                     color: flick.textColor
-                    font.family: flick.typography.fontFamily ?? "思源黑体 VF"
+                    // C5：Kindle 默认衬线感——未指定字体时回退思源宋体（衬线），
+                    // 与 SettingsStore 的 typography/fontFamily 新默认一致
+                    font.family: flick.typography.fontFamily ?? "思源宋体 VF"
                     font.pixelSize: flick.typography.fontSize ?? 18
                     horizontalAlignment: flick.typography.align === "center" ? Text.AlignHCenter
                                         : (flick.typography.align === "right" ? Text.AlignRight : Text.AlignLeft)

@@ -25,8 +25,10 @@ SettingsStore::SettingsStore(const QString &path, QObject *parent) : QObject(par
         m_root = QJsonDocument::fromJson(f.readAll()).object();
     // 默认值
     if (!m_root.contains("theme")) m_root.insert("theme", QJsonObject{{"mode", "auto"}});
+    // C5：Kindle 默认衬线感——默认字体改思源宋体（衬线）；已有配置（含旧默认黑体）
+    // 保持用户选择不动，仅影响新配置。设置页外观卡提供 宋体/黑体 切换。
     if (!m_root.contains("typography"))
-        m_root.insert("typography", QJsonObject{{"fontFamily", "思源黑体 VF"}, {"fontSize", 18},
+        m_root.insert("typography", QJsonObject{{"fontFamily", "思源宋体 VF"}, {"fontSize", 18},
                                                 {"lineHeight", 1.6}, {"align", "left"}, {"pageWidth", "normal"}});
     if (!m_root.contains("tts")) m_root.insert("tts", QJsonObject{{"engine", "system"}, {"rate", 1.0}});
     if (!m_root.contains("webdav"))

@@ -53,7 +53,8 @@ Page {
         // implicit 尺寸，否则卡片高度为 0、内部 ColumnLayout 溢出覆盖后续卡片
         implicitWidth: body.implicitWidth + 28
         implicitHeight: body.implicitHeight + 28
-        radius: 10
+        // C5：卡片更扁平（radius 8）+ 浅米白底，接近 Kindle 设置分组卡片
+        radius: 8
         color: Material.theme === Material.Dark ? "#1E1E1E" : "#F6F5F1"
         border.color: Material.theme === Material.Dark ? "#33FFFFFF" : "#1A000000"
         border.width: 1
@@ -62,10 +63,26 @@ Page {
             anchors.fill: parent
             anchors.margins: 14
             spacing: 8
+            // C5：Kindle 风格分组标题——小字（13px）灰色非加粗 + 底部细分隔线。
+            // 分隔线经 Label.background 实现（background 是属性对象，不进入 body
+            // 的 children 列表）——SettingsTtsSmoke 依赖的卡内索引（body.children
+            // [0]=标题 [1]=引擎行…）不变。
             Label {
                 text: card.title
-                font.bold: true
-                color: Material.theme === Material.Dark ? "#E6E6E6" : "#1A1A1A"
+                font.pixelSize: 13
+                color: Material.secondaryTextColor
+                Layout.fillWidth: true
+                bottomPadding: 6
+                background: Rectangle {
+                    color: "transparent"
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        height: 1
+                        color: Material.theme === Material.Dark ? "#26FFFFFF" : "#14000000"
+                    }
+                }
             }
         }
     }
@@ -110,6 +127,29 @@ Page {
                         // Main.qml 的 stack id 是文件内私有、跨文件不可见；Item.window 也非 QML 属性。
                         // Window.window 附加属性指向 ApplicationWindow 根对象，其 applyTheme 同步 Material.theme 三态
                         Window.window.applyTheme(mode)
+                    }
+                }
+            }
+            // C5：正文字体——Kindle 默认衬线感：思源宋体（衬线）/ 思源黑体（无衬线）
+            // 切换。写 typography/fontFamily（ReaderPage 打开时经 typographyFromSettings
+            // 读取，同其他排版设置模式）；显示名与存储值分离（存储值即字族名，
+            // 不做翻译，避免译文破坏 Books.resolveFontFamily 的族名匹配）。
+            RowLayout {
+                Label { text: qsTr("字体") }
+                ComboBox {
+                    id: fontBox
+                    Layout.fillWidth: true
+                    textRole: "text"
+                    model: [
+                        { text: qsTr("思源宋体（衬线）"), value: "思源宋体 VF" },
+                        { text: qsTr("思源黑体（无衬线）"), value: "思源黑体 VF" }
+                    ]
+                    Component.onCompleted: {
+                        const cur = String(Settings.value("typography/fontFamily") || "思源宋体 VF")
+                        currentIndex = cur === "思源黑体 VF" ? 1 : 0
+                    }
+                    onActivated: (index) => {
+                        Settings.setValue("typography/fontFamily", model[index].value)
                     }
                 }
             }
