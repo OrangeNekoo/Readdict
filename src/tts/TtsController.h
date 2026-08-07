@@ -11,6 +11,9 @@ class TtsController : public QObject {
     Q_OBJECT
     Q_PROPERTY(int chapter READ chapter NOTIFY chapterChanged)
     Q_PROPERTY(int currentIndex READ currentIndex NOTIFY sentenceChanged)
+    // C2：朗读会话状态（0 空闲/1 播放/2 暂停）——QML 侧据此门控 TtsBar 显隐
+    //（仅朗读会话激活时显示；原只有 stateChanged 信号，无法声明式绑定）
+    Q_PROPERTY(int state READ state NOTIFY stateChanged)
     Q_PROPERTY(QStringList voices READ voices NOTIFY voicesChanged)
     Q_PROPERTY(bool engineAvailable READ engineAvailable NOTIFY engineAvailableChanged)
     Q_PROPERTY(double rate READ rate WRITE setRate NOTIFY rateChanged)
@@ -29,6 +32,7 @@ public:
     Q_INVOKABLE void setChapter(int ch);
     int chapter() const { return m_chapter; }
     int currentIndex() const { return m_index; }
+    int state() const { return m_state; }
     QString currentSentence() const;
     QStringList voices() const;
     bool engineAvailable() const { return m_engine && m_engine->available(); }

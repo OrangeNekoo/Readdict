@@ -58,10 +58,26 @@ Item {
             tryVerify(function () { return page.contentView.contentHeight > 0 }, 3000,
                       "内容总高度应 > 0，实际 " + page.contentView.contentHeight)
             // 回归源精确锁定：TtsBar 应贴底（y ≈ 高 - 52 控制栏 - 46 朗读条），
-            // 而非 y=0 压住顶栏（锚失效回归，见 ttsBar 锚注释）
+            // 而非 y=0 压住顶栏（锚失效回归，见 ttsBar 锚注释）；C2 起默认隐藏，
+            // 隐藏时 y 仍按锚定位（anchors 与可见性无关），断言依然成立
             verify(page.ttsBar !== undefined, "ReaderPage 应暴露 ttsBar 句柄")
             tryVerify(function () { return page.ttsBar.y > root.height * 0.5 }, 3000,
                       "TtsBar 应位于页面下部，实际 y=" + page.ttsBar.y + "（y=0 即锚失效回归）")
+            // C2：朗读条门控——默认隐藏（无朗读会话，用户反馈 BUG ②），正文占满到底部控制栏
+            Tts.stop()   // 幂等复位（loadChapter 已 stop；前置用例可能留状态）
+            verify(!page.ttsBar.visible, "未朗读时 TtsBar 应隐藏")
+            var hiddenH = page.contentView.height
+            // 状态注入：setSentences + seekTo 驱动 state 0→1（与 TtsBar 播放键的 Tts.play()
+            // 走同一 stateChanged 路径；测试桩无引擎不发声）→ TtsBar 显示且正文让出 46px
+            Tts.setSentences(["测试朗读句子。"])
+            Tts.seekTo(0)
+            tryVerify(function () { return page.ttsBar.visible }, 3000, "朗读会话激活后 TtsBar 应显示")
+            tryVerify(function () { return page.contentView.height === hiddenH - 46 }, 3000,
+                      "TtsBar 显示时正文应让出 46px，实际 " + page.contentView.height)
+            Tts.stop()
+            tryVerify(function () { return !page.ttsBar.visible }, 3000, "停止后 TtsBar 应隐藏")
+            tryVerify(function () { return page.contentView.height === hiddenH }, 3000,
+                      "TtsBar 隐藏时正文应恢复占满，实际 " + page.contentView.height)
             // 返回链路：顶栏返回按钮可见可点 → pop 回书架
             verify(page.backButton !== undefined, "ReaderPage 应暴露返回按钮句柄")
             verify(page.backButton.visible && page.backButton.enabled,

@@ -7,6 +7,8 @@ import Readdict.Backend
 // 朗读控制条：播放/暂停/停止/上一句/下一句 + 语速滑块 + 音色下拉 + 状态提示。
 // 无内部状态：信号上报 ReaderPage 处理（play/pause/stop/prev/next/rate/voice），
 // playing/errorText 由 ReaderPage 从 Tts 单例同步；引擎可用性直接读 Tts。
+// C2：visible 由宿主（ReaderPage.ttsBarVisible）门控——默认隐藏，仅朗读会话激活时
+// 显示；本组件不自行管理可见性（C3 统一显隐框架继续沿用该宿主门控）。
 Rectangle {
     id: bar
     property bool playing: false

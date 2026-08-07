@@ -94,7 +94,7 @@ Page {
         anchors.top: topBar.bottom
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: ttsBar.top
+        anchors.bottom: page.ttsBarVisible ? ttsBar.top : controlsHost.top
         chapter: page.chapter
         typography: page.typography
         // B3：正文前景色随背景模式——dark 传浅色 #E0E0E0；B5：eink 传墨色 #3A3A3A；
@@ -109,8 +109,16 @@ Page {
         onRequestNextChapter: page.autoNextChapter()
     }
 
+    // C2：朗读条门控——朗读会话激活（Tts.state != 0 播放/暂停）才显示，否则隐藏且正文
+    // 占满到底部控制栏（用户反馈 BUG ②：未点朗读却自动出现语速条）。content/hover 区
+    // 锚点随本属性切换，保证隐藏时不挤占正文。
+    // C3 扩展点：在此之上叠加"点底部唤出 + 5s 自动隐藏"统一显隐——如朗读会话中用户
+    // 手动收起，需在本属性处引入手动隐藏覆盖（勿在 TtsBar 上另写 visible 绑定，C3 统一接管）。
+    property bool ttsBarVisible: Tts.state !== 0
+
     // C5：朗读控制条（播放/暂停/停止/跳句/语速/音色），信号接 Tts 单例；
     // 引擎不可用时 TtsBar 内部禁用播放并显示提示。
+    // C2：visible 由 page.ttsBarVisible 门控（仅朗读会话激活时显示）。
     TtsBar {
         id: ttsBar
         anchors.left: parent.left
@@ -121,6 +129,7 @@ Page {
         // content.bottom 解析为 0（内容高度 -36 全空白）。改锚兄弟项 controlsHost.top，
         // 几何不变（controlsHost 恒 52px 贴底，可见性动画不影响布局）。
         anchors.bottom: controlsHost.top
+        visible: page.ttsBarVisible
         bgMode: page.bgMode
         onPlayClicked: Tts.play()
         onPauseClicked: Tts.pause()
@@ -155,8 +164,9 @@ Page {
         onTriggered: page.saveScroll()
     }
 
-    // D7：底部控制栏自动隐藏——鼠标静置 3s 淡出，移动恢复；朗读条（TtsBar）常显不隐藏，
-    // 保证播放中暂停/停止随时可达。opacity 动画不改变布局（内容区锚点不动，无跳动）。
+    // D7：底部控制栏自动隐藏——鼠标静置 3s 淡出，移动恢复。
+    // C2：朗读条不再常显（默认隐藏，仅朗读会话激活时显示，见 ttsBarVisible 门控），
+    // 会话中播放/暂停/停止随时可达。opacity 动画不改变布局（内容区锚点不动，无跳动）。
     property bool controlsVisible: true
 
     Item {
@@ -563,7 +573,8 @@ Page {
         jumpTimer.restart()
     }
 
-    // D7：hover 追踪（静置计时复位）——只覆盖正文内容区（topBar 下沿 → TtsBar 上沿），
+    // D7：hover 追踪（静置计时复位）——只覆盖正文内容区（topBar 下沿 → 朗读条上沿，
+    // C2 起与正文同界：朗读条隐藏时扩展到控制栏顶，该区域在隐藏时是正文），
     // 刻意排除顶栏/朗读条/控制栏：全页 NoButton hover MouseArea 会截走按钮的 hover 反馈
     //（Qt 把 hover 路由到最顶层项），限制区域后按钮 hover 高亮保留；鼠标从正文移到
     // 控制栏的过程中最后一次正文 onPositionChanged 已重置计时，按钮悬停 3s 内保持可见。
@@ -572,7 +583,7 @@ Page {
         anchors.top: topBar.bottom
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: ttsBar.top
+        anchors.bottom: page.ttsBarVisible ? ttsBar.top : controlsHost.top
         acceptedButtons: Qt.NoButton
         hoverEnabled: true
         onPositionChanged: {
