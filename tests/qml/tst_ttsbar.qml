@@ -124,17 +124,20 @@ Item {
             var page = loader.item
             verify(page !== null, "SettingsPage 应能加载（含 TTS 配置区）")
             var layout = page.contentItem.children[0]  // ColumnLayout
-            // B2 在"外观"分区插入了封面刷新行，B4 在 ColumnLayout 顶部插入返回按钮：
-            // children[0..6] = 返回按钮/外观标签/深色模式行/刷新封面行/语言标签/语言下拉/
-            // 朗读（TTS）标签（提示 Timer 是非可视 data 子项，不计入 children），
-            // 故 TTS 引擎行/OpenAI 配置为 children[7]/[8]
-            var engineRow = layout.children[7]     // 朗读(TTS) 分区：引擎行
+            // B5 设置页分组卡片化后：children[0]=返回按钮 [1]=外观卡 [2]=语言卡
+            // [3]=朗读(TTS)卡 [4]=阅读背景卡 [5]=同步卡 [6]=统计卡 [7]=版本标签
+            // （提示 Timer 是非可视 data 子项，不计入 children）；
+            // 卡内 ColumnLayout（card.children[0]）：0=标题 1=引擎行 2=OpenAI配置 3=保存/试音行
+            var ttsCard = layout.children[3]     // 朗读(TTS) 分区卡片
+            verify(ttsCard !== undefined, "TTS 分区卡片应存在")
+            var ttsBody = ttsCard.children[0]    // 卡内 ColumnLayout
+            var engineRow = ttsBody.children[1]  // 引擎行
             var engineBox = engineRow.children[1]
             verify(engineBox !== undefined, "引擎 ComboBox 应存在")
             compare(engineBox.currentIndex, 0, "默认引擎应为 system")
             // 切 OpenAI 并填参（假密钥：测试进程内存，不落源码/commit）
             engineBox.currentIndex = 1
-            var openaiCol = layout.children[8]
+            var openaiCol = ttsBody.children[2]
             verify(openaiCol.visible, "OpenAI 配置区应展开")
             openaiCol.children[0].children[1].text = "https://api.openai.com/v1"
             openaiCol.children[1].children[1].text = "sk-test-fake-key"
