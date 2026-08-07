@@ -124,14 +124,16 @@ Item {
             var page = loader.item
             verify(page !== null, "SettingsPage 应能加载（含 TTS 配置区）")
             var layout = page.contentItem.children[0]  // ColumnLayout
-            // B2 在"外观"分区插入了封面刷新行：TTS 引擎行/OpenAI 配置顺延为 children[6]/[7]
-            var engineRow = layout.children[6]     // 朗读(TTS) 分区：引擎行
+            // B2 在"外观"分区插入了封面刷新行，B4 在 ColumnLayout 顶部插入返回按钮：
+            // TTS 引擎行/OpenAI 配置现为 children[7]/[8]（索引前置项共 8 个：
+            // 返回按钮/外观标签/深色模式行/刷新封面行/提示 Timer/语言标签/语言下拉）
+            var engineRow = layout.children[7]     // 朗读(TTS) 分区：引擎行
             var engineBox = engineRow.children[1]
             verify(engineBox !== undefined, "引擎 ComboBox 应存在")
             compare(engineBox.currentIndex, 0, "默认引擎应为 system")
             // 切 OpenAI 并填参（假密钥：测试进程内存，不落源码/commit）
             engineBox.currentIndex = 1
-            var openaiCol = layout.children[7]
+            var openaiCol = layout.children[8]
             verify(openaiCol.visible, "OpenAI 配置区应展开")
             openaiCol.children[0].children[1].text = "https://api.openai.com/v1"
             openaiCol.children[1].children[1].text = "sk-test-fake-key"

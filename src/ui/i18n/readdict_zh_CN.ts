@@ -239,7 +239,7 @@
         <translation>设置</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="34"/>
+        <location filename="../qml/SettingsPage.qml" line="43"/>
         <source>外观</source>
         <translation>外观</translation>
     </message>
@@ -450,6 +450,11 @@
         <location filename="../qml/SettingsPage.qml" line="351"/>
         <source>图片导入失败，请换一张重试</source>
         <translation>图片导入失败，请换一张重试</translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="40"/>
+        <source>返回</source>
+        <translation>返回</translation>
     </message>
 </context>
 <context>

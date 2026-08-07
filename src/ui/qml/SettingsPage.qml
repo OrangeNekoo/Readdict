@@ -25,12 +25,21 @@ Page {
     // B2：封面刷新按钮/提示测试句柄（QML 冒烟经此触发 refreshCovers 数据流）
     property alias refreshCoversButton: refreshCoversButton
     property alias refreshCoversHint: refreshCoversHint
+    // B4：返回按钮测试句柄（QML 冒烟经此模拟返回书架导航，onClicked 即 goBack）
+    property alias backButton: backButton
     // 当前背景分区状态（onCompleted 从 Settings 恢复；导入后更新）
     property string bgImagePath: ""
     property real bgBlur: 0.0
     property real bgBrightness: 1.0
     ColumnLayout {
         anchors.fill: parent; anchors.margins: 24; spacing: 16
+        // B4：返回书架——顶部返回按钮（SyncPage/StatsPage 同款导航位），
+        // onClicked 走 goBack()（抽函数暴露供 QML 冒烟驱动）
+        ToolButton {
+            id: backButton
+            text: "← " + qsTr("返回")
+            onClicked: page.goBack()
+        }
         Label { text: qsTr("外观"); font.bold: true }
         RowLayout {
             Label { text: qsTr("深色模式") }
@@ -308,6 +317,12 @@ Page {
 
         Label { text: qsTr("版本 0.1.0"); color: Material.secondaryTextColor }
     }
+    // B4：返回上一页（书架）。SyncPage/StatsPage 内联 pop()，此处抽函数暴露供
+    // QML 冒烟测试驱动（返回按钮 onClicked 即此路径，等价于点击）
+    function goBack() {
+        page.StackView.view.pop()
+    }
+
     // 保存 TTS 配置：写 settings.json 的 tts/ 分区 → Tts.reconfigure 重建引擎
     function saveTts() {
         const engine = ttsEngineBox.model[ttsEngineBox.currentIndex].value
