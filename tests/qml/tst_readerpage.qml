@@ -64,8 +64,11 @@ Item {
             tryVerify(function () { return page.ttsBar.y > root.height * 0.5 }, 3000,
                       "TtsBar 应位于页面下部，实际 y=" + page.ttsBar.y + "（y=0 即锚失效回归）")
             // C2：朗读条门控——默认隐藏（无朗读会话，用户反馈 BUG ②），正文占满到底部控制栏
-            Tts.stop()   // 幂等复位（loadChapter 已 stop；前置用例可能留状态）
-            verify(!page.ttsBar.visible, "未朗读时 TtsBar 应隐藏")
+            Tts.stop()   // 幂等复位（loadChapter 已 stop；前置用例可能留 state!=0）
+            // 先等锚求值稳定到隐藏态（隐藏态正文高 = 720-36-52=632，显示态 586）再捕获基线
+            tryVerify(function () {
+                return !page.ttsBar.visible && page.contentView.height >= root.height - 36 - 52
+            }, 3000, "TtsBar 应隐藏且正文占满，实际 height=" + page.contentView.height)
             var hiddenH = page.contentView.height
             // 状态注入：setSentences + seekTo 驱动 state 0→1（与 TtsBar 播放键的 Tts.play()
             // 走同一 stateChanged 路径；测试桩无引擎不发声）→ TtsBar 显示且正文让出 46px
@@ -78,6 +81,16 @@ Item {
             tryVerify(function () { return !page.ttsBar.visible }, 3000, "停止后 TtsBar 应隐藏")
             tryVerify(function () { return page.contentView.height === hiddenH }, 3000,
                       "TtsBar 隐藏时正文应恢复占满，实际 " + page.contentView.height)
+            // C2 冒烟：控制栏"朗读"按钮是门控后的唯一启动入口——点击应启动会话（state 0→1）
+            // 且 TtsBar 随之显示。测试桩默认无引擎（play 直接 return 不置 state），先注入
+            // openai 无 key 引擎（引擎存在但不可用：speak 报错不发声，play 仍置 state=1）。
+            verify(page.readAloudButton !== undefined, "ReaderPage 应暴露朗读按钮句柄")
+            Tts.reconfigure("openai", "https://api.openai.com/v1", "", "tts-1", "nova", 1.0)
+            Tts.setSentences(["测试朗读句子。"])
+            page.readAloudButton.clicked()
+            tryVerify(function () { return page.ttsBar.visible && Tts.state === 1 }, 3000,
+                      "点击控制栏朗读按钮应启动会话（TtsBar 显示、state=1）")
+            Tts.stop()
             // 返回链路：顶栏返回按钮可见可点 → pop 回书架
             verify(page.backButton !== undefined, "ReaderPage 应暴露返回按钮句柄")
             verify(page.backButton.visible && page.backButton.enabled,

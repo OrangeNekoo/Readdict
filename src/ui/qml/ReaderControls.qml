@@ -21,6 +21,11 @@ Rectangle {
     signal openNotes()
     // C8：书内搜索（ReaderPage 打开 Dialog → Search.searchModel(bookId) → 跳转）
     signal openSearch()
+    // C2：朗读入口——TtsBar 门控后默认隐藏，朗读只能从控制栏启动；
+    // ReaderPage 接住：无会话/暂停时 Tts.play()（TtsBar 随 state 门控显示）
+    signal readAloud()
+    // C2：朗读按钮句柄（ReaderPage 冒烟测试经此点击；同一文档内 alias，供外部实例访问）
+    property alias readAloudBtn: readBtn
 
     height: 52
     color: controls.bgMode === "dark" ? "#F2121212" : "#F2FFFFFF"
@@ -77,5 +82,11 @@ Rectangle {
         CtlBtn { iconChar: "≣"; lbl: qsTr("笔记"); tip: qsTr("笔记列表"); onClicked: controls.openNotes() }
         // C8：书内搜索（同样追加行尾，不动既有索引）
         CtlBtn { iconChar: "⌕"; lbl: qsTr("搜索"); tip: qsTr("书内搜索"); onClicked: controls.openSearch() }
+        // C2：朗读入口（追加行尾保持既有 children 索引——ControlsSmoke 依赖 children[3]/[5]）
+        CtlBtn {
+            id: readBtn
+            iconChar: "▶"; lbl: qsTr("朗读"); tip: qsTr("开始朗读")
+            onClicked: controls.readAloud()
+        }
     }
 }

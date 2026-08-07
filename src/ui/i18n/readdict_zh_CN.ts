@@ -197,6 +197,16 @@
         <source>书内搜索</source>
         <translation>书内搜索</translation>
     </message>
+    <message>
+        <location filename="../qml/ReaderControls.qml" line="81"/>
+        <source>朗读</source>
+        <translation>朗读</translation>
+    </message>
+    <message>
+        <location filename="../qml/ReaderControls.qml" line="81"/>
+        <source>开始朗读</source>
+        <translation>开始朗读</translation>
+    </message>
 </context>
 <context>
     <name>ReaderPage</name>

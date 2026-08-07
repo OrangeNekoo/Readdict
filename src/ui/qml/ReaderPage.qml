@@ -34,6 +34,8 @@ Page {
     property alias backButton: backBtn
     // C1：朗读条（冒烟测试经此断言贴底布局——y=0 即 D7 锚失效回归，见 ttsBar 锚注释）
     property alias ttsBar: ttsBar
+    // C2：控制栏朗读按钮（冒烟测试经此点击启动朗读会话——TtsBar 门控后的唯一启动入口）
+    property alias readAloudButton: controls.readAloudBtn
 
     ReaderBackground {
         anchors.fill: parent
@@ -194,6 +196,9 @@ Page {
             onOpenToc: tocDialog.open()
             onOpenNotes: notesDlg.open()
             onOpenSearch: searchDlg.open()
+            // C2：朗读入口——无会话/已暂停时启动（播放中忽略，TtsBar 已显示）；
+            // Tts.play 对暂停态恢复、对空闲态开播，会话激活后 TtsBar 随门控显示
+            onReadAloud: { if (Tts.state !== 1) Tts.play() }
         }
     }
 
