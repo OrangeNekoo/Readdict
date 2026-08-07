@@ -88,6 +88,9 @@ Page {
         anchors.bottom: ttsBar.top
         chapter: page.chapter
         typography: page.typography
+        // B3：正文前景色随背景模式——dark 传浅色 #E0E0E0，其余（light/paper/image）
+        // 视为浅底用深字 #212121（image 模式内容区域透明露出自定义图片，按浅色处理）
+        textColor: page.bgMode === "dark" ? "#E0E0E0" : "#212121"
         // C7：划线上下文——bookId 供 addHighlight，highlights 供逐句渲染查表
         bookId: (page.book && page.book.id) || -1
         highlights: page.highlights

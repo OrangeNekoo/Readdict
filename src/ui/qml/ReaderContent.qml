@@ -27,6 +27,9 @@ Flickable {
     id: flick
     property var chapter: ({})
     property var typography: ({})
+    // B3：正文前景色——浅色/米白背景默认深字；深色背景由 ReaderPage 按 bgMode 传浅色。
+    // TextEdit.color 作为 QTextDocument 默认前景色，h1-h6 等无显式色的富文本继承。
+    property color textColor: "#212121"
     // B10：滚动位置恢复——ReaderPage 打开时赋保存的 scrollY（>=0），内容高度就绪后应用；
     // 默认 -1 表示"本次打开无需恢复"，避免内容高度变化时反复设置。
     // 应用时机：内容高度**收敛**（200ms 无变化）后——含图片段章节的首趟高度在图片
@@ -409,6 +412,8 @@ Flickable {
                     width: parent.width
                     textFormat: TextEdit.RichText
                     text: para.buildText()
+                    // B3：默认前景色随 flick.textColor（富文本 h1-h6 等无显式色的文本继承）
+                    color: flick.textColor
                     font.family: flick.typography.fontFamily ?? "思源黑体 VF"
                     font.pixelSize: flick.typography.fontSize ?? 18
                     horizontalAlignment: flick.typography.align === "center" ? Text.AlignHCenter
