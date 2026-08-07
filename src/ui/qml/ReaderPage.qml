@@ -30,6 +30,10 @@ Page {
     property int initialParagraph: -1
     // C8：书内搜索 Dialog（冒烟测试经此打开/关闭）
     property alias searchDialog: searchDlg
+    // C1：顶栏返回按钮（冒烟测试经此点击验证返回导航链路，同 SettingsPage.backButton 模式）
+    property alias backButton: backBtn
+    // C1：朗读条（冒烟测试经此断言贴底布局——y=0 即 D7 锚失效回归，见 ttsBar 锚注释）
+    property alias ttsBar: ttsBar
 
     ReaderBackground {
         anchors.fill: parent
@@ -62,6 +66,7 @@ Page {
             anchors.rightMargin: 12
             spacing: 6
             ToolButton {
+                id: backBtn
                 text: qsTr("返回")
                 font.pixelSize: 13
                 onClicked: page.StackView.view.pop()
@@ -110,7 +115,12 @@ Page {
         id: ttsBar
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: controls.top
+        // C1 修复：D7 把 ReaderControls 包进 controlsHost 后，controls 不再是 ttsBar 的
+        // 兄弟项，锚 controls.top 被 QML 丢弃（"Cannot anchor to an item that isn't a
+        // parent or sibling"）→ ttsBar 失去纵向定位落到 y=0 压住顶栏（返回不可点）、
+        // content.bottom 解析为 0（内容高度 -36 全空白）。改锚兄弟项 controlsHost.top，
+        // 几何不变（controlsHost 恒 52px 贴底，可见性动画不影响布局）。
+        anchors.bottom: controlsHost.top
         bgMode: page.bgMode
         onPlayClicked: Tts.play()
         onPauseClicked: Tts.pause()
