@@ -272,6 +272,8 @@ Item {
                 Importer.doImport(TestEnv.epubFixture)
             if (TestEnv.longSource.length > 0)
                 Importer.doImport(TestEnv.longSource)
+            if (TestEnv.multiSource.length > 0)
+                Importer.doImport(TestEnv.multiSource) // 规格 §7：章末自动续章冒烟书
         }
         function findBook(fmt, titlePart) {
             for (let b of Books.booksModel)
@@ -343,6 +345,119 @@ Item {
             }, 5000, "重开应恢复到保存的滚动位置 " + savedY + "，实际 " + page2.contentView.contentY)
             loader2.destroy()
         }
+        // 规格 §7：章末自动续章——滚动接近底部触发 requestNextChapter（ReaderContent 信号层）。
+        // 独立实例化 ReaderContent 并显式设置宽高（HighlightSmoke 同模式；ReaderPage 的锚定
+        // 布局在无头测试环境高度不可靠），避免环境布局差异：高内容章滚动到距底部阈值内触发、
+        // 顶部不触发、同一章内只触发一次（去重）。
+        function test_scrollAutoNextSignal() {
+            var loader = contentComp.createObject(root)
+            loader.width = 800
+            loader.height = 600
+            var c = loader.item
+            c.typography = { fontFamily: "Source Han Sans VF", fontSize: 18, lineHeight: 1.6,
+                             align: "left", pageWidth: "normal" }
+            var paras = []
+            for (var i = 0; i < 80; i++)
+                paras.push({ text: "第" + i + "段第一句。",
+                             html: "第" + i + "段第一句。",
+                             level: 0, imagePath: "",
+                             sentences: ["第" + i + "段第一句。"] })
+            c.chapter = { title: "章", paragraphs: paras }
+            tryVerify(function () { return c.contentHeight > c.height + 400 }, 5000,
+                      "内容高度应远大于视口，实际 " + c.contentHeight)
+            var fires = 0
+            c.requestNextChapter.connect(function () { fires++ })
+            // 顶部（contentY=0）不触发
+            c.contentY = 0
+            wait(100)
+            compare(fires, 0, "顶部滚动不应触发 requestNextChapter")
+            // 距底部 50px（< autoNextThreshold 200px）→ 触发
+            c.contentY = Math.max(0, c.contentHeight - c.height - 50)
+            tryVerify(function () { return fires >= 1 }, 3000,
+                      "滚动接近底部应触发 requestNextChapter，实际 " + fires)
+            // 去重：同一章内反复滚到章末不再重复触发
+            c.contentY = 10
+            wait(50)
+            c.contentY = Math.max(0, c.contentHeight - c.height - 50)
+            wait(100)
+            compare(fires, 1, "同一章内 requestNextChapter 应只触发一次")
+            loader.destroy()
+        }
+
+        // 规格 §7：ReaderPage 接线层——autoNextChapter / continueReadingFromTts 的换章逻辑
+        //（非末章换下一章、末章不再自动、换章后 Tts 游标复位并继续朗读）。
+        // 滚动信号→autoNextChapter 的 QML 绑定由 test_scrollAutoNextSignal（信号侧）与
+        // 本用例（处理侧）共同锁定；chapterCompleted→continueReadingFromTts 的绑定由
+        // test_ttsChapterCompletedAutoNext 锁定。
+        function test_autoNextPageWiring() {
+            var book = findBook("TXT", "multibook")
+            if (!book) skip("未导入多章节长书")
+            var loader = openReader(book)
+            var page = loader.item
+            tryVerify(function () { return page.chapter.paragraphs && page.chapter.paragraphs.length === 100 }, 5000,
+                      "首章应加载 100 段")
+            // 滚动续章入口：非末章 → 换下一章
+            page.autoNextChapter()
+            compare(Books.currentChapter, 1, "autoNextChapter 应换到下一章")
+            compare(page.chapter.title, "第二章")
+            // 末章：不再自动（停在末章，不被 loadChapter 钳制拽回开头）
+            page.loadChapter(2)
+            page.autoNextChapter()
+            compare(Books.currentChapter, 2, "末章滚动不应再换章")
+            compare(page.chapter.title, "第三章")
+            // 朗读续章入口：非末章 → 换章并继续朗读（无引擎桩下 play() 以 errorOccurred 体现）
+            var errors = []
+            var errHandler = function (m) { errors.push(m) }
+            Tts.errorOccurred.connect(errHandler)
+            page.loadChapter(0)
+            Tts.setSentences(["仅此一句"])
+            Tts.setChapter(0)
+            page.continueReadingFromTts(0)
+            compare(Books.currentChapter, 1, "continueReadingFromTts 应换到下一章")
+            compare(Tts.chapter, 1, "Tts 章节应同步")
+            compare(Tts.currentIndex, 0, "新章游标应复位到首句")
+            verify(errors.length > 0, "continueReadingFromTts 应调用 Tts.play()")
+            Tts.errorOccurred.disconnect(errHandler)
+            // 末章朗读结束：不再自动
+            page.loadChapter(2)
+            Tts.setSentences(["仅此一句"])
+            Tts.setChapter(2)
+            var before = errors.length
+            page.continueReadingFromTts(2)
+            compare(Books.currentChapter, 2, "末章朗读结束不应再换章")
+            compare(errors.length, before, "末章不应调用 Tts.play()")
+            loader.destroy()
+        }
+
+        // 规格 §7：Tts.chapterCompleted → 自动 loadChapter(next) 并继续朗读；
+        // 末章朗读结束不再自动（无下一章）。
+        function test_ttsChapterCompletedAutoNext() {
+            var book = findBook("TXT", "multibook")
+            if (!book) skip("未导入多章节长书")
+            var loader = openReader(book)
+            var page = loader.item
+            tryVerify(function () { return page.chapter.paragraphs && page.chapter.paragraphs.length > 0 }, 5000,
+                      "打开应加载章节")
+            page.loadChapter(0)
+            // 强制单句章：Tts.next() 一次即越过章末 → chapterCompleted(0)
+            Tts.setSentences(["仅此一句"])
+            Tts.setChapter(0)
+            var errors = []
+            var errHandler = function (m) { errors.push(m) }
+            Tts.errorOccurred.connect(errHandler)
+            Tts.next()
+            tryVerify(function () { return Books.currentChapter === 1 }, 3000,
+                      "朗读到章末应自动加载下一章，实际 " + Books.currentChapter)
+            compare(page.chapter.title, "第二章")
+            compare(Tts.chapter, 1, "Tts 章节应同步到新章")
+            compare(Tts.currentIndex, 0, "新章句子应已装载且游标复位")
+            // Tts 桩无引擎：play() 的唯一可观测效果是 errorOccurred——证明自动续读
+            // 调用了 Tts.play()（真实引擎下为发声继续）
+            verify(errors.length > 0, "自动续读应调用 Tts.play()，实际错误 " + errors.join(";"))
+            Tts.errorOccurred.disconnect(errHandler)
+            loader.destroy()
+        }
+
         // C8：书内搜索跳转——搜索 Dialog 可打开；jumpToChapterParagraph 应滚动到
         // 视口下方的目标段（长文本书 300 段，contentY 远大于 0）。
         // 注：test_scrollRestore 已保存滚动偏移 400，本用例的 loadChapter 会重置

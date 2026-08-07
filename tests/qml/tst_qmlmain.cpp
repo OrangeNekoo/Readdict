@@ -39,6 +39,9 @@ class TestEnv : public QObject {
     Q_PROPERTY(QString epubFixture READ epubFixture CONSTANT)
     // 长文本书（300 段，单章）：滚动恢复冒烟（内容高度远大于视口，滚动值可区分）（B10）
     Q_PROPERTY(QString longSource READ longSource CONSTANT)
+    // 多章节长书（3 章：首章=文件名 100 段，后两章各 60 段）：章末自动续章冒烟（规格 §7，
+    // 首章内容高度远大于视口，可滚动接近底部触发自动换章）
+    Q_PROPERTY(QString multiSource READ multiSource CONSTANT)
     // 重复 h2 标题 TXT（4 章，后 3 章 h2 同名）：划线查重键跨章碰撞回归（C7b）
     Q_PROPERTY(QString dupTitlesSource READ dupTitlesSource CONSTANT)
     // 真实背景图片（64x64 PNG，file:// URL）：D5 冒烟经此验证 copyToBackgrounds 导入路径
@@ -69,6 +72,22 @@ public:
             lf.close();
         }
         m_longSource = QUrl::fromLocalFile(longPath).toString();
+        // 多章节长书：首章（文件名标题）100 段 → 距视口底部可滚动距离远大于
+        // autoNextThreshold(200px)；"## " 开新章（TextParser level>=2），后两章各 60 段
+        const QString multiPath = srcDir.filePath("multibook.txt");
+        QFile mf(multiPath);
+        if (mf.open(QIODevice::WriteOnly)) {
+            for (int k = 0; k < 100; ++k)
+                mf.write(QStringLiteral("这是第一章的第 %1 段内容，用于章末自动续章的滚动验证。\n\n").arg(k + 1).toUtf8());
+            mf.write("## 第二章\n");
+            for (int k = 0; k < 60; ++k)
+                mf.write(QStringLiteral("这是第二章的第 %1 段内容。\n\n").arg(k + 1).toUtf8());
+            mf.write("## 第三章\n");
+            for (int k = 0; k < 60; ++k)
+                mf.write(QStringLiteral("这是第三章的第 %1 段内容。\n\n").arg(k + 1).toUtf8());
+            mf.close();
+        }
+        m_multiSource = QUrl::fromLocalFile(multiPath).toString();
         // 重复 h2 标题书：4 章（首章=文件名，后 3 章 h2 均为 "第一章"）——
         // 未去重时第 2/3/4 章标题相同，划线查重键跨章碰撞（C7b 回归用）
         const QString dupPath = srcDir.filePath("duptitles.txt");
@@ -108,10 +127,12 @@ public:
         return QFile::exists(p) ? QUrl::fromLocalFile(p).toString() : QString();
     }
     QString longSource() const { return m_longSource; }
+    QString multiSource() const { return m_multiSource; }
     QString backgroundImage() const { return m_backgroundImage; }
 private:
     QStringList m_files;
     QString m_longSource;
+    QString m_multiSource;
     QString m_dupTitlesSource;
     QString m_backgroundImage;
 };

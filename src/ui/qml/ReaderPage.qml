@@ -91,6 +91,8 @@ Page {
         // C7：划线上下文——bookId 供 addHighlight，highlights 供逐句渲染查表
         bookId: (page.book && page.book.id) || -1
         highlights: page.highlights
+        // 规格 §7：滚动接近章末 → 自动加载下一章（末章由 autoNextChapter 兜底不换）
+        onRequestNextChapter: page.autoNextChapter()
     }
 
     // C5：朗读控制条（播放/暂停/停止/跳句/语速/音色），信号接 Tts 单例；
@@ -120,6 +122,8 @@ Page {
         target: Tts
         function onStateChanged(state) { ttsBar.playing = state === 1 }
         function onErrorOccurred(msg) { ttsBar.errorText = msg; ttsErrorTimer.restart() }
+        // 规格 §7：朗读越过章末 → 自动换下一章并继续朗读（continueReadingFromTts）
+        function onChapterCompleted(ch) { page.continueReadingFromTts(ch) }
     }
 
     // B10：滚动位置每 5 秒写一次 settings.json（章节索引 + 章内偏移），
@@ -432,6 +436,25 @@ Page {
             for (const s of (p.sentences ?? [])) all.push(s)
         Tts.setSentences(all)
         Tts.setChapter(i)
+    }
+
+    // 规格 §7：章末自动续章——ReaderContent 滚动接近底部触发，当前章非末章时换下一章。
+    // 与手动换章（控制栏/目录）同走 loadChapter（含 Tts.stop 复位）；末章直接返回，
+    // 避免 loadChapter 的钳制把读者从章尾拽回本章开头。
+    function autoNextChapter() {
+        const titles = Books.chapterTitles(page.book.id)
+        if (!titles || Books.currentChapter + 1 >= titles.length) return
+        page.loadChapter(Books.currentChapter + 1)
+    }
+
+    // 规格 §7：朗读续章——Tts.chapterCompleted（自然读完/下一句越过章末）→ 换下一章
+    // 并继续朗读（新章句子已由 loadChapter 喂给 Tts，play() 从首句发声）；
+    // 末章朗读结束不再自动（停在末章句尾）。
+    function continueReadingFromTts(ch) {
+        const titles = Books.chapterTitles(page.book.id)
+        if (!titles || ch + 1 >= titles.length) return
+        page.loadChapter(ch + 1)   // loadChapter 内部 Tts.stop() 复位游标
+        Tts.play()                 // 新章从首句继续朗读
     }
 
     function setFontSize(size) {

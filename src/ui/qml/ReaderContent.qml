@@ -35,6 +35,18 @@ Flickable {
     property double restoreScrollY: -1
     property bool restorePending: false
     property bool restoreApplied: false
+    // 恢复实际应用的滚动值（applyRestore 写入的 contentY）：恢复窗口内自动续章不触发，
+    // 用户随后主动滚动（差值 >1px）即解除恢复态（见 onContentYChanged）
+    property double restoreAppliedY: -1
+    // ---- 规格 §7：章末自动续章 ----
+    // 滚动距底部 autoNextThreshold 内（且用户已实际滚动、非恢复/TTS 跟随）触发
+    // requestNextChapter，由 ReaderPage 接住 loadChapter(next)。
+    signal requestNextChapter()
+    property int autoNextThreshold: 200
+    property bool nextChapterRequested: false
+    // TTS 播放中滚动位置由 followSentence 驱动（非用户意图）：自动续章改走
+    // ReaderPage 的 Tts.chapterCompleted 路径，滚动触发在播放中停用
+    property bool ttsPlaying: false
     // C5：每段起始句子全局索引（sentenceStarts[i] = 前 i 段句子总数），与
     // ReaderPage 拍平喂给 Tts.setSentences 的顺序一致；totalSentences 供测试断言。
     property var sentenceStarts: []
@@ -79,6 +91,8 @@ Flickable {
         restoreTimer.stop()
         flick.restorePending = false
         flick.restoreApplied = false
+        flick.restoreAppliedY = -1
+        flick.nextChapterRequested = false   // 规格 §7：新章可再次触发自动续章
         flick.computeSentenceStarts()
         // C7：章节变了，旧选择/跳转提示作废
         flick.flashIndex = -1
@@ -93,6 +107,28 @@ Flickable {
         }
     }
     onContentHeightChanged: flick.scheduleRestore()
+
+    // 规格 §7：章末自动续章——距底部 autoNextThreshold 内（且用户已实际滚动，contentY>0）
+    // 触发 requestNextChapter。恢复窗口内不触发（恢复把用户拽到保存位置，非主动滚动）；
+    // TTS 播放中滚动位置由 followSentence 驱动，同样不触发（朗读续章走 chapterCompleted 路径）。
+    onContentYChanged: {
+        if (flick.restoreApplied && flick.restoreAppliedY >= 0
+                && Math.abs(flick.contentY - flick.restoreAppliedY) > 1)
+            flick.restoreApplied = false   // 用户接管滚动：恢复窗口结束
+        flick.checkAutoNext()
+    }
+
+    function checkAutoNext() {
+        if (flick.nextChapterRequested || flick.restorePending || flick.restoreApplied
+                || flick.ttsPlaying || flick.contentHeight <= 0 || flick.height <= 0)
+            return
+        // contentY > 0：整章放得下视口的短章（maxY<=0 或极小）停在顶部时不触发；
+        // 短章读者已看到全部内容，不应被自动拽走
+        if (flick.contentY > 0 && flick.contentY >= flick.contentHeight - flick.height - flick.autoNextThreshold) {
+            flick.nextChapterRequested = true   // 去重：同一章只发一次，换章（onChapterChanged）复位
+            flick.requestNextChapter()
+        }
+    }
 
     onHighlightsChanged: flick.rebuildHighlightMap()
 
@@ -121,7 +157,9 @@ Flickable {
         flick.restoreApplied = true
         flick.restorePending = false
         // 章节高度可能因排版参数/图片加载变化，钳制到实际最大滚动值
-        flick.contentY = Math.min(flick.restoreScrollY, Math.max(0, flick.contentHeight - flick.height))
+        flick.restoreAppliedY = Math.min(flick.restoreScrollY,
+                                         Math.max(0, flick.contentHeight - flick.height))
+        flick.contentY = flick.restoreAppliedY
     }
 
     // C5：由段落 sentences 长度累加出每段起始句子索引（与 ReaderPage 拍平顺序一致）
@@ -306,10 +344,13 @@ Flickable {
         flick.showSelectionToolbar(it.children[0], globalIdx, text)
     }
 
-    // C5：朗读游标/换章（setSentences 复位游标 0）驱动高亮与滚动
+    // C5：朗读游标/换章（setSentences 复位游标 0）驱动高亮与滚动；
+    // 规格 §7：TTS 播放中滚动位置由 followSentence 驱动（非用户意图），自动续章
+    // 走 ReaderPage 的 chapterCompleted 路径，此处仅跟踪 playing 状态供 checkAutoNext 判定。
     Connections {
         target: Tts
         function onSentenceChanged(index) { flick.followSentence(index) }
+        function onStateChanged(state) { flick.ttsPlaying = state === 1 }
     }
 
     NumberAnimation {
