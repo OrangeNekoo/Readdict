@@ -116,6 +116,12 @@ Page {
                         Importer.doImport(f)
                 }
             }
+
+            // D3：设置入口（设置页含 WebDAV 同步页导航）
+            Button {
+                text: qsTr("设置")
+                onClicked: shelf.StackView.view.push("SettingsPage.qml")
+            }
         }
 
         // C8：全文搜索结果列表（书名/章节/摘要，点击打开对应书与段落）

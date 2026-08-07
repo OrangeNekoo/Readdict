@@ -199,6 +199,13 @@ qt_add_executable(tst_qml
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/OpenAITTSEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/OpenAITTSEngine.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/tts/TTSEngine.h
+    # D3：Sync 单例（SyncPage 冒烟 + 错误配置 finished(false) 验证）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sync/SyncController.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sync/SyncController.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sync/SyncManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sync/SyncManager.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sync/WebDavClient.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sync/WebDavClient.h
 )
 target_include_directories(tst_qml PRIVATE ../src ../src/parsers ../third_party/libmobi/src)
 target_compile_definitions(tst_qml PRIVATE QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml")
@@ -221,6 +228,7 @@ qt_add_resources(tst_qml "qml_ui"
         ../src/ui/qml/ShelfPage.qml
         ../src/ui/qml/BookCard.qml
         ../src/ui/qml/SettingsPage.qml
+        ../src/ui/qml/SyncPage.qml
         ../src/ui/qml/ReaderPage.qml
         ../src/ui/qml/ReaderContent.qml
         ../src/ui/qml/ReaderControls.qml
@@ -247,3 +255,20 @@ qt_add_executable(tst_syncmanager
 target_include_directories(tst_syncmanager PRIVATE ../src ../src/sync)
 target_link_libraries(tst_syncmanager PRIVATE Qt6::Test Qt6::Sql Qt6::Network)
 add_test(NAME tst_syncmanager COMMAND tst_syncmanager)
+
+# D3：SyncController（真实 WebDavClient 走本地 QTcpServer mock：成功上传路径 +
+# 不可达服务器失败路径 + 自动同步开关/空转 run 防重入）
+qt_add_executable(tst_synccontroller
+    tst_synccontroller.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sync/SyncController.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sync/SyncController.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sync/SyncManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sync/SyncManager.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sync/WebDavClient.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sync/WebDavClient.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/DatabaseManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/SettingsStore.cpp
+)
+target_include_directories(tst_synccontroller PRIVATE ../src ../src/sync)
+target_link_libraries(tst_synccontroller PRIVATE Qt6::Test Qt6::Sql Qt6::Network)
+add_test(NAME tst_synccontroller COMMAND tst_synccontroller)

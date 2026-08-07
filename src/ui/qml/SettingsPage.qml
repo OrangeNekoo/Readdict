@@ -8,6 +8,8 @@ import Readdict.Backend
 Page {
     id: page
     title: qsTr("设置")
+    // D3：测试/外部句柄（QML 冒烟经此验证设置页 → 同步页导航）
+    property alias syncEntryButton: syncEntryButton
     ColumnLayout {
         anchors.fill: parent; anchors.margins: 24; spacing: 16
         Label { text: qsTr("外观"); font.bold: true }
@@ -127,6 +129,14 @@ Page {
                 text: ""
                 color: "#2E7D32"
             }
+        }
+
+        // D3：WebDAV 同步入口——同步配置独立成页（SyncPage.qml），此处只放导航按钮
+        Label { text: qsTr("同步"); font.bold: true }
+        Button {
+            id: syncEntryButton
+            text: qsTr("WebDAV 同步设置")
+            onClicked: page.StackView.view.push("SyncPage.qml")
         }
 
         Label { text: qsTr("版本 0.1.0"); color: Material.secondaryTextColor }

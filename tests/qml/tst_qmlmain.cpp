@@ -19,6 +19,7 @@
 #include "core/HighlightManager.h"
 #include "core/SearchEngine.h"
 #include "core/SettingsStore.h"
+#include "sync/SyncController.h"
 #include "tts/TtsController.h"
 #include "ui/ReaderTextHelper.h"
 
@@ -131,6 +132,9 @@ int main(int argc, char *argv[]) {
                                  new SearchEngine(appData + "/t.db", QStringLiteral("readdict_search")));
     // C7：TextEdit 行距助手（同生产 main.cpp）
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "ReaderText", new ReaderTextHelper);
+    // D3：Sync 单例（同生产 main.cpp；指向测试临时库，run() 读同一 settings.json）
+    qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Sync",
+                                 new SyncController(appData + "/t.db", appData));
     qmlRegisterSingletonInstance("Readdict.Test", 1, 0, "TestEnv", new TestEnv(appData));
     return quick_test_main(argc, argv, "tst_qml", QUICK_TEST_SOURCE_DIR);
 }

@@ -52,6 +52,12 @@ qt_add_executable(Readdict
     src/tts/TTSEngine.h
     src/ui/ReaderTextHelper.cpp
     src/ui/ReaderTextHelper.h
+    src/sync/SyncController.cpp
+    src/sync/SyncController.h
+    src/sync/SyncManager.cpp
+    src/sync/SyncManager.h
+    src/sync/WebDavClient.cpp
+    src/sync/WebDavClient.h
 )
 qt_add_qml_module(Readdict
     URI Readdict

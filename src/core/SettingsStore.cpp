@@ -29,7 +29,8 @@ SettingsStore::SettingsStore(const QString &path, QObject *parent) : QObject(par
     if (!m_root.contains("webdav"))
         m_root.insert("webdav", QJsonObject{{"url", ""}, {"user", ""}, {"password", ""},
                                             {"syncSettings", true}, {"syncProgress", true},
-                                            {"syncHighlights", false}, {"syncBooks", false}});
+                                            {"syncHighlights", false}, {"syncBooks", false},
+                                            {"autoSync", false}});
     save();
 }
 

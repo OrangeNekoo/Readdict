@@ -15,6 +15,7 @@
 #include "core/HighlightManager.h"
 #include "core/SearchEngine.h"
 #include "core/SettingsStore.h"
+#include "sync/SyncController.h"
 #include "tts/TtsController.h"
 #include "ui/ReaderTextHelper.h"
 
@@ -112,6 +113,12 @@ int main(int argc, char *argv[]) {
     tts->setRate(settings->value("tts/rate").toDouble(1.0));
     tts->setVoice(settings->value("tts/voice").toString());
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Tts", tts);
+    // D3：WebDAV 同步控制器（手动/每 30 分钟自动）。SyncManager 内部直连 SQLite
+    // （独立连接名 readdict_sync），与各单例连接隔离；dbPath=AppDataLocation/Readdict.db，
+    // libraryDir=AppDataLocation（同 Books 单例）。启动时恢复上次的自动同步开关。
+    auto *syncController = new SyncController(appData + "/Readdict.db", appData);
+    syncController->setAutoSync(settings->value("webdav/autoSync").toBool());
+    qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Sync", syncController);
     // B10：应用退出时结算阅读计时（页面 onDestruction 只在正常退出 QML 引擎销毁时触发，
     // 直接退进程/崩溃时兜底由这里结算，保证已读秒数不丢失）。
     QObject::connect(&app, &QCoreApplication::aboutToQuit, books, &BookManager::stopTracking);
