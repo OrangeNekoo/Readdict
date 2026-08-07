@@ -69,6 +69,7 @@ qt_add_qml_module(Readdict
         src/ui/qml/ShelfPage.qml
         src/ui/qml/BookCard.qml
         src/ui/qml/SettingsPage.qml
+        src/ui/qml/SyncPage.qml
         src/ui/qml/ReaderPage.qml
         src/ui/qml/ReaderContent.qml
         src/ui/qml/ReaderControls.qml

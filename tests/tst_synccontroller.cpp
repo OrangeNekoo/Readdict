@@ -163,6 +163,40 @@ private slots:
         QVERIFY2(ok, "无勾选项应判定成功（无失败行）");
         QVERIFY2(!ctl.running(), "同步结束后 running 应为 false");
     }
+
+    // D3 复审回归：历史失败不得污染本次判定——先不可达失败，再本地 mock 成功，
+    // 第二次 finished 必须为 (true, "")（SyncManager::sync 开始清空 m_log）
+    void staleFailureDoesNotPoisonNextRun() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString conn = QStringLiteral("synccontroller_conn") + QTest::currentTestFunction();
+        DatabaseManager dbm(dir.path() + "/t.db", QStringLiteral("synccontroller_dbm") + QTest::currentTestFunction());
+        SettingsStore st(dir.path() + "/settings.json");
+        SyncController ctl(dir.path() + "/t.db", dir.path(), conn);
+
+        // 第一次：不可达服务器 → 失败
+        st.setValue("webdav/url", "http://127.0.0.1:1/dav/");
+        st.save();
+        bool got = false, ok = true;
+        QString err;
+        QObject::connect(&ctl, &SyncController::finished,
+                         [&](bool o, const QString &e) { got = true; ok = o; err = e; });
+        ctl.run(true, false, false, false);
+        QVERIFY2(got && !ok, "第一次（不可达）应失败");
+
+        // 第二次：本地 mock → 成功；不得受第一次失败行影响
+        EmptyDav server;
+        QVERIFY2(server.listen(QHostAddress::LocalHost, 0), "mock 服务器应能监听");
+        st.setValue("webdav/url",
+                    QStringLiteral("http://127.0.0.1:%1/dav/").arg(server.serverPort()));
+        st.save();
+        got = false; ok = false; err.clear();
+        ctl.run(true, false, false, false);
+        QVERIFY2(got, "第二次 finished 应到达");
+        QVERIFY2(ok, ("后续成功同步不应被历史失败污染，error=" + err).toUtf8());
+        QVERIFY2(err.isEmpty(), "成功同步 error 应为空");
+        QVERIFY2(!ctl.running(), "同步结束后 running 应为 false");
+    }
 };
 
 QTEST_MAIN(TestSyncController)

@@ -681,13 +681,14 @@ private slots:
         QVERIFY(!m.log().join('\n').contains("采用远端"));
         QCOMPARE(readFileBytes(dir.filePath("settings.json")),
                  QByteArray("{\"theme\":{\"mode\":\"dark\"}}")); // 本地未被损坏内容影响
-        // 再次同步同样跳过（不空转：不会每轮 TakeRemote 下载后无效果）
+        // 再次同步同样跳过（不空转：不会每轮 TakeRemote 下载后无效果）。
+        // 日志按"本次同步"记账（D3 复审修复：sync() 开始清空 m_log），
+        // 第二次同步的日志独立于第一次——断言本次仍跳过且不空转。
         m.sync(mock, o);
-        int skipped = 0;
-        for (const QString &l : m.log())
-            if (l.contains("跳过 settings.json: 远端数据不可解析"))
-                ++skipped;
-        QCOMPARE(skipped, 2);
+        const QStringList log2 = m.log();
+        QCOMPARE(log2.size(), 1); // 只记录本次同步的行
+        QVERIFY(log2.join('\n').contains("跳过 settings.json: 远端数据不可解析"));
+        QVERIFY(!log2.join('\n').contains("采用远端"));
     }
 
     // ---- 补充：highlights note/color 修改经 sync 传播（版本时钟感知编辑） ----
@@ -725,14 +726,13 @@ private slots:
         const QVariantList list = hmB.highlightsForBook(1);
         QCOMPARE(list.size(), 1);
         QCOMPARE(list.first().toMap()["note"].toString(), QString("新笔记")); // 笔记已传播
-        // B 同步 #2：本地版本 T == 远端 T → Skip（收敛，不重传）
-        const int nB = mB.log().size();
+        // B 同步 #2：本地版本 T == 远端 T → Skip（收敛，不重传）。
+        // 日志按"本次同步"记账（D3 复审：sync() 开始清空 m_log），整条 log 即本次记录
         mB.sync(mock, o);
-        QVERIFY(mB.log().mid(nB).join('\n').contains("跳过 highlights.json"));
+        QVERIFY(mB.log().join('\n').contains("跳过 highlights.json"));
         // A 同步 #2：本地版本 T == 远端 T → Skip（原编辑端不被超越，无循环下载）
-        const int nA = mA.log().size();
         mA.sync(mock, o);
-        const QStringList addedA = mA.log().mid(nA);
+        const QStringList addedA = mA.log();
         QVERIFY(addedA.join('\n').contains("跳过 highlights.json"));
         QVERIFY(!addedA.join('\n').contains("采用远端 highlights.json"));
     }
@@ -780,11 +780,11 @@ private slots:
         // 不写) + adopted 对齐 06-01
         m.sync(mock, o);
         QVERIFY(m.log().join('\n').contains("采用远端 books.json"));
-        // #2/#3：本地版本 = max(01-01, adopted 06-01) == 远端 → Skip（不再重复下载）
+        // #2/#3：本地版本 = max(01-01, adopted 06-01) == 远端 → Skip（不再重复下载）；
+        // 日志按次记账，整条 log 即本次记录
         m.sync(mock, o);
-        const int n = m.log().size();
         m.sync(mock, o);
-        QVERIFY(m.log().mid(n).join('\n').contains("跳过 books.json"));
+        QVERIFY(m.log().join('\n').contains("跳过 books.json"));
         // KeepLocal 上传后 adopted 对齐本地数据版本（远端回退时不循环）：远端换成更旧内容
         mock.files["books.json"] =
             "{\"books\":[{\"id\":1,\"title\":\"a\",\"author\":\"\",\"publisher\":\"\","
@@ -792,10 +792,9 @@ private slots:
             "\"addedAt\":\"2026-01-01T00:00:00Z\"}]}";
         mock.mtimes["books.json"] = QDateTime(QDate(2025, 1, 1), QTime(0, 0, 0), QTimeZone::UTC);
         m.sync(mock, o); // 远端回退到 01-01：adopted 06-01 > 远端 → KeepLocal 上传本地载荷
-        QVERIFY(m.log().mid(n).join('\n').contains("保留本地 books.json"));
-        const int n2 = m.log().size();
+        QVERIFY(m.log().join('\n').contains("保留本地 books.json"));
         m.sync(mock, o); // 上传后 adopted := 本地数据 max 01-01 == 远端 → Skip，不循环
-        QVERIFY(m.log().mid(n2).join('\n').contains("跳过 books.json"));
+        QVERIFY(m.log().join('\n').contains("跳过 books.json"));
     }
 
     // ---- 补充：highlights 无字段差异时版本单调追赶（避免永 TakeRemote 空转） ----
@@ -882,13 +881,13 @@ private slots:
         QVERIFY(m.log().join('\n').contains("跳过 progress.json: 远端数据不可解析"));
         QVERIFY(!m.log().join('\n').contains("下载 progress.json")); // 未标下载
         QCOMPARE(progressOf(db, 1).toDouble(), 0.0);
-        // 再次同步同样跳过（不空转）
+        // 再次同步同样跳过（不空转）。日志按"本次同步"记账（D3 复审：sync()
+        // 开始清空 m_log），第二次同步的日志独立——断言本次仍跳过
         m.sync(mock, o);
-        int skipped = 0;
-        for (const QString &l : m.log())
-            if (l.contains("跳过 progress.json: 远端数据不可解析"))
-                ++skipped;
-        QCOMPARE(skipped, 2);
+        const QStringList log2 = m.log();
+        QCOMPARE(log2.size(), 1); // 只记录本次同步的行
+        QVERIFY(log2.join('\n').contains("跳过 progress.json: 远端数据不可解析"));
+        QVERIFY(!log2.join('\n').contains("下载 progress.json"));
     }
 
     // ---- 补充：books KeepLocal 上传前合并远端独有书目（数据丢失修复） ----

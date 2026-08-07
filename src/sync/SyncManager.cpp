@@ -646,6 +646,10 @@ static QByteArray mergeBooksPayloads(const QByteArray &remoteData, const QByteAr
 }
 
 void SyncManager::sync(WebDavClient &client, const Options &opts) {
+    // 日志按"本次同步"记账：清空历史，避免 D3 SyncController 按全量累积日志
+    // 判定成败——历史失败行会让后续完全成功的同步误报 finished(false)，
+    // 且错误文本无限增长（D3 复审发现）。
+    m_log.clear();
     // 快照式决策：list() 只取一次（简报"client.list() 得远端文件与 mtime"），
     // 单次同步内所有项的 有无/冲突 判定基于同一快照。
     const QVector<DavEntry> remote = client.list();
