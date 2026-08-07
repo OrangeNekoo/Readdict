@@ -20,6 +20,8 @@ Page {
     property alias bgImageRadio: bgImageRadio
     property alias bgBlurSlider: bgBlurSlider
     property alias bgBrightnessSlider: bgBrightnessSlider
+    // D6：语言下拉测试句柄（QML 冒烟经此驱动三语切换）
+    property alias languageBox: languageBox
     // 当前背景分区状态（onCompleted 从 Settings 恢复；导入后更新）
     property string bgImagePath: ""
     property real bgBlur: 0.0
@@ -36,7 +38,7 @@ Page {
                     const mode = Settings.value("theme/mode")
                     currentIndex = mode === "auto" ? 0 : mode === "light" ? 1 : mode === "dark" ? 2 : 0
                 }
-                onActivated: {
+                onActivated: (index) => {
                     const mode = ["auto", "light", "dark"][index]
                     Settings.setValue("theme/mode", mode)
                     // Main.qml 的 stack id 是文件内私有、跨文件不可见；Item.window 也非 QML 属性。
@@ -47,9 +49,20 @@ Page {
         }
         Label { text: qsTr("语言"); font.bold: true }
         ComboBox {
+            id: languageBox
             model: [qsTr("简体中文"), qsTr("繁體中文"), qsTr("English")]
-            // 语言持久化先落 settings.json 的 ui/language，翻译加载在计划 D 完善
-            onActivated: Settings.setValue("ui/language", ["zh_CN", "zh_TW", "en"][index])
+            // D6：启动恢复上次选择；切换即写 settings.json 的 ui/language 并触发
+            // Lang.applyLanguage 加载对应 .qm（main.cpp 的 languageChanged →
+            // QQmlEngine::retranslate 刷新全部 qsTr 文本，重启后保持）。
+            Component.onCompleted: {
+                const code = String(Settings.value("ui/language") || "zh_CN")
+                currentIndex = code === "zh_TW" ? 1 : code === "en" ? 2 : 0
+            }
+            onActivated: (index) => {
+                const code = ["zh_CN", "zh_TW", "en"][index]
+                Settings.setValue("ui/language", code)
+                Lang.applyLanguage(code)
+            }
         }
 
         // C5：朗读（TTS）配置——引擎选择 + OpenAI 参数，保存后 Tts.reconfigure 热切换。

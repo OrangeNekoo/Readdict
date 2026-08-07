@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Sql Network Pdf TextToSpeech Multimedia Test QuickTest)
+find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Sql Network Pdf TextToSpeech Multimedia Test QuickTest LinguistTools)
 
 qt_standard_project_setup()
 
@@ -52,6 +52,8 @@ qt_add_executable(Readdict
     src/tts/TTSEngine.h
     src/ui/ReaderTextHelper.cpp
     src/ui/ReaderTextHelper.h
+    src/ui/LanguageController.cpp
+    src/ui/LanguageController.h
     src/sync/SyncController.cpp
     src/sync/SyncController.h
     src/sync/SyncManager.cpp
@@ -82,6 +84,16 @@ qt_add_qml_module(Readdict
 qt_add_resources(Readdict "app_resources"
     PREFIX "/"
     FILES resources.qrc
+)
+
+# D6：三语国际化。构建时 lupdate 扫描 QML/C++ 的 qsTr/tr 更新 .ts，
+# lrelease 编译 .qm 并默认以 /i18n 前缀编入 Readdict 资源（main.cpp 的
+# LanguageController 从 :/i18n 加载 readdict_<code>.qm）。
+qt_add_translations(Readdict
+    TS_FILES
+        src/ui/i18n/readdict_zh_CN.ts
+        src/ui/i18n/readdict_zh_TW.ts
+        src/ui/i18n/readdict_en.ts
 )
 
 target_include_directories(Readdict PRIVATE src third_party/libmobi/src)

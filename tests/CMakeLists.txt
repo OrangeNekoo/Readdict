@@ -185,6 +185,9 @@ qt_add_executable(tst_qml
     # C7：TextEdit 行距助手（段落渲染用 TextEdit）
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/ReaderTextHelper.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/ReaderTextHelper.h
+    # D6：语言控制器（Lang 单例，QML 冒烟驱动三语切换）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/LanguageController.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/LanguageController.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/SentenceSplitter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/TextParser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/EpubParser.cpp
@@ -238,6 +241,45 @@ qt_add_resources(tst_qml "qml_ui"
         ../src/ui/qml/PdfReaderPage.qml
 )
 add_test(NAME tst_qml COMMAND tst_qml)
+
+# D6：三语 .qm 编入 QML 测试资源（:/i18n/readdict_<code>.qm），使 Lang 单例在
+# 测试进程中真实加载翻译；lrelease 目标先于测试产出 qm（qt_add_translations
+# 生成 Readdict_lrelease 自定义目标，见顶层 CMakeLists）。
+add_dependencies(tst_qml Readdict_lrelease)
+# 绝对路径文件入资源需 QT_RESOURCE_ALIAS（Qt 6.11 策略）；必须逐文件设置，
+# 列表形式会把同一别名赋给全部文件（别名冲突导致 zh_CN 命中 en 内容）
+set_source_files_properties(${CMAKE_BINARY_DIR}/readdict_zh_CN.qm PROPERTIES QT_RESOURCE_ALIAS readdict_zh_CN.qm)
+set_source_files_properties(${CMAKE_BINARY_DIR}/readdict_zh_TW.qm PROPERTIES QT_RESOURCE_ALIAS readdict_zh_TW.qm)
+set_source_files_properties(${CMAKE_BINARY_DIR}/readdict_en.qm PROPERTIES QT_RESOURCE_ALIAS readdict_en.qm)
+qt_add_resources(tst_qml "i18n_qm"
+    PREFIX "/i18n"
+    FILES
+        ${CMAKE_BINARY_DIR}/readdict_zh_CN.qm
+        ${CMAKE_BINARY_DIR}/readdict_zh_TW.qm
+        ${CMAKE_BINARY_DIR}/readdict_en.qm
+)
+
+# D6：语言控制器单元测试——真实 .qm（同 tst_qml 的资源嵌入方式）验证
+# applyLanguage 切换后 QCoreApplication::translate 命中三语翻译
+qt_add_executable(tst_language
+    tst_language.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/LanguageController.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/LanguageController.h
+)
+target_include_directories(tst_language PRIVATE ../src ../src/ui)
+target_link_libraries(tst_language PRIVATE Qt6::Test Qt6::Gui)
+add_dependencies(tst_language Readdict_lrelease)
+set_source_files_properties(${CMAKE_BINARY_DIR}/readdict_zh_CN.qm PROPERTIES QT_RESOURCE_ALIAS readdict_zh_CN.qm)
+set_source_files_properties(${CMAKE_BINARY_DIR}/readdict_zh_TW.qm PROPERTIES QT_RESOURCE_ALIAS readdict_zh_TW.qm)
+set_source_files_properties(${CMAKE_BINARY_DIR}/readdict_en.qm PROPERTIES QT_RESOURCE_ALIAS readdict_en.qm)
+qt_add_resources(tst_language "i18n_qm"
+    PREFIX "/i18n"
+    FILES
+        ${CMAKE_BINARY_DIR}/readdict_zh_CN.qm
+        ${CMAKE_BINARY_DIR}/readdict_zh_TW.qm
+        ${CMAKE_BINARY_DIR}/readdict_en.qm
+)
+add_test(NAME tst_language COMMAND tst_language)
 
 # D1：WebDAV 协议客户端（自实现 PROPFIND/MKCOL/PUT/GET/DELETE，本地 QTcpServer mock）
 qt_add_executable(tst_webdav tst_webdav.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/sync/WebDavClient.cpp)

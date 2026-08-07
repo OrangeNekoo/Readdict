@@ -3,7 +3,6 @@
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QLocale>
-#include <QTranslator>
 #include <QDir>
 #include <QFile>
 #include <QFontDatabase>
@@ -18,6 +17,7 @@
 #include "sync/SyncController.h"
 #include "tts/TtsController.h"
 #include "ui/ReaderTextHelper.h"
+#include "ui/LanguageController.h"
 
 // B8：加载 fronts/ 下的可变字体（思源黑体 VF / 思源宋体 VF / 得意黑）。
 // 开发期从仓库根 fronts/ 相对当前工作目录加载（构建目录启动时 CWD 为仓库根），
@@ -57,18 +57,31 @@ static void loadBundledFonts() {
         qInfo() << "字体加载完成，共" << loaded << "个字体文件";
 }
 
+// D6：启动语言——settings.json 的 ui/language 优先；未设置时按系统语言映射到
+// zh_CN/zh_TW/en（简/繁/英三语），仍无匹配默认 zh_CN。
+static QString resolveStartupLanguage(const SettingsStore &settings) {
+    const QString saved = settings.value("ui/language").toString();
+    if (!saved.isEmpty()) return saved;
+    const QStringList uiLanguages = QLocale::system().uiLanguages();
+    for (const QString &locale : uiLanguages) {
+        const QLocale loc(locale);
+        if (loc.language() == QLocale::Chinese) {
+            const QLocale::Territory t = loc.territory();
+            if (t == QLocale::Taiwan || t == QLocale::HongKong || t == QLocale::Macau)
+                return QStringLiteral("zh_TW");
+            return QStringLiteral("zh_CN");
+        }
+        if (loc.language() == QLocale::English)
+            return QStringLiteral("en");
+    }
+    return QStringLiteral("zh_CN");
+}
+
 int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
     QQuickStyle::setStyle("Material");
     app.setApplicationName("Readdict");
     app.setOrganizationName("Readdict");
-
-    QTranslator translator;
-    const QStringList uiLanguages = QLocale::system().uiLanguages();
-    for (const QString &locale : uiLanguages) {
-        if (translator.load("readdict_" + QLocale(locale).name(), ":/i18n")) break;
-    }
-    app.installTranslator(&translator);
 
     // 确保 AppData 目录存在：SettingsStore 直接写 settings.json、数据库与书库目录都在其下，
     // 父目录缺失会导致写入/打开失败（A4 记录的问题）。
@@ -78,6 +91,10 @@ int main(int argc, char *argv[]) {
 
     const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     auto *settings = new SettingsStore(appData + "/settings.json");
+    // D6：语言控制器（zh_CN/zh_TW/en）。启动按 Settings ui/language（或系统语言，默认 zh_CN）
+    // 加载翻译；语言切换由设置页下拉触发 applyLanguage，languageChanged 驱动 QML 重译。
+    auto *lang = new LanguageController(resolveStartupLanguage(*settings));
+    qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Lang", lang);
     auto *books = new BookManager(appData + "/Readdict.db");
     // 阅读器进度（progress/<bookId>）与 Books 单例解耦读写 settings.json（B8）
     books->setSettingsStore(settings);
@@ -124,6 +141,8 @@ int main(int argc, char *argv[]) {
     QObject::connect(&app, &QCoreApplication::aboutToQuit, books, &BookManager::stopTracking);
 
     QQmlApplicationEngine engine;
+    // D6：翻译切换后重估全部 qsTr 绑定（含 StackView 中不可见页面），即时全量刷新文本
+    QObject::connect(lang, &LanguageController::languageChanged, &engine, &QQmlEngine::retranslate);
     engine.loadFromModule("Readdict", "Main");
     if (engine.rootObjects().isEmpty()) return -1;
     return app.exec();

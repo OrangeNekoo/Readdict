@@ -24,6 +24,7 @@
 #include "sync/SyncController.h"
 #include "tts/TtsController.h"
 #include "ui/ReaderTextHelper.h"
+#include "ui/LanguageController.h"
 
 // 仅测试进程可见：在临时目录预生成 TXT 源书，QML 侧经 Importer.doImport 导入。
 class TestEnv : public QObject {
@@ -145,6 +146,8 @@ int main(int argc, char *argv[]) {
                                  new SearchEngine(appData + "/t.db", QStringLiteral("readdict_search")));
     // C7：TextEdit 行距助手（同生产 main.cpp）
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "ReaderText", new ReaderTextHelper);
+    // D6：语言控制器（同生产 main.cpp；初始 zh_CN，测试资源已编入三份 .qm）
+    qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Lang", new LanguageController("zh_CN"));
     // D3：Sync 单例（同生产 main.cpp；指向测试临时库，run() 读同一 settings.json）
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Sync",
                                  new SyncController(appData + "/t.db", appData));
