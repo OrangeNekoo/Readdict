@@ -34,10 +34,12 @@ public:
     QByteArray buildProgressJson(const QVector<QPair<qint64, double>> &progress) const;
     QByteArray buildHighlightsJson() const;
     QByteArray buildBooksJson() const;
-    void applySettingsJson(const QByteArray &data);
-    void applyProgressJson(const QByteArray &data);
-    void applyHighlightsJson(const QByteArray &data);
-    void applyBooksJson(const QByteArray &data);
+    // apply* 返回 false = 写库/写盘失败（syncOne 据此 log 失败并跳过 adopted 推进，避免
+    // 元数据丢失后不再重试）
+    bool applySettingsJson(const QByteArray &data);
+    bool applyProgressJson(const QByteArray &data);
+    bool applyHighlightsJson(const QByteArray &data);
+    bool applyBooksJson(const QByteArray &data);
     Conflict resolveConflict(const QDateTime &local, const QDateTime &remote) const;
     struct Options { bool settings = false, progress = true, highlights = false, books = false; };
     void sync(WebDavClient &client, const Options &opts);
@@ -51,9 +53,11 @@ private:
     // remoteVersionOf（内容类项目 progress/highlights/books）：从远端载荷提取内容版本
     // （max ts），与本地内容版本比较——同钟收敛（Skip 可达、不重复下载）；settings 缺省
     // 用 DavEntry::modified（文件 mtime，本地侧截断到秒级对齐，见 sync()）。
+    // uploadWith（books 用）：KeepLocal 上传前把远端载荷中本地缺失的条目并入载荷——
+    // 否则无条件 PUT 本地方集会整体覆盖远端书目（标准多设备流程的数据丢失，见报告）。
     void syncOne(WebDavClient &client, const QVector<DavEntry> &remote, const QString &name,
                  const std::function<QByteArray()> &build,
-                 const std::function<void(const QByteArray &)> &apply,
+                 const std::function<bool(const QByteArray &)> &apply,
                  const QDateTime &localVersion, bool hasLocalData,
                  const std::function<QDateTime(const QByteArray &)> &remoteVersionOf = {},
                  const std::function<bool(const QByteArray &)> &sameAsLocal = {},
@@ -61,12 +65,13 @@ private:
                  // 载荷版本记入同步状态（adopted = 载荷 max addedAt），本地版本时钟随之
                  // 追赶——否则版本低于远端的设备每次 TakeRemote 下载后 apply 无版本前进，
                  // 重复下载永不 Skip
-                 const std::function<void(const QByteArray &)> &onAdopt = {});
+                 const std::function<void(const QByteArray &)> &onAdopt = {},
+                 const std::function<QByteArray(const QByteArray &)> &uploadWith = {});
     void syncBookBodies(WebDavClient &client, const QVector<DavEntry> &remote);
     // ---- 同步状态（libraryDir/.readdict_sync.json）：记录已采纳的远端版本 ----
     QString syncStatePath() const;
     QDateTime adoptedVersion(const QString &item) const;
-    void setAdoptedVersion(const QString &item, const QDateTime &v);
+    bool setAdoptedVersion(const QString &item, const QDateTime &v);
     QString m_dbPath, m_libraryDir;
     QSqlDatabase m_db;
     QStringList m_log;

@@ -558,6 +558,11 @@ private slots:
                         "progress,added_at) VALUES(1,'a','作者','社','类','EPUB','%1','',0.0,"
                         "'2026-01-01T00:00:00')").arg(dir.path() + "/books/a.epub")),
                      qPrintable(q.lastError().text()));
+            // 五轮复审：FTS 索引行（external-content 表无触发器，addBook 手动维护；
+            // 本测试直插 SQL 故手动补，验证 applyBooksJson 采纳元数据时同步维护索引）
+            QVERIFY2(q.exec("INSERT INTO books_fts(rowid,title,author,publisher)"
+                            " VALUES(1,'a','作者','社')"),
+                     qPrintable(q.lastError().text()));
         }
         MockWebDavClient mock;
         // 远端：books.json 元数据（含本地没有的 book 2，addedAt 供内容版本比较）
@@ -601,6 +606,16 @@ private slots:
             QCOMPARE(q.value(3).toString(), QString("C"));
             QCOMPARE(q.value(4).toString(), QString("EPUB"));
             QCOMPARE(q.value(5).toString(), QString("cov"));
+        }
+        // 五轮复审：采纳元数据后 books_fts 同步维护（按新标题可全文搜索命中）
+        {
+            QSqlDatabase seed = seedDb(db);
+            QSqlQuery q(seed);
+            q.exec("SELECT title,author,publisher FROM books_fts WHERE rowid=1");
+            QVERIFY(q.next());
+            QCOMPARE(q.value(0).toString(), QString("远程标题"));
+            QCOMPARE(q.value(1).toString(), QString("A"));
+            QCOMPARE(q.value(2).toString(), QString("P"));
         }
     }
 
@@ -867,6 +882,61 @@ private slots:
             if (l.contains("跳过 progress.json: 远端数据不可解析"))
                 ++skipped;
         QCOMPARE(skipped, 2);
+    }
+
+    // ---- 补充：books KeepLocal 上传前合并远端独有书目（数据丢失修复） ----
+    void syncFlowBooksKeepLocalPreservesRemote() {
+        QTemporaryDir dir;
+        const QString db = dir.filePath("t.db");
+        {
+            QSqlDatabase seed = seedDb(db);
+            // B 导入新书（added_at 07-01）；added_at 需改 seedBook 默认，直插 SQL
+            QSqlQuery q(seed);
+            QVERIFY2(q.exec("INSERT INTO books(id,title,format,path,added_at,progress)"
+                            " VALUES(1,'b','EPUB','/lib/books/b.epub','2026-07-01T00:00:00',0.0)"),
+                     qPrintable(q.lastError().text()));
+        }
+        MockWebDavClient mock;
+        // 远端：A 的已有书目（id=2，B 本地没有）——标准多设备流程：A 同步后 B 首次同步
+        // （adopted=01-01），B 再导入新书后 KeepLocal
+        mock.files["books.json"] =
+            "{\"books\":[{\"id\":2,\"title\":\"A的书\",\"author\":\"A\",\"publisher\":\"\","
+            "\"category\":\"\",\"format\":\"EPUB\",\"path\":\"books/a.epub\",\"cover\":\"\","
+            "\"addedAt\":\"2026-01-01T00:00:00Z\"}]}";
+        SyncManager m(db, dir.path());
+        SyncManager::Options o; o.settings = false; o.progress = false;
+        o.highlights = false; o.books = true;
+        m.sync(mock, o); // 本地 max(07-01) > 远端 01-01 → KeepLocal
+        QVERIFY(m.log().join('\n').contains("保留本地 books.json"));
+        // 上传载荷 = 本地书（id=1）+ 远端独有书（id=2）——A 的书目不丢失
+        const QJsonArray merged =
+            QJsonDocument::fromJson(mock.files["books.json"]).object()["books"].toArray();
+        QSet<qint64> ids;
+        for (const QJsonValue &v : merged)
+            ids.insert(v.toObject()["id"].toVariant().toLongLong());
+        QVERIFY(ids.contains(1));
+        QVERIFY(ids.contains(2)); // 远端独有书目被并入，未丢失
+        QCOMPARE(merged.size(), 2);
+    }
+
+    // ---- 补充：远端 settings 空对象（合法空 JSON）→ Skip 不空转 ----
+    void syncFlowEmptyRemoteSettingsSkips() {
+        QTemporaryDir dir;
+        QFile f(dir.filePath("settings.json"));
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        QVERIFY(f.write("{\"theme\":{\"mode\":\"dark\"}}") > 0);
+        f.close();
+        MockWebDavClient mock;
+        mock.files["settings.json"] = "{}"; // 合法空 JSON（无白名单键）
+        mock.mtimes["settings.json"] = QDateTime::currentDateTimeUtc().addSecs(3600); // mtime 较新
+        SyncManager m(dir.filePath("Readdict.db"), dir.path());
+        SyncManager::Options o; o.settings = true; o.progress = false;
+        o.highlights = false; o.books = false;
+        m.sync(mock, o);
+        // 空载荷视为内容相等 → Skip（否则每轮 TakeRemote 空转，apply 早退无版本前进）
+        QVERIFY(m.log().join('\n').contains("跳过 settings.json"));
+        QVERIFY(!m.log().join('\n').contains("采用远端 settings.json"));
+        QCOMPARE(mock.putNames.size(), 0);
     }
 };
 QTEST_MAIN(TestSync)
