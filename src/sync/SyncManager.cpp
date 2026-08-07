@@ -20,6 +20,12 @@ namespace {
 const QStringList kSyncSections = {QStringLiteral("theme"), QStringLiteral("typography"),
                                    QStringLiteral("tts")};
 
+// tts 分区内的敏感字段：OpenAI API 密钥（settings.json 键名为 key）。随设置同步会上传
+// 到托管 WebDAV 的第三方机器，与"webdav 凭据不出本机"同原则，打包/合并时一律剔除。
+// 决策：只剔除 apiKey，不整体排除 tts 分区——engine/url/model/voice/rate 等非敏感项
+// 仍跨设备同步，避免 OpenAI 模型/音色等配置丢失。
+const QStringList kTtsSensitiveKeys = {QStringLiteral("key")};
+
 // 深合并：src 叶子覆盖 target 对应键；两侧都是对象则递归；target 独有键保留。
 void mergeSection(QJsonObject &target, const QJsonObject &src) {
     for (auto it = src.constBegin(); it != src.constEnd(); ++it) {
@@ -107,9 +113,19 @@ QByteArray SyncManager::buildSettingsJson() const {
         return QByteArray();
     QJsonObject out;
     const QJsonObject root = doc.object();
-    for (const QString &key : kSyncSections)
-        if (root.contains(key))
-            out.insert(key, root.value(key));
+    for (const QString &key : kSyncSections) {
+        if (!root.contains(key))
+            continue;
+        QJsonValue v = root.value(key);
+        // 敏感字段（OpenAI API 密钥）不随设置同步（见 kTtsSensitiveKeys 注释）
+        if (key == QStringLiteral("tts") && v.isObject()) {
+            QJsonObject section = v.toObject();
+            for (const QString &sk : kTtsSensitiveKeys)
+                section.remove(sk);
+            v = section;
+        }
+        out.insert(key, v);
+    }
     return QJsonDocument(out).toJson(QJsonDocument::Compact);
 }
 
@@ -208,7 +224,15 @@ bool SyncManager::applySettingsJson(const QByteArray &data) {
     for (const QString &key : kSyncSections) {
         if (!remote.contains(key))
             continue;
-        const QJsonValue rv = remote.value(key);
+        QJsonValue rv = remote.value(key);
+        // 远端 tts 分区里的密钥字段一律忽略（旧版本远端可能残留 key）：
+        // 本地密钥绝不被远端载荷覆盖，也不写回 settings.json
+        if (key == QStringLiteral("tts") && rv.isObject()) {
+            QJsonObject section = rv.toObject();
+            for (const QString &sk : kTtsSensitiveKeys)
+                section.remove(sk);
+            rv = section;
+        }
         if (rv.isObject()) {
             QJsonObject section = local.value(key).toObject();
             mergeSection(section, rv.toObject());

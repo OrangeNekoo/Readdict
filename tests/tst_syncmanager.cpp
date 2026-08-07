@@ -276,7 +276,9 @@ private slots:
         QFile f(dir.filePath("settings.json"));
         QVERIFY(f.open(QIODevice::WriteOnly));
         QVERIFY(f.write("{\"theme\":{\"mode\":\"dark\"},\"typography\":{\"fontSize\":20,\"lineHeight\":1.8},"
-                        "\"tts\":{\"engine\":\"system\"},\"webdav\":{\"url\":\"http://x\",\"user\":\"u\",\"password\":\"secret\"},"
+                        "\"tts\":{\"engine\":\"openai\",\"key\":\"sk-super-secret\",\"model\":\"tts-1\","
+                        "\"voice\":\"nova\",\"rate\":1.25},"
+                        "\"webdav\":{\"url\":\"http://x\",\"user\":\"u\",\"password\":\"secret\"},"
                         "\"progress\":{\"1\":3}}") > 0);
         f.close();
         SyncManager m(dir.filePath("Readdict.db"), dir.path()); // settings 与 db 同目录
@@ -288,21 +290,32 @@ private slots:
         QVERIFY(!root.contains("webdav"));   // 凭据分区不出本机
         QVERIFY(!root.contains("progress")); // 章内阅读位置不随设置同步
         QVERIFY(!p.contains("secret"));      // 密码字符串绝不出现在载荷
+        QVERIFY(!p.contains("sk-super-secret")); // OpenAI API 密钥绝不出现在载荷
+        // tts 分区保留非敏感项，仅剔除密钥字段（决策：只排除 apiKey，不整体排除 tts 分区）
+        const QJsonObject tts = root["tts"].toObject();
+        QCOMPARE(tts["engine"].toString(), QString("openai"));
+        QCOMPARE(tts["model"].toString(), QString("tts-1"));
+        QCOMPARE(tts["voice"].toString(), QString("nova"));
+        QCOMPARE(tts["rate"].toDouble(), 1.25);
+        QVERIFY(!tts.contains("key"));
         QCOMPARE(root["theme"].toObject()["mode"].toString(), QString("dark"));
         // 本地无 settings.json → 空载荷（远端缺文件时上传空对象，应用侧由 SettingsStore 兜底默认）
         SyncManager m2(":memory:", "/tmp/libdir", "readdict_sync_2");
         QCOMPARE(QJsonDocument::fromJson(m2.buildSettingsJson()).object().isEmpty(), true);
     }
 
-    // ---- 补充：settings 合并（远端叶子覆盖 + webdav/progress 不动） ----
+    // ---- 补充：settings 合并（远端叶子覆盖 + webdav/progress 不动 + 远端 tts 密钥忽略） ----
     void settingsMergeAppliesRemote() {
         QTemporaryDir dir;
         QFile f(dir.filePath("settings.json"));
         QVERIFY(f.open(QIODevice::WriteOnly));
-        QVERIFY(f.write("{\"theme\":{\"mode\":\"light\"},\"webdav\":{\"url\":\"http://x\",\"user\":\"u\",\"password\":\"p\"}}") > 0);
+        QVERIFY(f.write("{\"theme\":{\"mode\":\"light\"},\"tts\":{\"engine\":\"system\",\"key\":\"local-key\",\"voice\":\"alloy\"},"
+                        "\"webdav\":{\"url\":\"http://x\",\"user\":\"u\",\"password\":\"p\"}}") > 0);
         f.close();
         SyncManager m(dir.filePath("Readdict.db"), dir.path());
+        // 远端载荷携带 tts 密钥（旧版本远端可能残留）：合并时必须忽略，本地密钥不被覆盖
         m.applySettingsJson("{\"theme\":{\"mode\":\"dark\"},\"typography\":{\"fontSize\":20},"
+                            "\"tts\":{\"engine\":\"openai\",\"key\":\"remote-hacked-key\",\"rate\":1.5},"
                             "\"webdav\":{\"password\":\"hacked\"},\"progress\":{\"9\":9}}");
         const QJsonObject root =
             QJsonDocument::fromJson(readFileBytes(dir.filePath("settings.json"))).object();
@@ -311,6 +324,12 @@ private slots:
         // 本地 webdav 保留、远端 webdav/progress 被忽略（永不写入）
         QCOMPARE(root["webdav"].toObject()["password"].toString(), QString("p"));
         QVERIFY(!root.contains("progress"));
+        // tts：远端非敏感字段合并生效；远端 key 被忽略，本地 key 保留
+        const QJsonObject tts = root["tts"].toObject();
+        QCOMPARE(tts["engine"].toString(), QString("openai"));
+        QCOMPARE(tts["rate"].toDouble(), 1.5);
+        QCOMPARE(tts["key"].toString(), QString("local-key"));
+        QCOMPARE(tts["voice"].toString(), QString("alloy"));
         // 本地无 settings.json → 由远端生成
         QTemporaryDir dir2;
         SyncManager m2(dir2.filePath("Readdict.db"), dir2.path(), "readdict_sync_2");
