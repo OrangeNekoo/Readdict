@@ -22,8 +22,9 @@ Item {
     // Loading/Ready 期间占位隐藏，真实封面淡入。
     readonly property bool showPlaceholder: !card.book.cover || coverImage.status === Image.Error
     signal clicked()
-    width: 180
-    height: 280
+    // B5：Kindle 主页风格——封面主导（近满宽）、标题下置（小号非加粗）、进度细条
+    width: 176
+    height: 274
 
     // D7：悬停上浮——scale 1.03 + Behavior 缓动（Material 卡片悬停反馈）
     scale: cardMouse.hovered ? 1.03 : 1.0
@@ -53,8 +54,9 @@ Item {
             id: coverImg
             anchors.top: parent.top
             anchors.horizontalCenter: parent.horizontalCenter
-            width: 120
-            height: 160
+            anchors.topMargin: 10
+            width: parent.width - 16
+            height: 172
             radius: 6
             clip: true
             Image {
@@ -85,18 +87,33 @@ Item {
             anchors.top: coverImg.bottom
             anchors.left: parent.left
             anchors.right: parent.right
-            anchors.margins: 6
+            anchors.leftMargin: 8
+            anchors.rightMargin: 8
+            anchors.topMargin: 8
             text: card.book.title ?? ""
             elide: Text.ElideRight
-            font.bold: true
+            font.pixelSize: 13
+            color: Material.theme === Material.Dark ? "#CCCCCC" : "#333333"
         }
 
-        ProgressBar {
+        // B5：进度细条（Kindle 主页风格）——细 3px 圆角线替代 ProgressBar
+        Rectangle {
+            id: progressLine
             anchors.bottom: parent.bottom
             anchors.left: parent.left
             anchors.right: parent.right
-            anchors.margins: 8
-            value: card.book.progress ?? 0
+            anchors.leftMargin: 12
+            anchors.rightMargin: 12
+            anchors.bottomMargin: 10
+            height: 3
+            radius: 1.5
+            color: Material.theme === Material.Dark ? "#33FFFFFF" : "#22000000"
+            Rectangle {
+                width: Math.max(0, Math.min(1, card.book.progress ?? 0)) * parent.width
+                height: parent.height
+                radius: parent.radius
+                color: Material.accent
+            }
         }
 
         MouseArea {

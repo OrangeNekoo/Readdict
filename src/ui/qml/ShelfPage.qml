@@ -191,8 +191,9 @@ Page {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
-                cellWidth: 200
-                cellHeight: 300
+                // B5：Kindle 封面网格——封面主导，单元格贴合卡片尺寸（180×286）
+                cellWidth: 184
+                cellHeight: 286
                 model: Books.booksModel
                 delegate: BookCard {
                     book: modelData
