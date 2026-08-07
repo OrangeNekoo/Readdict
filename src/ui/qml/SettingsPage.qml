@@ -10,6 +10,8 @@ Page {
     title: qsTr("设置")
     // D3：测试/外部句柄（QML 冒烟经此验证设置页 → 同步页导航）
     property alias syncEntryButton: syncEntryButton
+    // D4：设置页 → 阅读统计页导航入口（QML 冒烟同模式驱动）
+    property alias statsEntryButton: statsEntryButton
     ColumnLayout {
         anchors.fill: parent; anchors.margins: 24; spacing: 16
         Label { text: qsTr("外观"); font.bold: true }
@@ -137,6 +139,14 @@ Page {
             id: syncEntryButton
             text: qsTr("WebDAV 同步设置")
             onClicked: page.StackView.view.push("SyncPage.qml")
+        }
+
+        // D4：阅读统计入口——统计独立成页（StatsPage.qml），卡片网格展示聚合数据
+        Label { text: qsTr("统计"); font.bold: true }
+        Button {
+            id: statsEntryButton
+            text: qsTr("阅读统计")
+            onClicked: page.StackView.view.push("StatsPage.qml")
         }
 
         Label { text: qsTr("版本 0.1.0"); color: Material.secondaryTextColor }

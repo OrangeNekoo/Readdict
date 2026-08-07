@@ -107,6 +107,42 @@ private slots:
                  qPrintable(QStringLiteral("阅读约 1.1 秒应累加至少 1 秒，实际 %1")
                                 .arg(m_mgr->bookById(1).readSeconds)));
     }
+    void statsAggregatesAndGroupsByCategory() {
+        // D4：聚合查询——COUNT/SUM/AVG 与分类 GROUP BY；read_seconds 来自 B10 计时累加
+        m_mgr->addReadSeconds(1, 3600); // 红楼梦 +1 小时
+        m_mgr->addReadSeconds(1, 1800); // 红楼梦 +30 分
+        m_mgr->addReadSeconds(2, 600);  // 三体 +10 分
+        m_mgr->setProgress(1, 0.25);    // 红楼梦 25%，三体 50%（init 注入）
+        const QVariantMap stats = m_mgr->stats();
+        QCOMPARE(stats.value("totalBooks").toLongLong(), 2);
+        QCOMPARE(stats.value("totalReadSeconds").toLongLong(), 6000); // 3600+1800+600
+        QCOMPARE(stats.value("totalProgress").toDouble(), 0.375);     // (0.25+0.5)/2
+        const QVariantList byCat = stats.value("byCategory").toList();
+        QCOMPARE(byCat.size(), 2);
+        QCOMPARE(byCat.at(0).toMap().value("name").toString(), QString("古典"));
+        QCOMPARE(byCat.at(0).toMap().value("count").toLongLong(), 1);
+        QCOMPARE(byCat.at(1).toMap().value("name").toString(), QString("科幻"));
+        QCOMPARE(byCat.at(1).toMap().value("count").toLongLong(), 1);
+    }
+    void statsEmptyLibraryIsZeroed() {
+        // D4：空库（0 书）不崩——COUNT=0、SUM/AVG 为 NULL 时 COALESCE 归零、byCategory 为空
+        BookManager empty(":memory:", "readdict_stats_empty");
+        const QVariantMap stats = empty.stats();
+        QCOMPARE(stats.value("totalBooks").toLongLong(), 0);
+        QCOMPARE(stats.value("totalReadSeconds").toLongLong(), 0);
+        QCOMPARE(stats.value("totalProgress").toDouble(), 0.0);
+        QVERIFY(stats.value("byCategory").toList().isEmpty());
+    }
+    void statsIncludesUncategorizedBooks() {
+        // D4：未分类书（category=''）计入 byCategory（name 为空串），计数与 totalBooks 对齐
+        m_mgr->addBook(Book{-1, "无分类书", "某作者", "某社", "", "TXT", "/tmp/nocat.txt", QString(), 0.0});
+        const QVariantMap stats = m_mgr->stats();
+        QCOMPARE(stats.value("totalBooks").toLongLong(), 3);
+        const QVariantList byCat = stats.value("byCategory").toList();
+        QCOMPARE(byCat.size(), 3); // 古典、科幻、空分类
+        QCOMPARE(byCat.at(0).toMap().value("name").toString(), QString()); // '' 排最前
+        QCOMPARE(byCat.at(0).toMap().value("count").toLongLong(), 1);
+    }
     void stopTrackingWithoutStartIsNoop() {
         m_mgr->stopTracking(); // 未 start 时调用无副作用（不崩溃、不写负数）
         QCOMPARE(m_mgr->bookById(1).readSeconds, 0);

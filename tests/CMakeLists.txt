@@ -229,6 +229,7 @@ qt_add_resources(tst_qml "qml_ui"
         ../src/ui/qml/BookCard.qml
         ../src/ui/qml/SettingsPage.qml
         ../src/ui/qml/SyncPage.qml
+        ../src/ui/qml/StatsPage.qml
         ../src/ui/qml/ReaderPage.qml
         ../src/ui/qml/ReaderContent.qml
         ../src/ui/qml/ReaderControls.qml

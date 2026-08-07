@@ -47,6 +47,9 @@ public:
     Q_INVOKABLE void setFilter(const QString &category);
     Q_INVOKABLE void setCategory(qint64 bookId, const QString &category);
     Q_INVOKABLE void doSearch(const QString &query);
+    // D4：阅读统计聚合——{totalBooks, totalReadSeconds, totalProgress(平均进度 0..1),
+    // byCategory:[{name,count}]}；空库时 COUNT=0、SUM/AVG 的 NULL 归零、byCategory 为空
+    Q_INVOKABLE QVariantMap stats() const;
     // ---- 阅读器接口（B8）：文档解析缓存 + 章节/进度/字体族 ----
     void setSettingsStore(SettingsStore *settings);
     Q_INVOKABLE QVariantList chapterTitles(qint64 bookId);

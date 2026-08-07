@@ -258,6 +258,35 @@ void BookManager::doSearch(const QString &query) {
     emit booksChanged();
 }
 
+QVariantMap BookManager::stats() const {
+    // D4：阅读统计。聚合查询 COUNT/SUM/AVG：COUNT 恒有值，SUM/AVG 空库时为 NULL，
+    // COALESCE 兜底归零（QML 侧无需判空）。分类分布按书籍实际分类 GROUP BY，
+    // 未分类（category=''）一并计入（QML 显示为"未分类"），保证计数与总藏书一致。
+    QVariantMap out;
+    QSqlQuery q(m_db);
+    q.exec("SELECT COUNT(*), COALESCE(SUM(read_seconds),0), COALESCE(AVG(progress),0) FROM books");
+    if (q.next()) {
+        out.insert("totalBooks", q.value(0).toLongLong());
+        out.insert("totalReadSeconds", q.value(1).toLongLong());
+        out.insert("totalProgress", q.value(2).toDouble());
+    } else {
+        out.insert("totalBooks", 0);
+        out.insert("totalReadSeconds", 0);
+        out.insert("totalProgress", 0.0);
+    }
+    QVariantList byCategory;
+    QSqlQuery c(m_db);
+    c.exec("SELECT category, COUNT(*) FROM books GROUP BY category ORDER BY category");
+    while (c.next()) {
+        QVariantMap m;
+        m.insert("name", c.value(0).toString());
+        m.insert("count", c.value(1).toLongLong());
+        byCategory.append(m);
+    }
+    out.insert("byCategory", byCategory);
+    return out;
+}
+
 QStringList BookManager::categories() const {
     QStringList out;
     QSqlQuery q(m_db);
