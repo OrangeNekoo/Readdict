@@ -243,16 +243,26 @@ void SyncManager::applyHighlightsJson(const QByteArray &data) {
         q.addBindValue(text);
         if (q.exec() && q.next()) {
             // 已存在：不重复插入；但远端对同一划线修改过 note/color 时合并过来
-            // （LWW：远端为准；无差异不写，保持幂等）。合并也算变更 → bump created_at，
-            // 同步版本时钟（MAX(created_at)）才能把这次修改继续传播到第三台设备
+            // （LWW：远端为准；无差异不写，保持幂等）。
+            // 合并更新时 created_at 取载荷 createdAt（转本地格式），绝不前移到
+            // currentDateTime：采用端版本 == 载荷版本 → 下次比较即 Skip；若前移 T+ε 会
+            // 超越原编辑端版本 T，导致原编辑端恒 TakeRemote 循环下载（三端收敛见报告）
             const QString rColor = o[QStringLiteral("color")].toString();
             const QString rNote = o[QStringLiteral("note")].toString();
             if (q.value(1).toString() != rColor || q.value(2).toString() != rNote) {
                 QSqlQuery up(m_db);
-                up.prepare(QStringLiteral("UPDATE highlights SET color=?,note=?,created_at=? WHERE id=?"));
+                const QDateTime adopted = parseIso(o[QStringLiteral("createdAt")].toString());
+                if (adopted.isValid()) {
+                    up.prepare(QStringLiteral("UPDATE highlights SET color=?,note=?,created_at=?"
+                                              " WHERE id=?"));
+                } else {
+                    // 载荷无有效时间戳：不动版本（保留本地 created_at），避免无谓前移
+                    up.prepare(QStringLiteral("UPDATE highlights SET color=?,note=? WHERE id=?"));
+                }
                 up.addBindValue(rColor);
                 up.addBindValue(rNote);
-                up.addBindValue(QDateTime::currentDateTime().toString(Qt::ISODate));
+                if (adopted.isValid())
+                    up.addBindValue(adopted.toLocalTime().toString(Qt::ISODate));
                 up.addBindValue(q.value(0).toLongLong());
                 up.exec();
             }
@@ -370,6 +380,14 @@ void SyncManager::syncOne(WebDavClient &client, const QVector<DavEntry> &remote,
         remoteData = client.get(name);
         if (!client.lastError().isEmpty()) {
             log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
+            return;
+        }
+        // 远端载荷不可解析（截断/手改损坏）→ 跳过并 log：不下载空转，也不让损坏内容
+        // 落入 mtime/TakeRemote 路径反复空转（与本地损坏"跳过+log"对称）
+        QJsonParseError parseErr;
+        const QJsonDocument doc = QJsonDocument::fromJson(remoteData, &parseErr);
+        if (parseErr.error != QJsonParseError::NoError || !doc.isObject()) {
+            log(QStringLiteral("跳过 %1: 远端数据不可解析").arg(name));
             return;
         }
         if (sameAsLocal && sameAsLocal(remoteData)) {

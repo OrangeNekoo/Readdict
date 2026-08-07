@@ -641,6 +641,33 @@ private slots:
         QCOMPARE(progressOf(db, 1).toDouble(), 0.5); // 未应用远端
     }
 
+    // ---- 补充：sync 流程——远端 settings.json 损坏 → 跳过且不空转 ----
+    void syncFlowCorruptRemoteSettingsSkips() {
+        QTemporaryDir dir;
+        QFile f(dir.filePath("settings.json"));
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        QVERIFY(f.write("{\"theme\":{\"mode\":\"dark\"}}") > 0);
+        f.close();
+        MockWebDavClient mock;
+        mock.files["settings.json"] = "{{{ 截断的"; // 损坏（解析失败）
+        mock.mtimes["settings.json"] = QDateTime::currentDateTimeUtc().addSecs(3600); // 若走 mtime 会 TakeRemote
+        SyncManager m(dir.filePath("Readdict.db"), dir.path());
+        SyncManager::Options o; o.settings = true; o.progress = false;
+        o.highlights = false; o.books = false;
+        m.sync(mock, o);
+        QVERIFY(m.log().join('\n').contains("跳过 settings.json: 远端数据不可解析"));
+        QVERIFY(!m.log().join('\n').contains("采用远端"));
+        QCOMPARE(readFileBytes(dir.filePath("settings.json")),
+                 QByteArray("{\"theme\":{\"mode\":\"dark\"}}")); // 本地未被损坏内容影响
+        // 再次同步同样跳过（不空转：不会每轮 TakeRemote 下载后无效果）
+        m.sync(mock, o);
+        int skipped = 0;
+        for (const QString &l : m.log())
+            if (l.contains("跳过 settings.json: 远端数据不可解析"))
+                ++skipped;
+        QCOMPARE(skipped, 2);
+    }
+
     // ---- 补充：highlights note/color 修改经 sync 传播（版本时钟感知编辑） ----
     void highlightsNotePropagatesViaSync() {
         QTemporaryDir dirA, dirB;
@@ -658,33 +685,34 @@ private slots:
             QSqlQuery qb(b);
             QVERIFY2(qb.exec(seed), qPrintable(qb.lastError().text()));
         }
-        // A 改笔记：updateNote bump created_at → 版本时钟（MAX(created_at)）感知编辑。
-        // qWait 1.1s：让 A 的 bump 与 B 稍后的合并严格跨秒，B 的再同步判定确定（KeepLocal）
+        // A 改笔记：updateNote bump created_at（编辑端版本前移到 T）→ 版本时钟感知编辑
         HighlightManager hmA(dbA, "readdict_hl_a");
         hmA.updateNote(1, "新笔记");
-        QTest::qWait(1100);
         MockWebDavClient mock;
         SyncManager mA(dbA, dirA.path());
         SyncManager::Options o; o.settings = false; o.progress = false;
         o.highlights = true; o.books = false;
-        mA.sync(mock, o); // 远端空 → 上传（载荷带新笔记 + 更新的 createdAt）
+        mA.sync(mock, o); // 远端空 → 上传（载荷带新笔记 + 版本 T）
         QVERIFY(mock.files.contains("highlights.json"));
         QVERIFY(QString::fromUtf8(mock.files["highlights.json"]).contains("新笔记"));
-        // B 同步 #1 → 内容版本：远端 max createdAt(A 的 bump) > B 本地 2026-01-01 → TakeRemote 合并
+        // B 同步 #1：本地 2026-01-01 < T → TakeRemote 合并；合并更新 created_at 取载荷 T
+        // （采用端版本 == 载荷版本，绝不再前移）→ B 收到笔记
         SyncManager mB(dbB, dirB.path(), "readdict_sync_b");
         mB.sync(mock, o);
         HighlightManager hmB(dbB, "readdict_hl_b");
         const QVariantList list = hmB.highlightsForBook(1);
         QCOMPARE(list.size(), 1);
         QCOMPARE(list.first().toMap()["note"].toString(), QString("新笔记")); // 笔记已传播
-        // B 同步 #2：合并已 bump 本地 createdAt → 本地版本(A 之后) > 远端 → KeepLocal 重传
-        const int n2 = mB.log().size();
+        // B 同步 #2：本地版本 T == 远端 T → Skip（收敛，不重传）
+        const int nB = mB.log().size();
         mB.sync(mock, o);
-        QVERIFY(mB.log().mid(n2).join('\n').contains("保留本地 highlights.json"));
-        // B 同步 #3：两端版本一致 → Skip（收敛，不再下载）
-        const int n3 = mB.log().size();
-        mB.sync(mock, o);
-        QVERIFY(mB.log().mid(n3).join('\n').contains("跳过 highlights.json"));
+        QVERIFY(mB.log().mid(nB).join('\n').contains("跳过 highlights.json"));
+        // A 同步 #2：本地版本 T == 远端 T → Skip（原编辑端不被超越，无循环下载）
+        const int nA = mA.log().size();
+        mA.sync(mock, o);
+        const QStringList addedA = mA.log().mid(nA);
+        QVERIFY(addedA.join('\n').contains("跳过 highlights.json"));
+        QVERIFY(!addedA.join('\n').contains("采用远端 highlights.json"));
     }
 
     // ---- 补充：NULL 章/句索引序列化保留 + 去重不失效 ----
