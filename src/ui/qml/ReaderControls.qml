@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// 阅读页底部浮动控制栏：章节导航 / 目录 / 字号 / 背景三态 / 对齐 / 页宽。
+// 阅读页底部浮动控制栏：章节导航 / 目录 / 字号 / 背景四态 / 对齐 / 页宽。
 // 全部以信号上报 ReaderPage 处理（状态读写集中在页面，本组件无状态）。
 Rectangle {
     id: controls

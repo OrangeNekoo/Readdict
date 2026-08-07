@@ -3,15 +3,20 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Readdict.Backend
 
-// 阅读页主组件：背景三态 + 章节渲染 + 底部控制栏 + 目录 Dialog。
+// 阅读页主组件：背景四态（浅/深/米白/自定义图片）+ 章节渲染 + 底部控制栏 + 目录 Dialog。
 // typography 由 Settings 的 typography/ 分区组合（QML 侧组合，避免跨单例依赖），
+// 背景由 Settings 的 background/ 分区恢复（mode/imagePath/blur/brightness，onCompleted 读取；
+// Settings.value 无变更信号，页面属性作响应层，与 typography 同模式）；
 // 章节进度经 Books.currentChapter 持久化到 settings.json 的 progress/<bookId>。
 Page {
     id: page
     property var book: ({})
     property var chapter: ({})
     property var typography: ({})
-    property string bgMode: "light"
+    property string bgMode: "light"          // 与 Settings background/mode 同步
+    property string bgImagePath: ""          // background/imagePath（图片背景）
+    property real bgBlur: 0.0                // background/blur（0..1）
+    property real bgBrightness: 1.0          // background/brightness（0.5..1.5）
     property var tocTitles: []
     // C7：本书全部划线（Highlights.highlightsForBook 结果，供渲染注入与笔记列表）
     property var highlights: []
@@ -29,6 +34,9 @@ Page {
     ReaderBackground {
         anchors.fill: parent
         mode: page.bgMode
+        imagePath: page.bgImagePath
+        blur: page.bgBlur
+        brightness: page.bgBrightness
     }
 
     // 顶部章节条：返回 + 当前章名
@@ -417,10 +425,30 @@ Page {
     }
 
     function cycleBackground() {
-        const order = ["light", "paper", "dark"]
+        // 四态循环（浅→米白→深→图片）；未选图片时跳过 image，避免切到"无图可显"的态
+        const order = page.bgImagePath ? ["light", "paper", "dark", "image"]
+                                       : ["light", "paper", "dark"]
         const cur = Math.max(0, order.indexOf(page.bgMode))
         page.bgMode = order[(cur + 1) % order.length]
-        Settings.setValue("reader/background", page.bgMode)
+        Settings.setValue("background/mode", page.bgMode)
+    }
+
+    // D5：启动恢复——从 Settings 的 background/ 分区读四态背景参数（含钳制）。
+    // 旧版本写的是 reader/background 键（三态），新键缺失时迁移并持久化，
+    // 否则设置页（读 background/mode）与阅读页（读旧键）显示不一致。
+    function backgroundFromSettings() {
+        let mode = Settings.value("background/mode")
+        if (mode !== "light" && mode !== "paper" && mode !== "dark" && mode !== "image") {
+            const legacy = Settings.value("reader/background")
+            mode = (legacy === "light" || legacy === "paper" || legacy === "dark") ? legacy : "light"
+            Settings.setValue("background/mode", mode)
+        }
+        page.bgMode = mode
+        page.bgImagePath = Settings.value("background/imagePath") || ""
+        const blur = Number(Settings.value("background/blur")) || 0.0
+        page.bgBlur = Math.max(0, Math.min(1, blur))
+        const bright = Number(Settings.value("background/brightness")) || 1.0
+        page.bgBrightness = Math.max(0.5, Math.min(1.5, bright))
     }
 
     // B10：滚动偏移持久化（章节 + contentY 原子写入，恢复时先 loadChapter 再设 scrollY）
@@ -468,8 +496,7 @@ Page {
 
     Component.onCompleted: {
         page.typography = page.typographyFromSettings()
-        const bg = Settings.value("reader/background")
-        page.bgMode = (bg === "light" || bg === "paper" || bg === "dark") ? bg : "light"
+        page.backgroundFromSettings()
         // 恢复：定位到保存的章节（progress/<bookId>），滚动偏移交给 ReaderContent
         // 在内容高度就绪后设置（progress/scroll_<bookId>）。
         // C8：全文搜索跳转打开时（initialChapter/initialParagraph >= 0）改用目标章节，

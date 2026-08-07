@@ -1,7 +1,10 @@
 #include "SettingsStore.h"
 #include <QDebug>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
+#include <QUrl>
 
 // 沿 key 链逐级下钻：每层取现有子对象（保留兄弟键）递归写入，再写回父对象。
 // 等价于"沿 key 链逐级下钻"的引用式写法；QJsonValueRef 是临时值，无法取其地址
@@ -31,6 +34,10 @@ SettingsStore::SettingsStore(const QString &path, QObject *parent) : QObject(par
                                             {"syncSettings", true}, {"syncProgress", true},
                                             {"syncHighlights", false}, {"syncBooks", false},
                                             {"autoSync", false}});
+    // D5：阅读背景分区（mode 四态 light/dark/paper/image；blur 0..1；brightness 0.5..1.5）
+    if (!m_root.contains("background"))
+        m_root.insert("background", QJsonObject{{"mode", "light"}, {"imagePath", ""},
+                                                {"blur", 0.0}, {"brightness", 1.0}});
     save();
 }
 
@@ -44,6 +51,34 @@ QJsonValue SettingsStore::value(const QString &dottedKey) const {
 void SettingsStore::setValue(const QString &dottedKey, const QJsonValue &value) {
     insertPath(m_root, dottedKey.split('/'), 0, value);
     save();
+}
+
+// D5：背景图片导入——源文件（file:// URL 或本地路径）复制到 AppData/backgrounds/。
+// AppData 由 settings.json 所在目录推导（生产与测试注入的目录一致），不用
+// QStandardPaths::AppDataLocation：测试进程若走系统 AppData 会写真实用户目录。
+// 同名文件覆盖（settings 的 imagePath 始终指向最新副本，无残留引用）。失败返回空串。
+QString SettingsStore::copyToBackgrounds(const QString &sourceUrl) {
+    const QUrl url(sourceUrl);
+    const QString src = url.isLocalFile() ? url.toLocalFile() : sourceUrl;
+    if (src.isEmpty() || !QFile::exists(src)) {
+        qWarning("SettingsStore: 背景图片源不存在: %s", qPrintable(src));
+        return {};
+    }
+    const QString dir = QFileInfo(m_path).absoluteDir().filePath(QStringLiteral("backgrounds"));
+    if (!QDir().mkpath(dir)) {
+        qWarning("SettingsStore: 无法创建背景目录 %s", qPrintable(dir));
+        return {};
+    }
+    const QString dest = dir + QLatin1Char('/') + QFileInfo(src).fileName();
+    if (QFile::exists(dest) && !QFile::remove(dest)) {
+        qWarning("SettingsStore: 无法覆盖旧背景图片 %s", qPrintable(dest));
+        return {};
+    }
+    if (!QFile::copy(src, dest)) {
+        qWarning("SettingsStore: 复制背景图片失败 %s -> %s", qPrintable(src), qPrintable(dest));
+        return {};
+    }
+    return dest;
 }
 
 void SettingsStore::save() {

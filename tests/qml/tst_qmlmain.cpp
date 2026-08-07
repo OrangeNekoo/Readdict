@@ -3,10 +3,12 @@
 // 注意：不用 qt_add_executable 的 QUICK_TEST_SOURCE_DIR 自动 main（该关键字在
 // Qt 6.11 公开 CMake API 中不存在），QUICK_TEST_SOURCE_DIR 宏由 tests/CMakeLists.txt
 // 通过 target_compile_definitions 定义为 tests/qml 的绝对路径。
+#include <QColor>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QGuiApplication>
+#include <QImage>
 #include <QQuickStyle>
 #include <QStringList>
 #include <QTemporaryDir>
@@ -38,6 +40,9 @@ class TestEnv : public QObject {
     Q_PROPERTY(QString longSource READ longSource CONSTANT)
     // 重复 h2 标题 TXT（4 章，后 3 章 h2 同名）：划线查重键跨章碰撞回归（C7b）
     Q_PROPERTY(QString dupTitlesSource READ dupTitlesSource CONSTANT)
+    // 真实背景图片（64x64 PNG，file:// URL）：D5 冒烟经此验证 copyToBackgrounds 导入路径
+    // 与 ReaderBackground 图片加载/模糊亮度渲染
+    Q_PROPERTY(QString backgroundImage READ backgroundImage CONSTANT)
 public:
     explicit TestEnv(const QString &workDir, QObject *parent = nullptr) : QObject(parent) {
         QDir srcDir(workDir + "/src");
@@ -79,6 +84,12 @@ public:
             df.close();
         }
         m_dupTitlesSource = QUrl::fromLocalFile(dupPath).toString();
+        // D5：真实背景图片（纯色 64x64 PNG，双色渐变不需要——纯色即可验证解码/复制/渲染）
+        const QString bgPath = srcDir.filePath("bg_test.png");
+        QImage bgImg(64, 64, QImage::Format_RGB32);
+        bgImg.fill(QColor(0x3a, 0x7d, 0xbd));
+        if (bgImg.save(bgPath))
+            m_backgroundImage = QUrl::fromLocalFile(bgPath).toString();
     }
     QStringList sourceFiles() const { return m_files; }
     QString dupTitlesSource() const { return m_dupTitlesSource; }
@@ -96,10 +107,12 @@ public:
         return QFile::exists(p) ? QUrl::fromLocalFile(p).toString() : QString();
     }
     QString longSource() const { return m_longSource; }
+    QString backgroundImage() const { return m_backgroundImage; }
 private:
     QStringList m_files;
     QString m_longSource;
     QString m_dupTitlesSource;
+    QString m_backgroundImage;
 };
 
 int main(int argc, char *argv[]) {
