@@ -434,16 +434,11 @@ Page {
     }
 
     // D5：启动恢复——从 Settings 的 background/ 分区读四态背景参数（含钳制）。
-    // 旧版本写的是 reader/background 键（三态），新键缺失时迁移并持久化，
-    // 否则设置页（读 background/mode）与阅读页（读旧键）显示不一致。
+    // 旧版 reader/background 键的迁移在 SettingsStore 构造函数预置默认分区时完成
+    //（QML 加载前），此处只读新键，不再有迁移分支。
     function backgroundFromSettings() {
-        let mode = Settings.value("background/mode")
-        if (mode !== "light" && mode !== "paper" && mode !== "dark" && mode !== "image") {
-            const legacy = Settings.value("reader/background")
-            mode = (legacy === "light" || legacy === "paper" || legacy === "dark") ? legacy : "light"
-            Settings.setValue("background/mode", mode)
-        }
-        page.bgMode = mode
+        const mode = Settings.value("background/mode")
+        page.bgMode = (mode === "light" || mode === "paper" || mode === "dark" || mode === "image") ? mode : "light"
         page.bgImagePath = Settings.value("background/imagePath") || ""
         const blur = Number(Settings.value("background/blur")) || 0.0
         page.bgBlur = Math.max(0, Math.min(1, blur))

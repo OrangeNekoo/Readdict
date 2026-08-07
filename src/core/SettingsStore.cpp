@@ -34,10 +34,27 @@ SettingsStore::SettingsStore(const QString &path, QObject *parent) : QObject(par
                                             {"syncSettings", true}, {"syncProgress", true},
                                             {"syncHighlights", false}, {"syncBooks", false},
                                             {"autoSync", false}});
-    // D5：阅读背景分区（mode 四态 light/dark/paper/image；blur 0..1；brightness 0.5..1.5）
-    if (!m_root.contains("background"))
-        m_root.insert("background", QJsonObject{{"mode", "light"}, {"imagePath", ""},
+    // D5：阅读背景分区（mode 四态 light/dark/paper/image；blur 0..1；brightness 0.5..1.5）。
+    // 旧键迁移（D5 复审）：B8 时代写 reader/background 三态键。迁移必须在 QML 加载前完成——
+    // 若先预置 background/mode=light 再让 QML 侧迁，QML 读到的恒为默认值，分支不可达，
+    // 升级用户的深色/米白背景会静默回退浅色。故在预置默认时读旧键作默认 mode，迁移后删除旧键。
+    if (!m_root.contains("background")) {
+        QString bgMode = QStringLiteral("light");
+        // QJsonObject::value 是字面键查找（无点分路径），需逐层取 reader/background
+        const QString legacy = m_root.value(QStringLiteral("reader")).toObject()
+                                     .value(QStringLiteral("background")).toString();
+        if (legacy == QLatin1String("light") || legacy == QLatin1String("paper") || legacy == QLatin1String("dark"))
+            bgMode = legacy;
+        m_root.insert("background", QJsonObject{{"mode", bgMode}, {"imagePath", ""},
                                                 {"blur", 0.0}, {"brightness", 1.0}});
+        // 删除旧键并清理空父对象
+        QJsonObject reader = m_root.value(QStringLiteral("reader")).toObject();
+        reader.remove(QStringLiteral("background"));
+        if (reader.isEmpty())
+            m_root.remove(QStringLiteral("reader"));
+        else
+            m_root.insert(QStringLiteral("reader"), reader);
+    }
     save();
 }
 

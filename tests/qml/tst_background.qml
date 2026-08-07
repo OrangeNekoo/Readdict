@@ -57,7 +57,10 @@ Item {
             b.mode = "paper"
             compare(String(b.children[0].color), "#f5efe0")
             b.mode = "image"
-            verify(b.children[1].visible && b.children[2].visible, "image 态应显示 Image 与 MultiEffect")
+            // 无图（imagePath 空）时：Image 层显示但 MultiEffect 依赖图片就绪态，
+            // 未就绪 → 效果层隐藏，露出底色 Rectangle（D5 复审兜底行为）
+            verify(b.children[1].visible, "image 态应显示 Image 层")
+            verify(!b.children[2].visible, "无图时 MultiEffect 应隐藏（等待 Image.Ready）")
             b.mode = "light"
             verify(!b.children[1].visible && !b.children[2].visible, "非 image 态应隐藏 Image 与 MultiEffect")
             loader.destroy()
@@ -84,6 +87,13 @@ Item {
             b.brightness = 0.5
             compare(fx.brightness, -0.5, "brightness 0.5 应换算为 MultiEffect -0.5")
             wait(80)   // 渲染若干帧（模糊效果在帧上执行），不崩即通过
+            // D5 复审：图片被删除/路径失效时（Image.Error）效果层必须隐藏，
+            // 由底色 Rectangle 兜底——错误源经 MultiEffect 输出不保证透明，可能黑块
+            b.imagePath = "/nonexistent/missing-bg.png"
+            tryVerify(function () { return img.status === Image.Error }, 5000,
+                      "无效路径应使图片加载为 Error，实际 " + img.status)
+            verify(!fx.visible, "图片加载失败时 MultiEffect 应隐藏（不显示黑块）")
+            verify(b.children[0].visible, "底色 Rectangle 应保持可见作兜底")
             loader.destroy()
         }
 

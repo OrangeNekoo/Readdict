@@ -30,7 +30,9 @@ Item {
 
     MultiEffect {
         anchors.fill: parent
-        visible: mode === "image"
+        // 图片就绪才显示效果层：imagePath 缺失/被删除时（Image.Error 或 Loading）隐藏
+        // MultiEffect——错误源经效果层的输出不保证透明（可能黑块），直接露出底色 Rectangle 兜底
+        visible: mode === "image" && img.status === Image.Ready
         source: img
         blurEnabled: true
         blur: bg.blur
