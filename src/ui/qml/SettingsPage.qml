@@ -42,8 +42,9 @@ Page {
     // B5：Kindle 风格分组卡片——圆角 + 浅底色，分区标题统一；视觉重组不改任何
     // 测试句柄。卡片内 ColumnLayout（body）首个子项是标题 Label，其后是调用方内容。
     // 注意：ColumnLayout 直接子项索引随卡片化变化（SettingsTtsSmoke 已同步）——
-    // children[0]=返回按钮 [1]=外观卡 [2]=语言卡 [3]=朗读(TTS)卡 [4]=阅读背景卡
-    // [5]=同步卡 [6]=统计卡 [7]=版本标签；卡内 body.children[0]=标题，其后为分区内容。
+    // D3 起返回按钮移出 ScrollView 固定顶部，不再占用布局索引：
+    // children[0]=外观卡 [1]=语言卡 [2]=朗读(TTS)卡 [3]=阅读背景卡
+    // [4]=同步卡 [5]=统计卡 [6]=版本标签；卡内 body.children[0]=标题，其后为分区内容。
     component SectionCard: Rectangle {
         id: card
         required property string title
@@ -87,28 +88,42 @@ Page {
         }
     }
 
+    // D3：返回书架——固定顶部导航（移出 ScrollView）。滚动时返回按钮不再随内容
+    // 滚出视口：既消除左上角滚动残影（用户反馈 BUG 3，按钮滚出裁剪边界时残留
+    // 渲染层），也与 SyncPage/StatsPage 固定导航位一致；滚动到页面底部仍可随时返回。
+    // onClicked 走 goBack()（抽函数暴露供 QML 冒烟驱动）
+    ToolButton {
+        id: backButton
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.leftMargin: 24
+        anchors.topMargin: 24
+        text: "← " + qsTr("返回")
+        onClicked: page.goBack()
+    }
     // C4：整页滚动——最小窗口高度(600)下分组卡片总高可能超高（B5 卡片化后
-    // 返回行 + 外观/语言/朗读/背景/同步/统计 6 张卡 + 版本标签），包 ScrollView
+    // 外观/语言/朗读/背景/同步/统计 6 张卡 + 版本标签），包 ScrollView
     // 使内容可滚动到底（底部同步/统计入口与版本标签小窗可达）。ColumnLayout
     // 不再 anchors.fill：width 绑 availableWidth（视图区宽度，避免横向滚动条），
     // 高度由 ScrollView 按内容 implicit 高度自动追踪 contentHeight（Qt 6.11 实测）。
-    // 滚动条样式统一 AsNeeded：内容不超高时不占用空间。
+    // D3：视图区从固定返回按钮下方开始（top 锚 backButton.bottom + 12），
+    // 滚动内容与固定导航分离，左上角不再有滚动元素。滚动条样式统一 AsNeeded：
+    // 内容不超高时不占用空间。
     ScrollView {
         id: settingsScroll
-        anchors.fill: parent
-        anchors.margins: 24
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.top: backButton.bottom
+        anchors.leftMargin: 24
+        anchors.rightMargin: 24
+        anchors.bottomMargin: 24
+        anchors.topMargin: 12
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
         ColumnLayout {
             id: settingsLayout
             width: settingsScroll.availableWidth
             spacing: 12
-        // B4：返回书架——顶部返回按钮（SyncPage/StatsPage 同款导航位），
-        // onClicked 走 goBack()（抽函数暴露供 QML 冒烟驱动）
-        ToolButton {
-            id: backButton
-            text: "← " + qsTr("返回")
-            onClicked: page.goBack()
-        }
         // B5：外观分区卡片（深色模式 + B2 封面刷新）
         SectionCard {
             title: qsTr("外观")

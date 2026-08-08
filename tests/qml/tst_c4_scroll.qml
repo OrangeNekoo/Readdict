@@ -53,7 +53,7 @@ Item {
             verify(page.settingsLayout !== undefined, "应暴露 settingsLayout 句柄")
             var fl = sv.contentItem
             verify(fl !== undefined, "ScrollView 内容应为 Flickable")
-            // 布局收敛后内容应超高（视口高 = 600 - 边距 24*2）
+            // 布局收敛后内容应超高（视口高 = 600 - 固定返回行(24+40+12) - 底边距 24）
             tryVerify(function () {
                 return fl.contentHeight > fl.height + 50
             }, 3000, "最小窗口高度下设置页内容应超高可滚动（contentHeight="
@@ -61,9 +61,18 @@ Item {
             // 滚动到底：contentY 可达最大滚动位置
             fl.contentY = fl.contentHeight - fl.height
             compare(fl.contentY, fl.contentHeight - fl.height, "应能滚到内容底部")
-            // 底部内容可达：版本标签（布局尾部 children[7]）滚到底后应进入视口
+            // D3：返回按钮固定顶部（移出 ScrollView）——滚动到底后仍应在视口内
+            // 且位置不随内容滚动（左上角残影修复的回归断言：按钮不再滚出视口）
+            var btn = page.backButton
+            verify(btn !== undefined, "应暴露返回按钮句柄")
+            var btnY = btn.mapToItem(page, 0, 0).y
+            verify(btn.visible && btnY >= 0 && btnY < page.height,
+                   "滚到底后返回按钮应固定可见（y=" + btnY + "）")
+            compare(btnY, btn.mapToItem(page, 0, 0).y, "返回按钮位置应固定不变")
+            // 底部内容可达：版本标签（布局尾部 children[6]，D3 起返回按钮移出
+            // ScrollView 固定顶部、不再占用布局索引）滚到底后应进入视口
             var layout = page.settingsLayout
-            var lastLabel = layout.children[7]
+            var lastLabel = layout.children[6]
             verify(lastLabel !== undefined, "版本标签应存在（布局尾部）")
             var yInView = lastLabel.mapToItem(fl, 0, 0).y
             verify(yInView >= 0 && yInView < fl.height,

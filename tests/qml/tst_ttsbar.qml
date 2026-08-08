@@ -131,11 +131,12 @@ Item {
             var page = loader.item
             verify(page !== null, "SettingsPage 应能加载（含 TTS 配置区）")
             var layout = page.settingsLayout     // ColumnLayout（C4 起包于 ScrollView，经句柄访问）
-            // B5 设置页分组卡片化后：children[0]=返回按钮 [1]=外观卡 [2]=语言卡
-            // [3]=朗读(TTS)卡 [4]=阅读背景卡 [5]=同步卡 [6]=统计卡 [7]=版本标签
+            // B5 设置页分组卡片化后；D3 起返回按钮移出 ScrollView 固定顶部：
+            // children[0]=外观卡 [1]=语言卡 [2]=朗读(TTS)卡 [3]=阅读背景卡
+            // [4]=同步卡 [5]=统计卡 [6]=版本标签
             // （提示 Timer 是非可视 data 子项，不计入 children）；
             // 卡内 ColumnLayout（card.children[0]）：0=标题 1=引擎行 2=OpenAI配置 3=保存/试音行
-            var ttsCard = layout.children[3]     // 朗读(TTS) 分区卡片
+            var ttsCard = layout.children[2]     // 朗读(TTS) 分区卡片
             verify(ttsCard !== undefined, "TTS 分区卡片应存在")
             var ttsBody = ttsCard.children[0]    // 卡内 ColumnLayout
             // C5：Kindle 风格分组标题——小字（13px）灰、非加粗、底部细分隔线

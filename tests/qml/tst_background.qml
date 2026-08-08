@@ -175,8 +175,15 @@ Item {
             Settings.setValue("background/blur", 0.6)
             Settings.setValue("background/brightness", 0.9)
             var loader = settingsComp.createObject(root)
+            loader.width = 1100; loader.height = 720
             var page = loader.item
             verify(page !== null, "SettingsPage 应能加载")
+            // D3：返回按钮固定顶部后滚动内容下移，阅读背景卡在 720 高窗口内
+            // 需先滚入视口（mouseClick 要求目标落在窗口内；mapToItem 定位 +
+            // contentY 滚动，滚动量稳定可复现）
+            var fl = page.settingsScroll.contentItem
+            fl.contentY = Math.max(0, page.bgImageRadio.mapToItem(fl, 0, 0).y - 80)
+            wait(100)
             verify(page.bgImageRadio.checked && !page.bgLightRadio.checked
                    && !page.bgDarkRadio.checked && !page.bgPaperRadio.checked
                    && !page.bgEinkRadio.checked,
@@ -190,7 +197,11 @@ Item {
             Settings.setValue("background/mode", "eink")
             loader.destroy()
             loader = settingsComp.createObject(root)
+            loader.width = 1100; loader.height = 720
             page = loader.item
+            fl = page.settingsScroll.contentItem
+            fl.contentY = Math.max(0, page.bgEinkRadio.mapToItem(fl, 0, 0).y - 80)
+            wait(100)
             verify(page.bgEinkRadio.checked && !page.bgImageRadio.checked,
                    "恢复 eink 后应恰好选中彩色墨水屏（其余未选）")
             mouseClick(page.bgEinkRadio, page.bgEinkRadio.width / 2, page.bgEinkRadio.height / 2)
