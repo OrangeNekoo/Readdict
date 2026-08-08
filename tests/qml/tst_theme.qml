@@ -16,6 +16,7 @@ Item {
 
     Component { id: bgComp; Loader { source: "qrc:/qt/qml/Readdict/ui/qml/ReaderBackground.qml" } }
     Component { id: contentComp; Loader { source: "qrc:/qt/qml/Readdict/ui/qml/ReaderContent.qml" } }
+    Component { id: mainComp; Loader { source: "qrc:/qt/qml/Readdict/ui/qml/Main.qml" } }
 
     TestCase {
         id: testCase
@@ -50,6 +51,9 @@ Item {
             compare(String(UITheme.borderDefault), "#3a3a3a", "深默认边框 #3A3A3A")
             compare(String(UITheme.borderActive), "#e8e8e3", "深选中边框 #E8E8E3")
             compare(String(UITheme.divider), "#333333", "深分隔线 #333333")
+            // U1 复审：dark 派生别名（任务映射未给出，Theme.qml 取同族派生值）
+            compare(String(UITheme.bgSearch), "#333333", "深搜索框背景（派生 #333333）")
+            compare(String(UITheme.bgPaper), "#2a2a26", "深米白纸色（派生 #2A2A26）")
             // 深浅切换后解析别名跟随
             UITheme.isDark = false
             compare(String(UITheme.textPrimary), "#1a1a1a", "切回浅色后 textPrimary 应解析浅值")
@@ -97,6 +101,31 @@ Item {
             UITheme.isDark = false
             compare(String(UITheme.textPrimary), String(UITheme.lightTextPrimary),
                     "浅色下 textPrimary 应等于 lightTextPrimary")
+        }
+
+        // U1 复审：Main.qml 顶层绑定 UITheme.isDark: root.effectiveDark——auto 模式下
+        // 系统深浅切换（Qt.styleHints.colorScheme 变化）即时同步 Token，而非依赖
+        // applyTheme 命令式赋值（命令式在系统切换时不会重跑）。加载真实 Main 组件，
+        // 驱动 theme 属性验证 isDark 由 effectiveDark 派生：显式 light/dark 两态 +
+        // auto 态应等于系统深色判定。末尾复位 isDark 避免污染后续用例。
+        function test_06_mainIsDarkBinding() {
+            var loader = mainComp.createObject(root)
+            loader.setSource("qrc:/qt/qml/Readdict/ui/qml/Main.qml")
+            var win = loader.item
+            verify(win !== null, "Main.qml 应能加载（含 UITheme.isDark 绑定）")
+            win.theme = "light"
+            tryVerify(function () { return UITheme.isDark === false }, 2000,
+                      "theme=light 时 isDark 应为 false（绑定驱动）")
+            win.theme = "dark"
+            tryVerify(function () { return UITheme.isDark === true }, 2000,
+                      "theme=dark 时 isDark 应为 true（绑定驱动）")
+            // auto：跟随系统 colorScheme（测试环境系统值不可控，断言绑定链已建立——
+            // 显式两态证明 isDark 由 effectiveDark 派生而非命令式赋值）
+            win.theme = "auto"
+            var sysDark = Qt.styleHints.colorScheme === Qt.ColorScheme.Dark
+            compare(UITheme.isDark, sysDark, "auto 模式 isDark 应等于系统深色判定")
+            loader.destroy()
+            UITheme.isDark = false
         }
     }
 }

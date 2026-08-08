@@ -18,13 +18,10 @@ ApplicationWindow {
 
     // 主题三态：auto 跟随系统、light 浅色、dark 深色；持久化于 Settings 的 theme/mode
     property string theme: "auto"
-    // U1：applyTheme 现同步两处——Material.theme 三态（QtQuick.Controls 控件仍由
-    // Material 样式渲染，保留）与 UITheme.isDark（Kindle Token 深浅解析）。颜色全部
-    // 走 Token，不再覆盖 Material.primary/accent（靛蓝移除，见下方 Material 声明注释）。
-    function applyTheme(mode) {
-        root.theme = mode
-        UITheme.isDark = root.effectiveDark
-    }
+    // U1 复审：applyTheme 只写 root.theme——UITheme.isDark 由下方顶层绑定跟随
+    // effectiveDark（命令式赋值在 Qt.styleHints.colorScheme 运行中变化时不会重跑，
+    // auto 模式系统切换深浅将不同步 Token；绑定与 Material.theme 同模式，实时派生）。
+    function applyTheme(mode) { root.theme = mode }
 
     Material.theme: root.theme === "dark" ? Material.Dark
                    : root.theme === "light" ? Material.Light
@@ -35,6 +32,18 @@ ApplicationWindow {
     property bool effectiveDark: root.theme === "dark"
         || (root.theme === "auto" && Qt.styleHints.colorScheme === Qt.ColorScheme.Dark)
 
+    // U1 复审：Kindle Token 深浅与 effectiveDark 建立实时绑定——auto 模式下系统深浅
+    // 切换（Qt.styleHints.colorScheme 变化）即时同步 UITheme.isDark。注意不能写成对象级
+    // 语法 `UITheme.isDark: ...`：单例类型在对象声明里会被解析为附加属性
+    //（"Non-existent attached object"），须经 Qt.binding 在 onCompleted 安装绑定
+    //（依赖 effectiveDark，与 Material.theme 同模式实时派生；命令式赋值在系统切换时
+    // 不会重跑）。applyTheme 只写 root.theme，由本绑定转发。
+    Component.onCompleted: {
+        UITheme.isDark = Qt.binding(function () { return root.effectiveDark })
+        const mode = Settings.value("theme/mode")
+        root.theme = (mode === "auto" || mode === "light" || mode === "dark") ? mode : "auto"
+    }
+
     // U1：去 Material 靛蓝（原 #3D5AFE/#536DFE 主色/accent 删除，UI 不再引用
     // Material.primary/accent——BookCard/StatsPage 的 accent 用法已改 Token）。
     // Material 框架仍需保留（QtQuick.Controls 控件样式），但颜色全走 Kindle Token：
@@ -43,14 +52,6 @@ ApplicationWindow {
     Material.background: UITheme.bgPrimary
     Material.foreground: UITheme.textPrimary
     background: Rectangle { anchors.fill: parent; color: UITheme.bgPrimary }
-
-    // 启动时从 settings.json 恢复上次主题选择（SettingsStore 默认值即 auto），
-    // 并同步 UITheme 深浅（Settings 无变更信号，applyTheme 路径由设置页调用）
-    Component.onCompleted: {
-        const mode = Settings.value("theme/mode")
-        root.theme = (mode === "auto" || mode === "light" || mode === "dark") ? mode : "auto"
-        UITheme.isDark = root.effectiveDark
-    }
 
     StackView {
         id: stack
