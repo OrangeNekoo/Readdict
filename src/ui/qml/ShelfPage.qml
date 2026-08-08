@@ -7,6 +7,8 @@ import Readdict.Backend
 
 Page {
     id: shelf
+    // U2：导航页标识（Main 据此联动顶部标签/底部导航高亮与沉浸隐藏）
+    property string navId: "shelf"
     property string toastText: ""
     // C8：全文搜索结果（Search.searchAllModel 返回：bookId/chapterIndex/paragraphIndex/
     // chapterTitle/snippet）；空数组表示无结果或未在全文模式。测试经此读模型。
@@ -115,12 +117,6 @@ Page {
                     for (let f of selectedFiles)
                         Importer.doImport(f)
                 }
-            }
-
-            // D3：设置入口（设置页含 WebDAV 同步页导航）
-            Button {
-                text: qsTr("设置")
-                onClicked: shelf.StackView.view.push("SettingsPage.qml")
             }
         }
 

@@ -53,9 +53,89 @@ ApplicationWindow {
     Material.foreground: UITheme.textPrimary
     background: Rectangle { anchors.fill: parent; color: UITheme.bgPrimary }
 
+    // ---- U2：Kindle 导航体系（顶部标签 + 底部线性图标导航）----
+    // 页面语义：书库（ShelfPage 兼主页/书库——仓库无独立主页页）、设置两套主标签；
+    // 统计/同步为独立页（原经设置页入口推入，现底部导航直达）。阅读页（reader/pdf）
+    // 为沉浸页：push 时隐藏标签与底部导航（正文占满窗口），返回后恢复。
+    // 测试/外部句柄：navStack（StackView）、tabBar/bottomNav（两个导航组件）。
+    property alias navStack: stack
+    property alias tabBar: tabBar
+    property alias bottomNav: bottomNav
+
+    // 当前顶层页 id（由栈顶页面 navId 派生；无 navId 的页面按非导航页处理）
+    property string currentNavId: ""
+    // 沉浸判定：栈顶为阅读页（reader/pdf）时隐藏两套导航，正文占满窗口
+    property bool navVisible: true
+
+    // 导航状态同步：StackView 的 currentItem 变化（push/pop/replace）时由
+    // onCurrentItemChanged/onCompleted 驱动，避免构造期绑定引用未创建子对象。
+    function syncNav() {
+        const top = stack.currentItem
+        root.currentNavId = top ? (top.navId || "") : ""
+        root.navVisible = top !== null && top.navId !== "reader" && top.navId !== "pdf"
+    }
+
+    // 导航页注册表：navId → 页面资源（Main.qml 同目录相对路径）
+    readonly property var navPages: {
+        "shelf": "ShelfPage.qml",
+        "settings": "SettingsPage.qml",
+        "stats": "StatsPage.qml",
+        "sync": "SyncPage.qml"
+    }
+
+    // 导航切换：已在目标页（含经设置页入口推入的统计/同步）则不动；否则先清掉
+    // 推入页（阅读页/设置子页，Immediate 同步）回到单根书库，再推入目标页——
+    // 根始终是 ShelfPage，任意导航页的返回链都回到书库。
+    function navigateTo(navId) {
+        const top = stack.currentItem
+        if (top && top.navId === navId) return
+        for (let i = stack.depth; i > 1; --i)
+            stack.pop(null, StackView.Immediate)
+        stack.push(navPages[navId])
+    }
+
+    KdTabBar {
+        id: tabBar
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: root.navVisible ? 44 : 0
+        visible: root.navVisible
+        tabs: [
+            { id: "shelf", text: qsTr("书库") },
+            { id: "settings", text: qsTr("设置") }
+        ]
+        currentId: root.currentNavId
+        onTabClicked: (id) => root.navigateTo(id)
+    }
+
     StackView {
         id: stack
-        anchors.fill: parent
+        anchors.top: tabBar.bottom
+        anchors.bottom: bottomNav.top
+        anchors.left: parent.left
+        anchors.right: parent.right
         initialItem: "ShelfPage.qml"
+        // U2：导航联动——currentItem 变化（push/pop）时同步标签/底部导航高亮与沉浸隐藏
+        onCurrentItemChanged: root.syncNav()
+        Component.onCompleted: root.syncNav()
+    }
+
+    KdBottomNav {
+        id: bottomNav
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: root.navVisible ? 56 : 0
+        visible: root.navVisible
+        // 图标为占位字符（U4 KdIcons 替换，接口不变）
+        items: [
+            { id: "shelf", icon: "⌂", text: qsTr("书库") },
+            { id: "stats", icon: "▤", text: qsTr("统计") },
+            { id: "sync", icon: "⇄", text: qsTr("同步") },
+            { id: "settings", icon: "⚙", text: qsTr("设置") }
+        ]
+        currentId: root.currentNavId
+        onItemClicked: (id) => root.navigateTo(id)
     }
 }

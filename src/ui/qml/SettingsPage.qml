@@ -10,6 +10,8 @@ import Readdict.Backend
 Page {
     id: page
     title: qsTr("设置")
+    // U2：导航页标识（Main 据此联动顶部标签/底部导航高亮与沉浸隐藏）
+    property string navId: "settings"
     // D3：测试/外部句柄（QML 冒烟经此验证设置页 → 同步页导航）
     property alias syncEntryButton: syncEntryButton
     // D4：设置页 → 阅读统计页导航入口（QML 冒烟同模式驱动）

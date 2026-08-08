@@ -11,6 +11,8 @@ import Readdict.Backend
 Page {
     id: page
     title: qsTr("WebDAV 同步")
+    // U2：导航页标识（Main 底部导航直达同步页；经设置页推入时高亮跟随）
+    property string navId: "sync"
     // 测试/外部句柄（QML 冒烟经此驱动配置与自动同步开关，ShelfPage 同模式）
     property alias syncUrlField: urlField
     property alias syncAutoCheck: cbAuto

@@ -13,6 +13,8 @@ import Readdict.Backend
 // progress/<bookId>（存章节索引）区分——B10 进度恢复按 format 分流读取。
 Page {
     id: page
+    // U2：沉浸页标识（Main 据此隐藏标签/底部导航；返回后恢复）
+    property string navId: "pdf"
     property var book: ({})
     property string theme: "auto"
     // false = 宽度适配（fitToWidth），true = 整页适配（fitToViewport）

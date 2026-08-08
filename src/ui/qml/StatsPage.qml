@@ -14,6 +14,8 @@ import Readdict.UI 1.0
 Page {
     id: page
     title: qsTr("阅读统计")
+    // U2：导航页标识（Main 底部导航直达统计页；经设置页推入时高亮跟随）
+    property string navId: "stats"
     // 最近一次 Books.stats() 结果（QVariantMap；QML 冒烟经此断言数字正确性）
     property var statsData: ({})
 

@@ -11,6 +11,8 @@ import Readdict.UI 1.0
 // 章节进度经 Books.currentChapter 持久化到 settings.json 的 progress/<bookId>。
 Page {
     id: page
+    // U2：沉浸页标识（Main 据此隐藏标签/底部导航；返回后恢复）
+    property string navId: "reader"
     // E4：阅读页获得键盘焦点——StackView push 时焦点随 currentItem 交给本页，
     // 页内 focus:true 的 ReaderContent（Flickable）获得 activeFocus 接收方向键；
     // 弹层/Dialog 打开时焦点在弹层内，正文 Keys 不触发（不干扰输入框）。
