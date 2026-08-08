@@ -159,7 +159,7 @@ QByteArray SyncManager::buildHighlightsJson() const {
     QJsonArray arr;
     QSqlQuery q(m_db);
     if (q.exec(QStringLiteral(
-            "SELECT id,book_id,chapter,sentence_index,text,color,note,created_at FROM highlights"))) {
+            "SELECT id,book_id,chapter,sentence_index,text,color,note,created_at,chapter_index FROM highlights"))) {
         while (q.next()) {
             // 时间戳转 UTC 序列化（跨设备时区不偏移）；NULL 字段（C7 允许 NULL 章/句索引）
             // 序列化为 JSON null，接收端按 null 匹配，避免压平为 ""/0 导致去重失效
@@ -178,6 +178,7 @@ QByteArray SyncManager::buildHighlightsJson() const {
                 // 否则同秒两次编辑在载荷中截断成同一版本、第二次编辑不同步
                 {"createdAt", created.isValid() ? created.toUTC().toString(Qt::ISODateWithMs)
                                                 : q.value(7).toString()},
+                {"chapterIndex", q.value(8).toInt()},
             });
         }
     }
@@ -367,7 +368,7 @@ bool SyncManager::applyHighlightsJson(const QByteArray &data) {
         }
         QSqlQuery ins(m_db);
         ins.prepare(QStringLiteral("INSERT INTO highlights(book_id,chapter,sentence_index,text,"
-                                   "color,note,created_at) VALUES(?,?,?,?,?,?,?)"));
+                                   "color,note,created_at,chapter_index) VALUES(?,?,?,?,?,?,?,?)"));
         ins.addBindValue(bookId);
         ins.addBindValue(chapter);
         ins.addBindValue(sentenceIndex);
@@ -379,6 +380,8 @@ bool SyncManager::applyHighlightsJson(const QByteArray &data) {
         const QDateTime created = parseIso(o[QStringLiteral("createdAt")].toString());
         ins.addBindValue(created.isValid() ? created.toLocalTime().toString(Qt::ISODateWithMs)
                                            : QDateTime::currentDateTime().toString(Qt::ISODateWithMs));
+        // L5（P0#6）：载荷缺失 chapterIndex（旧版本客户端）→ 默认 0，经 backfill 归位
+        ins.addBindValue(o[QStringLiteral("chapterIndex")].toInt());
         if (!ins.exec())
             ok = false;
     }

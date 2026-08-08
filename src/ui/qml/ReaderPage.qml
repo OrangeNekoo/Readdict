@@ -167,6 +167,9 @@ Page {
         // C7：划线上下文——bookId 供 addHighlight，highlights 供逐句渲染查表
         bookId: (page.book && page.book.id) || -1
         highlights: page.highlights
+        // L5（P0#6）：当前章 1 起索引随翻章更新（currentChapter 由 loadChapter 写），
+        // addHighlight 末参——划线按阅读顺序跨章排序
+        chapterIndex: Books.currentChapter + 1
         // E4：翻页方式（方向键分流 + 页边界吸附）
         pageMode: page.pageMode
         // 规格 §7：滚动接近章末 → 自动加载下一章（末章由 autoNextChapter 兜底不换）
@@ -1054,6 +1057,9 @@ Page {
             content.restoreScrollY = Books.lastScrollY(page.book.id)
         }
         if (page.book && page.book.id) {
+            // L5（P0#6）：旧库 chapter_index=0 的划线按章节标题回填 1 起索引（幂等），
+            // 随后重载使列表按跨章顺序呈现
+            Highlights.backfillChapterIndexes(page.book.id, Books.chapterTitles(page.book.id))
             page.reloadHighlights()   // C7：重新进入阅读页加载本书全部划线
             Books.startTracking(page.book.id)  // 阅读计时开始
         }

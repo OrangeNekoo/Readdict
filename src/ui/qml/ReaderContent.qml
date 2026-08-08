@@ -79,6 +79,9 @@ Flickable {
     property var highlights: []                   // Highlights.highlightsForBook 结果（ReaderPage 注入）
     property var highlightMap: ({})               // "chapter|sentenceIndex" → 划线 map，O(1) 渲染查表
     property int flashIndex: -1                   // 笔记跳转目标句（临时下划线提示，1.6s 后复位）
+    // L5（P0#6）：当前章 1 起索引（ReaderPage 按 Books.currentChapter+1 注入），
+    // addHighlight 末参，供笔记按阅读顺序跨章排序
+    property int chapterIndex: 0
     // 划线预设色（黄/绿/粉）与默认色（笔记入口无划线时使用）
     property var markerColors: [
         { name: qsTr("黄"), color: "#FFEB3B" },
@@ -477,7 +480,8 @@ Flickable {
             Highlights.updateColor(mk.id, color)
         else
             Highlights.addHighlight(flick.bookId, flick.chapter.title,
-                                    flick.selSentenceIndex, flick.selText, color)
+                                    flick.selSentenceIndex, flick.selText, color, "",
+                                    flick.chapterIndex)
         flick.clearSelection()
     }
 
@@ -492,7 +496,8 @@ Flickable {
         noteDlg.autoCreated = !mk
         noteDlg.targetId = mk ? mk.id : Highlights.addHighlight(flick.bookId, flick.chapter.title,
                                                                 flick.selSentenceIndex, flick.selText,
-                                                                flick.defaultMarkerColor)
+                                                                flick.defaultMarkerColor, "",
+                                                                flick.chapterIndex)
         noteDlg.open()
     }
 

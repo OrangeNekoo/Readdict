@@ -15,10 +15,11 @@ HighlightManager::HighlightManager(const QString &dbPath, const QString &connect
 }
 
 qint64 HighlightManager::addHighlight(qint64 bookId, const QString &chapter, int sentenceIndex,
-                                      const QString &text, const QString &color, const QString &note) {
+                                      const QString &text, const QString &color, const QString &note,
+                                      int chapterIndex) {
     QSqlQuery q(m_db);
-    q.prepare("INSERT INTO highlights(book_id,chapter,sentence_index,text,color,note,created_at)"
-              " VALUES(?,?,?,?,?,?,?)");
+    q.prepare("INSERT INTO highlights(book_id,chapter,sentence_index,text,color,note,created_at,chapter_index)"
+              " VALUES(?,?,?,?,?,?,?,?)");
     q.addBindValue(bookId);
     q.addBindValue(chapter);
     q.addBindValue(sentenceIndex);
@@ -26,6 +27,7 @@ qint64 HighlightManager::addHighlight(qint64 bookId, const QString &chapter, int
     q.addBindValue(color);
     q.addBindValue(note);
     q.addBindValue(QDateTime::currentDateTime().toString(Qt::ISODate));
+    q.addBindValue(chapterIndex);
     if (!q.exec()) {
         qWarning() << "addHighlight:" << q.lastError().text();
         return -1;
@@ -112,9 +114,11 @@ void HighlightManager::updateColor(qint64 id, const QString &color) {
 QVariantList HighlightManager::highlightsForBook(qint64 bookId) const {
     QVariantList out;
     QSqlQuery q(m_db);
-    // sentence_index, id 双序保证阅读顺序稳定（NULL 在 SQLite 中排最前，无影响）
-    q.prepare("SELECT id,book_id,chapter,sentence_index,text,color,note"
-              " FROM highlights WHERE book_id=? ORDER BY sentence_index, id");
+    // chapter_index, sentence_index, id 三级序保证跨章阅读顺序稳定
+    //（chapter_index 旧行默认 0 排最前，经 backfillChapterIndexes 回填归位；
+    // NULL sentence_index 在 SQLite 中排最前，章内影响与原实现一致）
+    q.prepare("SELECT id,book_id,chapter,sentence_index,text,color,note,chapter_index"
+              " FROM highlights WHERE book_id=? ORDER BY chapter_index, sentence_index, id");
     q.addBindValue(bookId);
     if (!q.exec()) {
         qWarning() << "highlightsForBook:" << q.lastError().text();
@@ -129,7 +133,25 @@ QVariantList HighlightManager::highlightsForBook(qint64 bookId) const {
         m[QStringLiteral("text")] = q.value(4).toString();
         m[QStringLiteral("color")] = q.value(5).toString();
         m[QStringLiteral("note")] = q.value(6).toString();
+        m[QStringLiteral("chapterIndex")] = q.value(7).toInt();
         out.append(m);
     }
     return out;
+}
+
+void HighlightManager::backfillChapterIndexes(qint64 bookId, const QVariantList &titles) {
+    // title 索引 i 从 1 起；仅触碰 chapter_index 为 0/NULL 的旧行（新写入行已带真实索引，
+    // 不覆盖）。章标题匹配 C7b 唯一化后的标题（BookManager::uniqueChapterTitles 同源）。
+    for (int i = 0; i < titles.size(); ++i) {
+        QSqlQuery q(m_db);
+        q.prepare("UPDATE highlights SET chapter_index=?"
+                  " WHERE book_id=? AND chapter=?"
+                  " AND (chapter_index IS 0 OR chapter_index IS NULL)");
+        q.addBindValue(i + 1);
+        q.addBindValue(bookId);
+        q.addBindValue(titles.at(i).toString());
+        if (!q.exec())
+            qWarning() << "backfillChapterIndexes:" << q.lastError().text();
+    }
+    emit highlightsChanged(bookId);
 }

@@ -17,13 +17,13 @@ private slots:
         QVERIFY(db.tables().contains("categories"));
         QVERIFY(db.tables().contains("highlights"));
         QVERIFY(db.tables().contains("books_fts"));
-        QCOMPARE(m_mgr->schemaVersion(), 1);
+        QCOMPARE(m_mgr->schemaVersion(), 2);
     }
     void reopensWithSameVersion() {
         QTemporaryDir dir;
         const QString path = dir.filePath("t.db");
-        { DatabaseManager a(path); QCOMPARE(a.schemaVersion(), 1); }
-        { DatabaseManager b(path); QCOMPARE(b.schemaVersion(), 1); }
+        { DatabaseManager a(path); QCOMPARE(a.schemaVersion(), 2); }
+        { DatabaseManager b(path); QCOMPARE(b.schemaVersion(), 2); }
     }
     void migrateRollsBackOnFailure() {
         QTemporaryDir dir;
@@ -37,7 +37,7 @@ private slots:
         {
             DatabaseManager mgr(path, QStringLiteral("readdict_lock_b")); // 迁移在此失败
             // 迁移未完成：user_version 保持 0（有效空库的初始值；-1 仅见于损坏文件），
-            // 未半提交成 1，锁释放后重试可完整迁移
+            // 未半提交成 1/2，锁释放后重试可完整迁移
             QCOMPARE(mgr.schemaVersion(), 0);
             // 失败路径不得留下悬空事务：migrate 内部已 ROLLBACK，新事务应能正常开启
             //（旧实现 BEGIN 后失败不回滚 → 此处 BEGIN 报 "cannot start a transaction…"）
@@ -47,11 +47,16 @@ private slots:
         }
         QSqlQuery qa2(a);
         QVERIFY2(qa2.exec("ROLLBACK"), qPrintable(qa2.lastError().text()));
-        // 锁释放后完整重试迁移成功：无半套 schema、user_version 一致
+        // 锁释放后完整重试迁移成功：无半套 schema、user_version 一致（v2 含 chapter_index）
         DatabaseManager ok(path, QStringLiteral("readdict_lock_c"));
-        QCOMPARE(ok.schemaVersion(), 1);
+        QCOMPARE(ok.schemaVersion(), 2);
         QVERIFY(ok.database().tables().contains("books"));
         QVERIFY(ok.database().tables().contains("books_fts"));
+        {   // L5：v2 增量列存在且可查询（旧行默认 0）
+            QSqlQuery qc(ok.database());
+            QVERIFY2(qc.exec("SELECT chapter_index FROM highlights"),
+                     qPrintable(qc.lastError().text()));
+        }
     }
 private:
     std::unique_ptr<DatabaseManager> m_mgr;

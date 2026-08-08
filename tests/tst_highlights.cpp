@@ -2,13 +2,18 @@
 #include <QSignalSpy>
 #include <QSqlQuery>
 #include <memory>
+#include <QTemporaryDir>
 #include "core/HighlightManager.h"
 
 class TestHighlights : public QObject {
     Q_OBJECT
 private slots:
     // QWARN duplicate connection name 'readdict_main' 已知良性（A3 同因），未改 DatabaseManager
-    void init() { m_h.reset(new HighlightManager(":memory:")); }
+    void init() {
+        m_tmp.reset(new QTemporaryDir);
+        dbPath = m_tmp->filePath("hl.db");
+        m_h.reset(new HighlightManager(":memory:"));
+    }
     // C7：highlightsForBook 返回 QVariantList<QVariantMap>（QML 友好），字段键与 QML 侧一致
     static QVariantMap row(const QVariantList &list, int i) { return list.at(i).toMap(); }
     void addsAndLists() {
@@ -97,7 +102,27 @@ private slots:
         QCOMPARE(row(list, 0)["sentenceIndex"].toInt(), -1);
         QCOMPARE(row(list, 0)["text"].toString(), QString("t"));
     }
+    // L5（P0#6）：跨章划线按 chapter_index 排序（插入顺序无关）
+    void crossChapterOrderFollowsChapterIndex() {
+        // 第 2 章句 0 先插入、第 1 章句 5 后插入 → 列表仍第 1 章在前
+        HighlightManager h(dbPath, "readdict_h_t1");
+        h.addHighlight(1, "第2章", 0, "t2", "#FF0", {}, 2);
+        h.addHighlight(1, "第1章", 5, "t1", "#FF0", {}, 1);
+        const QVariantList list = h.highlightsForBook(1);
+        QCOMPARE(list.size(), 2);
+        QCOMPARE(list.first().toMap().value("chapter").toString(), QString("第1章"));
+        QCOMPARE(list.first().toMap().value("chapterIndex").toInt(), 1);
+    }
+    void backfillChapterIndexesMapsTitles() {
+        HighlightManager h(dbPath, "readdict_h_t2");
+        h.addHighlight(1, "第2章", 0, "t2", "#FF0", {}, 0); // 旧行 chapter_index=0
+        h.backfillChapterIndexes(1, QVariantList{QStringLiteral("第1章"), QStringLiteral("第2章")});
+        const QVariantList list = h.highlightsForBook(1);
+        QCOMPARE(list.first().toMap().value("chapterIndex").toInt(), 2);
+    }
 private:
+    std::unique_ptr<QTemporaryDir> m_tmp;
+    QString dbPath;
     std::unique_ptr<HighlightManager> m_h;
 };
 QTEST_MAIN(TestHighlights)
