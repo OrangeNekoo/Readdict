@@ -132,12 +132,12 @@ ApplicationWindow {
         anchors.right: parent.right
         height: root.navVisible ? 56 : 0
         visible: root.navVisible
-        // 图标为占位字符（U4 KdIcons 替换，接口不变）
+        // U4：图标为 KdIcons 线性描边图标名（shelf/stats/sync/settings）
         items: [
-            { id: "shelf", icon: "⌂", text: qsTr("书库") },
-            { id: "stats", icon: "▤", text: qsTr("统计") },
-            { id: "sync", icon: "⇄", text: qsTr("同步") },
-            { id: "settings", icon: "⚙", text: qsTr("设置") }
+            { id: "shelf", icon: "shelf", text: qsTr("书库") },
+            { id: "stats", icon: "stats", text: qsTr("统计") },
+            { id: "sync", icon: "sync", text: qsTr("同步") },
+            { id: "settings", icon: "settings", text: qsTr("设置") }
         ]
         currentId: root.currentNavId
         onItemClicked: (id) => root.navigateTo(id)

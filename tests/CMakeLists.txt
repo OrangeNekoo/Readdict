@@ -231,6 +231,7 @@ qt_add_resources(tst_qml "qml_ui"
         ../src/ui/qml/Main.qml
         ../src/ui/qml/KdTabBar.qml
         ../src/ui/qml/KdBottomNav.qml
+        ../src/ui/qml/KdIcons.qml
         ../src/ui/qml/ShelfPage.qml
         ../src/ui/qml/BookCard.qml
         ../src/ui/qml/SettingsPage.qml
