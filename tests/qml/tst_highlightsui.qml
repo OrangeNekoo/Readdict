@@ -133,7 +133,7 @@ Item {
                              align: "left", pageWidth: "normal" }
             c.chapter = root.makeChapter()
             wait(50)
-            // 无引擎桩：seekTo 只驱动游标不发声
+            // 无引擎桩（openai 无 key）：play/next 只驱动游标不发声
             Tts.reconfigure("openai", "https://api.openai.com/v1", "", "tts-1", "nova", 1.0)
             var all = []
             for (var p of c.chapter.paragraphs)
@@ -143,14 +143,14 @@ Item {
                               text: "第1段第一句。", color: "#A5D6A7", note: "" }]
             wait(50)
             // 游标 2（段 1 首句）= 划线句：划线色为底 + 下划线叠加（两类信息都可见）
-            Tts.seekTo(2)
+            Tts.play(); Tts.next(); Tts.next()
             wait(50)
             var t1 = c.paragraphRepeater.itemAt(1).children[0].text.toLowerCase()
             verify(t1.indexOf("background-color:#a5d6a7") >= 0, "划线色应保留，实际 " + t1)
             // 序列化格式：text-decoration 后带空格（Qt 归一化）
             verify(t1.indexOf("text-decoration: underline") >= 0, "朗读游标应以下划线叠加，实际 " + t1)
             // 游标 3（段 1 次句）= 未划线当前句：TTS 黄底
-            Tts.seekTo(3)
+            Tts.next()
             wait(50)
             var t2 = c.paragraphRepeater.itemAt(1).children[0].text.toLowerCase()
             verify(t2.indexOf("background-color:#ffd54f") >= 0, "未划线当前句应 TTS 黄底，实际 " + t2)

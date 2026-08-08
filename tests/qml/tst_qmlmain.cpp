@@ -245,8 +245,8 @@ int main(int argc, char *argv[]) {
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Settings", settings);
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Books", books);
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Importer", importer);
-    // C5：Tts 单例（无引擎桩——测试不发声；engineAvailable=false 用于断言
-    // TtsBar 禁用播放；seekTo/setSentences 仍驱动 QML 高亮游标）
+    // C5：Tts 单例（初始无引擎——测试不发声；engineAvailable=false 用于断言
+    // TtsBar 禁用播放；用例内切 openai 无 key 引擎后 play/next 驱动 QML 高亮游标）
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Tts", new TtsController);
     // C7：Highlights 单例（独立连接名，与生产 main.cpp 对齐）——划线数据流测试经真实 SQLite
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Highlights",

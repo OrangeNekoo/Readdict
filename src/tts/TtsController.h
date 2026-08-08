@@ -33,16 +33,13 @@ public:
     int chapter() const { return m_chapter; }
     int currentIndex() const { return m_index; }
     int state() const { return m_state; }
-    QString currentSentence() const;
     QStringList voices() const;
     bool engineAvailable() const { return m_engine && m_engine->available(); }
-    bool atEnd() const { return m_index >= m_sentences.size(); }
     Q_INVOKABLE void play();      // 从 currentIndex 播放；暂停中恢复；末尾则从头
     Q_INVOKABLE void pause();
     Q_INVOKABLE void stop();
     Q_INVOKABLE void next();
     Q_INVOKABLE void previous();
-    Q_INVOKABLE void seekTo(int index);
     double rate() const { return m_rate; }
     QString voice() const { return m_voice; }
     void setRate(double rate);
@@ -62,7 +59,7 @@ private:
     TTSEngine *m_engine = nullptr;
     QStringList m_sentences;
     int m_index = 0, m_chapter = 0;
-    double m_rate = 1.0;      // 语速倍率（0.25..4.0，TtsBar 滑块 0.5..2.0）
+    double m_rate = 1.0;      // 语速倍率（0.25..4.0，TtsBar 滑块与设置页同范围）
     QString m_voice;          // 当前音色名（重配置后尝试在新引擎上恢复）
     int m_state = 0;          // 状态机：0 idle 1 playing 2 paused
     bool m_testing = false;   // testVoice 进行中：finished 不推进句子

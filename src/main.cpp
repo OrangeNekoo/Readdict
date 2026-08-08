@@ -143,15 +143,26 @@ int main(int argc, char *argv[]) {
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "ReaderText", new ReaderTextHelper);
     // C5：TTS 控制器按 settings.json 的 tts/ 分区构建引擎（system/openai），
     // reconfigure 由设置页在保存后再次调用以热切换引擎。
+    // P1#15：旧 tts/voice 单键 → 按当前引擎拆分
+    const QString legacyVoice = settings->value("tts/voice").toString();
+    if (!legacyVoice.isEmpty() && settings->value("tts/systemVoice").toString().isEmpty()
+        && settings->value("tts/openaiVoice").toString().isEmpty()) {
+        const QString eng = settings->value("tts/engine").toString("system");
+        settings->setValue(eng == "openai" ? "tts/openaiVoice" : "tts/systemVoice", legacyVoice);
+        // 旧键保留不删（回滚安全），读取路径全部改新键
+    }
+    const QString voice = settings->value(
+        settings->value("tts/engine").toString("system") == "openai"
+            ? "tts/openaiVoice" : "tts/systemVoice").toString();
     auto *tts = new TtsController;
     tts->reconfigure(settings->value("tts/engine").toString("system"),
                      settings->value("tts/url").toString(),
                      settings->value("tts/key").toString(),
                      settings->value("tts/model").toString(),
-                     settings->value("tts/voice").toString(),
+                     voice,
                      settings->value("tts/rate").toDouble(1.0));
     tts->setRate(settings->value("tts/rate").toDouble(1.0));
-    tts->setVoice(settings->value("tts/voice").toString());
+    tts->setVoice(voice);
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Tts", tts);
     // D3：WebDAV 同步控制器（手动/每 30 分钟自动）。SyncManager 内部直连 SQLite
     // （独立连接名 readdict_sync），与各单例连接隔离；dbPath=AppDataLocation/Readdict.db，

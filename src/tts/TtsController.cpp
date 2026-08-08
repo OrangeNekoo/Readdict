@@ -48,7 +48,13 @@ void TtsController::reconfigure(const QString &engine, const QString &url,
     m_testing = false;
     m_suppressFinished = false;
     setEngine(fresh);
-    if (old) old->deleteLater();
+    if (old) {
+        // L7（P2#37）：销毁前先停旧引擎，朗读中热切换不得继续播放旧引擎音频。
+        // 必须置于 setEngine 之后：旧引擎信号已断开，其 stop 的 finished
+        //（SystemTTS 异步 Ready→finished / OpenAI 同步 emit finished）不会回流到本控制器
+        old->stop();
+        old->deleteLater();
+    }
     // 新引擎恢复当前语速/音色（OpenAI 的 setRate 映射到请求 speed）
     if (fresh) {
         fresh->setRate(m_rate);
@@ -84,12 +90,6 @@ void TtsController::setChapter(int ch) {
     if (m_chapter == ch) return;
     m_chapter = ch;
     emit chapterChanged(ch);
-}
-
-QString TtsController::currentSentence() const {
-    if (m_index >= 0 && m_index < m_sentences.size())
-        return m_sentences[m_index];
-    return QString();
 }
 
 QStringList TtsController::voices() const {
@@ -174,13 +174,3 @@ void TtsController::previous() {
     if (m_index > 0) { --m_index; speakCurrent(); m_state = 1; emit stateChanged(1); }
 }
 
-void TtsController::seekTo(int index) {
-    if (index < 0 || index >= m_sentences.size()) return;
-    m_testing = false;
-    m_index = index;
-    // 先发游标变更（无引擎时也能驱动 QML 高亮），speakCurrent 内部会再发一次（幂等）
-    emit sentenceChanged(index);
-    speakCurrent();
-    m_state = 1;
-    emit stateChanged(1);
-}

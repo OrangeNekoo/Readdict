@@ -247,9 +247,9 @@ Item {
             var t0 = page.contentView.paragraphRepeater.itemAt(0).children[0].text
             verify(t0.toLowerCase().indexOf("#ffd54f") < 0,
                    "未朗读时首句不应黄标（D2），实际 " + t0)
-            // 朗读会话激活（openai 无 key 桩：seekTo 只驱动 state 0→1 不发声）→ 首句黄标恢复
+            // 朗读会话激活（openai 无 key 桩：play 只驱动 state 0→1 不发声）→ 首句黄标恢复
             Tts.reconfigure("openai", "https://api.openai.com/v1", "", "tts-1", "nova", 1.0)
-            Tts.seekTo(0)
+            Tts.play()
             tryVerify(function () {
                 return page.contentView.paragraphRepeater.itemAt(0).children[0].text.toLowerCase()
                        .indexOf("#ffd54f") >= 0

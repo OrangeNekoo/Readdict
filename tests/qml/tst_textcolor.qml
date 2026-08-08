@@ -92,8 +92,8 @@ Item {
         // span 必须追加显式深色前景 color:#212121——否则继承 #E8E8E3 浅字浅底。
         // 覆盖两条路径：划线句（marker）与朗读当前句（TTS 黄底）。
         function test_04_darkHighlightContrast() {
-            // 前置用例可能已把 Tts 热切到系统引擎（seekTo 真实发声）：切 openai 无 key
-            //（引擎存在但不可用）→ seekTo 仅驱动高亮游标不触发朗读（同 tst_ttsbar 模式）
+            // 前置用例可能已把 Tts 热切到系统引擎（play 真实发声）：切 openai 无 key
+            //（引擎存在但不可用）→ play 仅驱动高亮游标不触发朗读（同 tst_ttsbar 模式）
             Tts.reconfigure("openai", "https://api.openai.com/v1", "", "tts-1", "nova", 1.0)
             var loader = contentComp.createObject(root)
             loader.width = 800; loader.height = 600
@@ -115,7 +115,7 @@ Item {
                    "dark 下划线句 span 应含 background-color 与显式 color:#212121，实际 " + t1)
             // 路径 B：朗读当前句（段 0 全局句 0）→ TTS 黄底 span 应含深色前景
             Tts.setSentences(["第一段正文。", "标题", "粗体句。"])
-            Tts.seekTo(0)
+            Tts.play()
             wait(50)
             var t0 = root.paraEdit(c, 0).text.toLowerCase()
             verify(t0.indexOf("background-color:#ffd54f") >= 0 && t0.indexOf("color:#212121") >= 0,

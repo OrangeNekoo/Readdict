@@ -231,7 +231,8 @@ Page {
         onPrevClicked: Tts.previous()
         onNextClicked: Tts.next()
         onRateChanged: (r) => { Tts.rate = r; Settings.setValue("tts/rate", r) }
-        onVoiceChanged: (v) => { Tts.voice = v; Settings.setValue("tts/voice", v) }
+        // L7（P1#15）：音色键按引擎拆分；TtsBar 音色下拉仅系统引擎有列表（Tts.voices），写 tts/systemVoice
+        onVoiceChanged: (v) => { Tts.voice = v; Settings.setValue("tts/systemVoice", v) }
     }
 
     // C5：Tts 状态/错误同步到 TtsBar（playing 图标切换、错误提示 4 秒后消失）

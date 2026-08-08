@@ -40,7 +40,7 @@ private slots:
         TtsController c;
         c.setSentences({"第一句。", "第二句！", "第三句？"});
         QCOMPARE(c.currentIndex(), 0);
-        QCOMPARE(c.currentSentence(), QString("第一句。"));
+        // currentSentence 已删（L7 死接口）：游标语义经 currentIndex 断言
         c.next(); QCOMPARE(c.currentIndex(), 1);
         c.previous(); QCOMPARE(c.currentIndex(), 0);
     }
@@ -48,7 +48,8 @@ private slots:
         TtsController c;
         c.setSentences({"a.", "b."});
         c.next(); c.next();
-        QVERIFY(c.atEnd());
+        QCOMPARE(c.currentIndex(), 2);   // atEnd 语义改经游标断言：游标 == 句数（停在末尾）
+        QCOMPARE(c.state(), 0);
     }
     void setsChapter() {
         TtsController c;
@@ -68,7 +69,7 @@ private slots:
         QCOMPARE(e.spoken, (QStringList{"一。", "二。"}));
         QCOMPARE(spy.count(), 1);
     }
-    // 最后一句播放完 → chapterCompleted，索引停在末尾（atEnd）而非越界
+    // 最后一句播放完 → chapterCompleted，游标停在末尾（atEnd 语义）而非越界
     void finishedOnLastSentenceEmitsChapterCompleted() {
         TtsController c;
         FakeEngine e;
@@ -80,8 +81,7 @@ private slots:
         e.emitFinished();  // → 章节完成
         QCOMPARE(spy.count(), 1);
         QCOMPARE(spy.takeFirst().at(0).toInt(), 0);
-        QVERIFY(c.atEnd());
-        QCOMPARE(c.currentSentence(), QString());  // 不越界
+        QCOMPARE(c.currentIndex(), 2);   // 游标停在末尾，不越界
         QCOMPARE(e.spoken.size(), 2);              // 不再 speak 越界内容
     }
     // 空句子列表 play：不崩溃，明确报错
@@ -102,14 +102,6 @@ private slots:
         c.play();
         QCOMPARE(err.count(), 1);
         QVERIFY(err.takeFirst().at(0).toString().contains("引擎"));
-    }
-    // seekTo 越界忽略
-    void seekToOutOfRangeIsIgnored() {
-        TtsController c;
-        c.setSentences({"a.", "b.", "c."});
-        c.seekTo(5); QCOMPARE(c.currentIndex(), 0);
-        c.seekTo(-1); QCOMPARE(c.currentIndex(), 0);
-        c.seekTo(1); QCOMPARE(c.currentIndex(), 1);
     }
     // previous 在 0 处保持
     void previousAtZeroStays() {
@@ -313,7 +305,7 @@ private slots:
         c.play();
         e.emitFinished();
         e.emitFinished();
-        QVERIFY(c.atEnd());
+        QCOMPARE(c.currentIndex(), 2);   // 游标停在末尾（atEnd 语义）
         QSignalSpy spy(&c, &TtsController::sentenceChanged);
         c.play();
         QCOMPARE(c.currentIndex(), 0);
@@ -332,16 +324,6 @@ private slots:
         c.play();
         QVERIFY(e.resumed);
         QCOMPARE(e.spoken.size(), 1);   // 未重新 speak
-    }
-    // C5：seekTo 无引擎时也推进高亮游标（sentenceChanged 通知）
-    void seekToEmitsSentenceChangedWithoutEngine() {
-        TtsController c;
-        QSignalSpy spy(&c, &TtsController::sentenceChanged);
-        c.setSentences({"a.", "b.", "c."});
-        spy.clear();
-        c.seekTo(2);
-        QCOMPARE(c.currentIndex(), 2);
-        QVERIFY(spy.count() >= 1);
     }
     // D1（用户反馈 BUG）：设置 OpenAI → 测试发音 → 进入书 → 朗读
     // 一直重复"测试语音"。锁定修复后契约（引擎 stop() 发一个 finished 供抑制标志消费，
@@ -370,7 +352,7 @@ private slots:
         e.emitFinished();
         QCOMPARE(e.spoken.last(), QString("第三句？"));
         e.emitFinished();
-        QVERIFY(c.atEnd());
+        QCOMPARE(c.currentIndex(), 3);   // 游标停在末尾（atEnd 语义）
         QCOMPARE(e.spoken, (QStringList{
             "这是一段测试语音", "第一句。", "第二句！", "第三句？"}));
     }
@@ -389,6 +371,18 @@ private slots:
         e.emitFinished();                       // 第一句结束 → 必须推进
         QCOMPARE(c.currentIndex(), 1);
         QCOMPARE(e.spoken.last(), QString("二。"));
+    }
+    // L7（P2#37）：reconfigure 销毁旧引擎前必须先 stop——朗读中热切换引擎，
+    // 旧引擎的音频不得继续播放。FakeEngine 即文件既有记录 stop 的桩（简报 SpyEngine 意图）
+    void reconfigureStopsOldEngine() {
+        TtsController c;
+        auto *first = new FakeEngine;
+        c.setEngine(first);
+        c.setSentences({"一。"});
+        c.play();
+        QCOMPARE(first->spoken, QStringList{"一。"});   // 播放确已进行（旧引擎正在发声）
+        c.reconfigure("system", "", "", "", "", 1.0);
+        QVERIFY(first->stopped);
     }
 };
 QTEST_MAIN(TestTtsController)

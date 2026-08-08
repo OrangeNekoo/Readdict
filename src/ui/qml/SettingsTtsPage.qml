@@ -10,9 +10,11 @@ import Readdict.UI 1.0
 // （服务地址/key/模型/音色/语速）、保存并应用 + 测试发音。
 // U5 新增：语速 KdSegmentedSlider 快速档位（0.5/1.0/1.5/2.0/3.0），与精确输入
 // TextField 双向同步（段选择写字段；字段值命中档位时高亮对应段）。
+// L7（P1#15）：音色键按引擎拆分——系统引擎新增音色列表写 tts/systemVoice，
+// OpenAI 音色文本写 tts/openaiVoice（旧 tts/voice 只由启动迁移读取，不再写）。
 // 返回：固定顶部"← 返回"（B4 模式）。测试/外部句柄：backButton、goBack()、
 // ttsEngineBox/ttsUrlField/ttsKeyField/ttsModelField/ttsVoiceField/ttsSpeedField、
-// rateSlider（KdSegmentedSlider）、saveTts()、ttsSavedHint。
+// ttsSystemVoiceBox、rateSlider（KdSegmentedSlider）、saveTts()、ttsSavedHint。
 Page {
     id: page
     title: qsTr("朗读（TTS）")
@@ -23,6 +25,7 @@ Page {
     property alias ttsKeyField: ttsKeyField
     property alias ttsModelField: ttsModelField
     property alias ttsVoiceField: ttsVoiceField
+    property alias ttsSystemVoiceBox: ttsSystemVoiceBox
     property alias ttsSpeedField: ttsSpeedField
     property alias rateSlider: rateSlider
     property alias ttsSavedHint: ttsSavedHint
@@ -86,6 +89,28 @@ Page {
                     color: Tts.engineAvailable ? UITheme.success : UITheme.danger
                 }
             }
+            // L7（P1#15）：系统引擎音色列表（Tts.voices 转发宿主系统语音），写 tts/systemVoice
+            RowLayout {
+                visible: ttsEngineBox.currentIndex === 0
+                Label { text: qsTr("音色") }
+                ComboBox {
+                    id: ttsSystemVoiceBox
+                    Layout.preferredWidth: 260
+                    model: Tts.voices
+                    enabled: Tts.voices.length > 0
+                    Component.onCompleted: syncVoice()
+                    // 恢复持久化音色：列表变更（引擎热切换）后同样同步，找不到则停首项
+                    function syncVoice() {
+                        const saved = Settings.value("tts/systemVoice") || ""
+                        const i = model.indexOf(saved)
+                        currentIndex = i >= 0 ? i : 0
+                    }
+                    Connections {
+                        target: Tts
+                        function onVoicesChanged() { ttsSystemVoiceBox.syncVoice() }
+                    }
+                }
+            }
             // OpenAI 引擎参数（引擎为 system 时折叠）
             ColumnLayout {
                 visible: ttsEngineBox.currentIndex === 1
@@ -125,7 +150,7 @@ Page {
                         id: ttsVoiceField
                         Layout.fillWidth: true
                         placeholderText: "alloy / echo / fable / onyx / nova / shimmer"
-                        Component.onCompleted: text = Settings.value("tts/voice") || "alloy"
+                        Component.onCompleted: text = Settings.value("tts/openaiVoice") || "alloy"
                     }
                 }
                 RowLayout {
@@ -195,22 +220,31 @@ Page {
         page.StackView.view.pop()
     }
 
-    // 保存 TTS 配置：写 settings.json 的 tts/ 分区 → Tts.reconfigure 重建引擎
+    // 保存 TTS 配置：写 settings.json 的 tts/ 分区 → Tts.reconfigure 重建引擎。
+    // L7（P1#15）：音色按引擎拆键——system 写 tts/systemVoice（音色列表当前项），
+    // openai 写 tts/openaiVoice（音色文本）；不再写旧 tts/voice 单键。
     function saveTts() {
         const engine = ttsEngineBox.model[ttsEngineBox.currentIndex].value
         const url = ttsUrlField.text.trim()
         const key = ttsKeyField.text
         const model = ttsModelField.text.trim() || "tts-1"
-        const voice = ttsVoiceField.text.trim() || "alloy"
+        const voice = engine === "system"
+            ? (ttsSystemVoiceBox.currentText || String(Settings.value("tts/systemVoice") || ""))
+            : (ttsVoiceField.text.trim() || "alloy")
         const rate = Math.min(4, Math.max(0.25, parseFloat(ttsSpeedField.text) || 1.0))
         Settings.setValue("tts/engine", engine)
         Settings.setValue("tts/url", url)
         Settings.setValue("tts/key", key)
         Settings.setValue("tts/model", model)
-        Settings.setValue("tts/voice", voice)
+        if (engine === "system") {
+            if (voice) Settings.setValue("tts/systemVoice", voice)   // 宿主无语音时列表空，保留旧值
+        } else {
+            Settings.setValue("tts/openaiVoice", voice)
+        }
         Settings.setValue("tts/rate", rate)
         Tts.reconfigure(engine, url, key, model, voice, rate)
         Tts.rate = rate
+        if (voice) Tts.voice = voice
         ttsSavedHint.text = qsTr("已保存并应用")
         ttsSavedHintClear.restart()
     }

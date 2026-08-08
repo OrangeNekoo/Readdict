@@ -3,8 +3,8 @@ import QtTest
 import Readdict.Backend
 
 // C5 冒烟：TtsBar（信号/禁用/状态图标）与 ReaderContent 逐句高亮 + 滚动跟随。
-// tst_qmlmain 注册的 Tts 为无引擎桩：engineAvailable=false（测试不发声），
-// setSentences/seekTo 仍驱动高亮游标与 sentenceChanged。
+// tst_qmlmain 注册的 Tts 初始无引擎；用例内切 openai 无 key（引擎存在但不可用）
+// 后 play/next 只驱动高亮游标与 sentenceChanged，不发声。
 Item {
     id: root
     width: 1100; height: 720
@@ -70,8 +70,8 @@ Item {
             return { title: "章", paragraphs: paras }
         }
         function test_highlightAndScroll() {
-            // 前置用例可能已把 Tts 热切换到系统引擎：seekTo 会真实发声。
-            // 显式切到 openai 无 key（引擎存在但不可用）→ seekTo 不触发朗读。
+            // 前置用例可能已把 Tts 热切换到系统引擎：play/next 会真实发声。
+            // 显式切到 openai 无 key（引擎存在但不可用）→ play/next 不触发朗读。
             Tts.reconfigure("openai", "https://api.openai.com/v1", "", "tts-1", "nova", 1.0)
             var loader = contentComp.createObject(root)
             loader.width = 800
@@ -96,8 +96,9 @@ Item {
             var tPre = c.paragraphRepeater.itemAt(0).children[0].text
             verify(tPre.toLowerCase().indexOf("#ffd54f") < 0,
                    "未朗读时首句不应出现 TTS 黄底（D2），实际 " + tPre)
-            // seekTo(3)：全局句 3 → 段 1 内第 2 句（"第二句！"）应包高亮 span
-            Tts.seekTo(3)
+            // play + 3×next 驱动游标到全局句 3 → 段 1 内第 2 句（"第二句！"）应包高亮 span
+            Tts.play()
+            Tts.next(); Tts.next(); Tts.next()
             wait(50)
             var d1 = c.paragraphRepeater.itemAt(1)
             verify(d1 !== undefined && d1.children[0] !== undefined, "段 1 委托应存在")
@@ -113,8 +114,8 @@ Item {
                    "当前句应包高亮 span，实际 " + t1)
             var t0 = c.paragraphRepeater.itemAt(0).children[0].text
             verify(t0.indexOf("FFD54F") < 0, "段 0 不应高亮，实际 " + t0)
-            // 滚动跟随：seekTo(40)（段 20）→ contentY 平滑滚到该段（动画 320ms）
-            Tts.seekTo(40)
+            // 滚动跟随：游标推进到全局句 40（段 20）→ contentY 平滑滚到该段（动画 320ms）
+            for (var k = 0; k < 37; k++) Tts.next()
             var item = c.paragraphRepeater.itemAt(20)
             var expected = Math.max(0, Math.min(item.y - c.height / 3,
                                                 Math.max(0, c.contentHeight - c.height)))

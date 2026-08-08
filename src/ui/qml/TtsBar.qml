@@ -64,15 +64,15 @@ Rectangle {
             id: rateSlider
             Layout.preferredWidth: 140
             Layout.fillWidth: true
-            from: 0.5; to: 2.0
+            from: 0.25; to: 4.0   // L7（P1#9）：与 TtsController/设置页语速范围统一
             value: Tts.rate
-            stepSize: 0.1
+            stepSize: 0.25   // 与 from 0.25 对齐的整网格（0.1 网格在 0.25 起点下触不到 4.0）
             onMoved: bar.rateChanged(value)
         }
         Label {
-            text: qsTr("语速 %1×").arg(rateSlider.value.toFixed(1))
+            text: qsTr("语速 %1×").arg(rateSlider.value.toFixed(2))   // 0.25 网格需两位小数
             color: bar.fgColor
-            Layout.preferredWidth: 72
+            Layout.preferredWidth: 80
             horizontalAlignment: Text.AlignLeft
         }
         ComboBox {

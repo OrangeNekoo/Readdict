@@ -74,10 +74,12 @@ Item {
                 return !page.ttsBar.visible && page.contentView.height >= root.height - 36 - 46
             }, 3000, "TtsBar 应隐藏且正文占满，实际 height=" + page.contentView.height)
             var hiddenH = page.contentView.height
-            // 状态注入：setSentences + seekTo 驱动 state 0→1（与 TtsBar 播放键的 Tts.play()
-            // 走同一 stateChanged 路径；测试桩无引擎不发声）→ TtsBar 显示且正文让出 46px
+            // 状态注入：setSentences + play 驱动 state 0→1（与 TtsBar 播放键的 Tts.play()
+            // 走同一 stateChanged 路径）→ TtsBar 显示且正文让出 46px。
+            // 前置 reconfigure 到 openai 无 key：引擎存在但不可用，play 置 state=1 不发声
+            Tts.reconfigure("openai", "https://api.openai.com/v1", "", "tts-1", "nova", 1.0)
             Tts.setSentences(["测试朗读句子。"])
-            Tts.seekTo(0)
+            Tts.play()
             tryVerify(function () { return page.ttsBar.visible }, 3000, "朗读会话激活后 TtsBar 应显示")
             tryVerify(function () { return page.contentView.height === hiddenH - 46 }, 3000,
                       "TtsBar 显示时正文应让出 46px，实际 " + page.contentView.height)
@@ -216,8 +218,9 @@ Item {
             page.controlsHideDelay = 100000
             Tts.stop()   // 幂等复位
             page.controlsVisible = false
+            Tts.reconfigure("openai", "https://api.openai.com/v1", "", "tts-1", "nova", 1.0)
             Tts.setSentences(["测试朗读句子。"])
-            Tts.seekTo(0)   // 状态注入 state 0→1（同 C2 冒烟路径）
+            Tts.play()   // 状态注入 state 0→1（同 C2 冒烟路径，openai 无 key 不发声）
             tryVerify(function () { return page.ttsBar.visible }, 3000,
                       "朗读会话中 TtsBar 应显示")
             verify(!page.controlsVisible, "控制栏隐藏不应影响 TtsBar 门控")
