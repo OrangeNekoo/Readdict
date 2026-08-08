@@ -41,8 +41,9 @@ Item {
     TestCase {
         name: "SettingsScrollSmoke"
 
-        // 最小窗口高度(600)下：设置页内容超高（B5 分组卡片化后 6 张卡 + 返回行
-        // 总高超过视口）→ ScrollView 可滚动到底，底部版本标签进入视口
+        // 最小窗口高度(600)下：U5 全屏列表（7 行 KdListItem + 版本标签，行高 60）
+        // 总高低于视口时全部内容直接可见（可达性契约：版本标签可进入视口——
+        // 不超高则无需滚动；若未来行增多超高，ScrollView 滚动兜底同样可达）
         function test_scrollRangeAtMinHeight() {
             var loader = settingsComp.createObject(root)
             loader.width = 800; loader.height = 600
@@ -53,15 +54,13 @@ Item {
             verify(page.settingsLayout !== undefined, "应暴露 settingsLayout 句柄")
             var fl = sv.contentItem
             verify(fl !== undefined, "ScrollView 内容应为 Flickable")
-            // 布局收敛后内容应超高（视口高 = 600 - 固定返回行(24+40+12) - 底边距 24）
-            tryVerify(function () {
-                return fl.contentHeight > fl.height + 50
-            }, 3000, "最小窗口高度下设置页内容应超高可滚动（contentHeight="
-                     + fl.contentHeight + "，视口=" + fl.height + "）")
-            // 滚动到底：contentY 可达最大滚动位置
-            fl.contentY = fl.contentHeight - fl.height
-            compare(fl.contentY, fl.contentHeight - fl.height, "应能滚到内容底部")
-            // D3：返回按钮固定顶部（移出 ScrollView）——滚动到底后仍应在视口内
+            // 布局收敛后内容可达（超高时滚动，否则直接可见）
+            tryVerify(function () { return fl.contentHeight > 0 }, 3000,
+                      "内容应完成布局（contentHeight=" + fl.contentHeight + "）")
+            var maxScroll = Math.max(0, fl.contentHeight - fl.height)
+            fl.contentY = maxScroll
+            compare(fl.contentY, maxScroll, "应能滚到最大滚动位置（不超高时为 0）")
+            // D3：返回按钮固定顶部（移出 ScrollView）——滚到底后仍应在视口内
             // 且位置不随内容滚动（左上角残影修复的回归断言：按钮不再滚出视口）
             var btn = page.backButton
             verify(btn !== undefined, "应暴露返回按钮句柄")
@@ -69,10 +68,11 @@ Item {
             verify(btn.visible && btnY >= 0 && btnY < page.height,
                    "滚到底后返回按钮应固定可见（y=" + btnY + "）")
             compare(btnY, btn.mapToItem(page, 0, 0).y, "返回按钮位置应固定不变")
-            // 底部内容可达：版本标签（布局尾部 children[6]，D3 起返回按钮移出
-            // ScrollView 固定顶部、不再占用布局索引）滚到底后应进入视口
+            // 底部内容可达：版本标签（U5 列表尾部 children[7]，7 行 + 版本）在视口内
             var layout = page.settingsLayout
-            var lastLabel = layout.children[6]
+            compare(layout.children.length, 8, "列表应为 7 行 + 版本标签，实际 "
+                    + layout.children.length)
+            var lastLabel = layout.children[7]
             verify(lastLabel !== undefined, "版本标签应存在（布局尾部）")
             var yInView = lastLabel.mapToItem(fl, 0, 0).y
             verify(yInView >= 0 && yInView < fl.height,

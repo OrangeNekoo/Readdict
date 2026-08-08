@@ -7,7 +7,8 @@ import Readdict.UI 1.0
 // 可用图标名（24x24 网格，线宽 1.8 round cap）：
 //   shelf 书库(首页) / stats 统计 / sync 同步 / settings 设置 / toc 目录 /
 //   theme 主题 / font 字体 / layout 布局 / more 更多 / back 返回 /
-//   search 搜索 / prev 上一章 / next 下一章 / read 朗读 / notes 笔记
+//   search 搜索 / prev 上一章 / next 下一章 / read 朗读 / notes 笔记 /
+//   chevron 右箭头 / globe 语言 / image 图片背景
 // 接口：name（图标名）、color（描边色，默认 textPrimary）、size（边长，默认 24）。
 Item {
     id: kdIcon
@@ -166,6 +167,22 @@ Item {
             seg(ctx, 9.5, 9, 15, 9)
             seg(ctx, 9.5, 12.5, 15, 12.5)
             seg(ctx, 9.5, 16, 13, 16)
+            break
+        // 右箭头 chevron（U5：列表项进入子页指示，同分析报告 §4 "›"）
+        case "chevron":
+            poly(ctx, [[9.5,6],[15.5,12],[9.5,18]], false)
+            break
+        // 语言/地球（U5：设置页语言行图标）
+        case "globe":
+            ring(ctx, 12, 12, 8)
+            seg(ctx, 4, 12, 20, 12)
+            ctx.beginPath(); ctx.ellipse(12, 12, 3.6, 8, 0, 0, Math.PI * 2); ctx.stroke()
+            break
+        // 图片/背景（U5：设置页阅读背景行图标——画框 + 山丘 + 太阳）
+        case "image":
+            poly(ctx, [[4.5,4.5],[19.5,4.5],[19.5,19.5],[4.5,19.5]], true)
+            poly(ctx, [[5.5,17.5],[10,11.5],[13.5,15.5],[16,12.5],[18.5,17.5]], false)
+            ring(ctx, 15.5, 8, 1.6)
             break
         default:
             break   // 未知图标名：不绘制（静默，保持布局占位）

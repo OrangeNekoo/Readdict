@@ -415,19 +415,25 @@ Item {
             Settings.setValue("typography/fontFamily", "思源宋体 VF")
             loader.destroy()
         }
-        // D4：设置页外观卡字体项已移除（避免与阅读界面双入口）
+        // D4：设置页外观卡字体项已移除（避免与阅读界面双入口）；
+        // U5：设置页卡片分组 → 全屏列表——首行为深色模式（KdToggle 开关行），无字体行
         function test_settingsPageNoFontEntry() {
             var loader = settingsComp.createObject(root)
             var page = loader.item
             verify(page !== null, "SettingsPage 应能加载")
             verify(page.fontBox === undefined, "设置页不应再暴露字体下拉句柄（已移入阅读界面）")
-            // 外观卡 body：0=标题 1=深色模式 2=刷新封面（字体行移除后恰 3 子项）
-            var appearance = page.settingsLayout.children[0]
-            verify(appearance !== undefined, "外观卡应存在")
-            var body = appearance.children[0]
-            compare(body.children.length, 3,
-                    "外观卡应仅剩标题/深色模式/刷新封面（字体行移除后），实际 "
-                    + body.children.length)
+            // U5 全屏列表：children[0]=深色模式行（KdListItem），其后语言/TTS/背景/
+            // 刷新封面/同步/统计 + 版本标签（共 7 行 + 1 标签）
+            var layout = page.settingsLayout
+            var first = layout.children[0]
+            verify(first !== undefined, "首行应存在")
+            compare(first.text, "深色模式", "首行应为深色模式（KdListItem）")
+            compare(first.textLabel.font.pixelSize, 15, "列表项文字应为 fsListItem 15px（Kindle §7）")
+            verify(first.chevronIcon !== undefined && !first.chevronIcon.visible,
+                   "开关行（内嵌 KdToggle）不应显示 chevron")
+            verify(page.themeModeToggle !== undefined, "设置页应暴露深色模式 KdToggle 句柄")
+            compare(layout.children.length, 8,
+                    "列表应为 7 行 + 版本标签（无字体行），实际 " + layout.children.length)
             loader.destroy()
         }
     }

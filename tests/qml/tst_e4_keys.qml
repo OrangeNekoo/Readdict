@@ -158,17 +158,22 @@ Item {
         }
         // 等章节布局收敛：loadChapter 后 contentHeight 首趟可能仍是旧章残留值
         //（Repeater 布局在事件循环 polish 阶段才更新，直接读会算错 maxY——
-        // 内容变矮时 Flickable 会把 contentY 钳回）。轮询到高度连续两次采样
-        // 一致（50ms 间隔）且 > 视口高为止。
+        // 内容变矮时 Flickable 会把 contentY 钳回）。U5 修复竞态：旧实现只要求
+        // 高度"连续两次采样一致"，loadChapter 后新章 Repeater 重建前的旧章高度
+        // 也被判为稳定 → maxY 按旧章算（内容 100 段 vs 新章 61 段时偏差巨大）。
+        // 现要求委托数先匹配当前章（paragraphRepeater.count == paragraphs.length）
+        // 再判高度稳定，彻底排除旧章高度残留窗口。
         function waitContentSettled(cv) {
             var last = -1
             var stable = 0
             var t0 = new Date().getTime()
             while (new Date().getTime() - t0 < 5000) {
                 var h = cv.contentHeight
-                if (Math.abs(h - last) < 0.5) stable++
+                var synced = cv.chapter && cv.chapter.paragraphs
+                    && cv.paragraphRepeater.count === cv.chapter.paragraphs.length
+                if (synced && Math.abs(h - last) < 0.5) stable++
                 else stable = 0
-                if (stable >= 2 && h > cv.height) return true
+                if (synced && stable >= 2 && h > cv.height) return true
                 last = h
                 wait(50)
             }
@@ -401,40 +406,34 @@ Item {
             h2.stack.destroy()
         }
 
-        // 设置页入口：翻页方式单选切换 → reading/pageMode 持久化 + 恢复选中。
-        // 程序化 checked=true / toggle() 不触发 onToggled（Qt 6.11 实测，同背景
-        // 模式单选取舍）→ 用 mouseClick 模拟真实点击驱动写入。
+        // 设置页入口（U5：翻页方式迁入 SettingsBackgroundPage 子页）：KdRadioGrid
+        // 单选切换 → reading/pageMode 持久化 + 恢复选中。selectValue() 与单元格点击
+        // 同路径（MouseArea.onClicked → selectValue）；恢复走 currentValue 赋值不触发
+        // selected（不写 Settings，同背景模式单选取舍）。
         function test_settingsPageModeEntry() {
             var loader = Qt.createQmlObject(
-                "import QtQuick; import QtQuick.Controls; Loader { source: \"qrc:/qt/qml/Readdict/ui/qml/SettingsPage.qml\"; }", root)
-            verify(loader.item !== null, "SettingsPage 应能加载")
+                "import QtQuick; import QtQuick.Controls; Loader { source: \"qrc:/qt/qml/Readdict/ui/qml/SettingsBackgroundPage.qml\"; }", root)
+            verify(loader.item !== null, "SettingsBackgroundPage 应能加载")
             loader.width = 1100; loader.height = 720
             var sp = loader.item
-            verify(sp.pageModeScrollRadio !== undefined && sp.pageModePagedRadio !== undefined,
-                   "设置页应暴露翻页方式单选句柄")
+            verify(sp.pageModeGrid !== undefined, "背景子页应暴露翻页方式 KdRadioGrid 句柄")
             // 初始：默认 scroll 选中
-            verify(sp.pageModeScrollRadio.checked, "默认应选中连续滚动")
-            // 滚动到翻页方式单选可见（mouseClick 要求目标在窗口内，同背景单选先例）
-            var fl = sp.settingsScroll.contentItem
-            fl.contentY = Math.max(0, sp.pageModePagedRadio.mapToItem(fl, 0, 0).y - 80)
-            wait(100)
+            compare(sp.pageModeGrid.currentValue, "scroll", "默认应选中连续滚动")
             // 切整页翻动 → 写 reading/pageMode=paged
-            mouseClick(sp.pageModePagedRadio, sp.pageModePagedRadio.width / 2,
-                       sp.pageModePagedRadio.height / 2)
+            sp.pageModeGrid.selectValue("paged")
             compare(String(Settings.value("reading/pageMode")), "paged",
-                    "点整页翻动应写 reading/pageMode=paged")
+                    "选整页翻动应写 reading/pageMode=paged")
             // 切回连续滚动
-            mouseClick(sp.pageModeScrollRadio, sp.pageModeScrollRadio.width / 2,
-                       sp.pageModeScrollRadio.height / 2)
+            sp.pageModeGrid.selectValue("scroll")
             compare(String(Settings.value("reading/pageMode")), "scroll",
-                    "点连续滚动应写 reading/pageMode=scroll")
-            // 恢复 paged 后重载设置页 → 选中态恢复
+                    "选连续滚动应写 reading/pageMode=scroll")
+            // 恢复 paged 后重载子页 → 选中态恢复
             Settings.setValue("reading/pageMode", "paged")
             var loader2 = Qt.createQmlObject(
-                "import QtQuick; import QtQuick.Controls; Loader { source: \"qrc:/qt/qml/Readdict/ui/qml/SettingsPage.qml\"; }", root)
+                "import QtQuick; import QtQuick.Controls; Loader { source: \"qrc:/qt/qml/Readdict/ui/qml/SettingsBackgroundPage.qml\"; }", root)
             loader2.width = 1100; loader2.height = 720
-            verify(loader2.item.pageModePagedRadio.checked,
-                   "reading/pageMode=paged 时重载设置页应选中整页翻动")
+            compare(loader2.item.pageModeGrid.currentValue, "paged",
+                    "reading/pageMode=paged 时重载子页应选中整页翻动")
             loader2.destroy()
             loader.destroy()
             Settings.setValue("reading/pageMode", "scroll")

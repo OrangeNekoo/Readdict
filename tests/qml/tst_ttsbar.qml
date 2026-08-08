@@ -125,53 +125,55 @@ Item {
     }
     TestCase {
         name: "SettingsTtsSmoke"
-        // 设置页 TTS 配置区：选 OpenAI → 填参 → 保存并应用 → Tts.reconfigure 生效
+        // U5：设置页 TTS 配置迁入子页——列表行（KdListItem 样式/chevron）→
+        // push SettingsTtsPage → 驱动引擎/参数/语速档位 → 保存并应用 → reconfigure 生效
         function test_settingsTtsSaveAndReconfigure() {
-            var loader = settingsComp.createObject(root)
-            var page = loader.item
-            verify(page !== null, "SettingsPage 应能加载（含 TTS 配置区）")
-            var layout = page.settingsLayout     // ColumnLayout（C4 起包于 ScrollView，经句柄访问）
-            // B5 设置页分组卡片化后；D3 起返回按钮移出 ScrollView 固定顶部：
-            // children[0]=外观卡 [1]=语言卡 [2]=朗读(TTS)卡 [3]=阅读背景卡
-            // [4]=同步卡 [5]=统计卡 [6]=版本标签
-            // （提示 Timer 是非可视 data 子项，不计入 children）；
-            // 卡内 ColumnLayout（card.children[0]）：0=标题 1=引擎行 2=OpenAI配置 3=保存/试音行
-            var ttsCard = layout.children[2]     // 朗读(TTS) 分区卡片
-            verify(ttsCard !== undefined, "TTS 分区卡片应存在")
-            var ttsBody = ttsCard.children[0]    // 卡内 ColumnLayout
-            // C5：Kindle 风格分组标题——小字（13px）灰、非加粗、底部细分隔线
-            // （分隔线经 Label.background，不进入 body children，卡内索引不受影响）
-            var titleLabel = ttsBody.children[0]
-            verify(titleLabel !== undefined, "分组标题应存在（body.children[0]）")
-            compare(titleLabel.font.pixelSize, 13, "分组标题应为 Kindle 小字 13px，实际 "
-                    + titleLabel.font.pixelSize)
-            verify(titleLabel.font.bold === false, "分组标题应非加粗")
-            verify(titleLabel.background !== null, "分组标题应有底部细分隔线（background）")
-            var engineRow = ttsBody.children[1]  // 引擎行
-            var engineBox = engineRow.children[1]
-            verify(engineBox !== undefined, "引擎 ComboBox 应存在")
-            compare(engineBox.currentIndex, 0, "默认引擎应为 system")
+            // 经真实 StackView 驱动子页导航（同 tst_syncpage/tst_statspage 模式）
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { width: 1100; height: 720 }",
+                root, "ttsStack")
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/SettingsPage.qml")
+            var page = stack.currentItem
+            verify(page !== null, "SettingsPage 应能加载（含 TTS 入口行）")
+            // U5 列表结构：settingsLayout 直接子项 = 7 行 + 版本标签（children[0..7]）
+            var layout = page.settingsLayout
+            var ttsRow = layout.children[2]     // 0=深色 1=语言 2=朗读(TTS) …
+            verify(ttsRow !== undefined, "TTS 列表行应存在")
+            compare(ttsRow.text, "朗读（TTS）", "TTS 行主文案")
+            compare(ttsRow.textLabel.font.pixelSize, 15, "列表项文字应为 fsListItem 15px（Kindle §7）")
+            verify(ttsRow.chevronIcon.visible, "进入子页的行应显示右箭头 chevron")
+            // 点击 TTS 行 → push SettingsTtsPage
+            page.ttsEntryButton.clicked()
+            var ttsPage = stack.currentItem
+            verify(ttsPage !== page, "点击 TTS 行应推入 TTS 子页")
+            compare(ttsPage.ttsEngineBox.currentIndex, 0, "默认引擎应为 system")
             // 切 OpenAI 并填参（假密钥：测试进程内存，不落源码/commit）
-            engineBox.currentIndex = 1
-            var openaiCol = ttsBody.children[2]
-            verify(openaiCol.visible, "OpenAI 配置区应展开")
-            openaiCol.children[0].children[1].text = "https://api.openai.com/v1"
-            openaiCol.children[1].children[1].text = "sk-test-fake-key"
-            openaiCol.children[2].children[1].text = "tts-1"
-            openaiCol.children[3].children[1].text = "nova"
-            openaiCol.children[4].children[1].text = "1.25"
-            page.saveTts()
+            ttsPage.ttsEngineBox.currentIndex = 1
+            ttsPage.ttsUrlField.text = "https://api.openai.com/v1"
+            ttsPage.ttsKeyField.text = "sk-test-fake-key"
+            ttsPage.ttsModelField.text = "tts-1"
+            ttsPage.ttsVoiceField.text = "nova"
+            ttsPage.ttsSpeedField.text = "1.25"
+            // U5：语速快速档位（KdSegmentedSlider）——选中 1.5 应回写字段
+            verify(ttsPage.rateSlider !== undefined, "语速分段滑块句柄应存在")
+            ttsPage.rateSlider.selectValue(1.5)
+            compare(ttsPage.ttsSpeedField.text, "1.5", "段选择应写入语速字段")
+            ttsPage.saveTts()
             compare(String(Settings.value("tts/engine")), "openai", "engine 应持久化")
             compare(String(Settings.value("tts/key")), "sk-test-fake-key", "key 应持久化到 settings.json")
+            compare(Number(Settings.value("tts/rate")), 1.5, "语速 1.5 应持久化")
             verify(Tts.engineAvailable, "reconfigure 后 openai（有 key）引擎应可用")
             // 再切回系统引擎：reconfigure 换 SystemTTSEngine（无系统语音的宿主上
             // 不可用属正常，仅在存在语音时断言可用）
-            engineBox.currentIndex = 0
-            page.saveTts()
+            ttsPage.ttsEngineBox.currentIndex = 0
+            ttsPage.saveTts()
             compare(String(Settings.value("tts/engine")), "system")
             if (Tts.voices.length > 0)
                 verify(Tts.engineAvailable, "有系统语音时引擎应可用")
-            loader.destroy()
+            // 子页返回：goBack/返回按钮 → pop 回设置页
+            ttsPage.backButton.clicked()
+            verify(stack.currentItem === page, "TTS 子页返回应 pop 回设置页")
+            stack.destroy()
         }
     }
 }

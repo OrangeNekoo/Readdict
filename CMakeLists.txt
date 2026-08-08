@@ -76,6 +76,10 @@ qt_add_qml_module(Readdict
         src/ui/qml/KdTabBar.qml
         src/ui/qml/KdBottomNav.qml
         src/ui/qml/KdIcons.qml
+        src/ui/qml/KdListItem.qml
+        src/ui/qml/KdRadioGrid.qml
+        src/ui/qml/KdSegmentedSlider.qml
+        src/ui/qml/KdToggle.qml
         src/ui/qml/KdBottomSheet.qml
         src/ui/qml/ThemeSheet.qml
         src/ui/qml/FontSheet.qml
@@ -84,6 +88,9 @@ qt_add_qml_module(Readdict
         src/ui/qml/ShelfPage.qml
         src/ui/qml/BookCard.qml
         src/ui/qml/SettingsPage.qml
+        src/ui/qml/SettingsLanguagePage.qml
+        src/ui/qml/SettingsTtsPage.qml
+        src/ui/qml/SettingsBackgroundPage.qml
         src/ui/qml/SyncPage.qml
         src/ui/qml/StatsPage.qml
         src/ui/qml/ReaderPage.qml

@@ -19,7 +19,8 @@ Item {
 
     Component { id: bgComp; Loader { source: "qrc:/qt/qml/Readdict/ui/qml/ReaderBackground.qml" } }
     Component { id: readerComp; Loader { source: "qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml" } }
-    Component { id: settingsComp; Loader { source: "qrc:/qt/qml/Readdict/ui/qml/SettingsPage.qml" } }
+    // U5：设置页背景配置迁入子页 SettingsBackgroundPage（KdRadioGrid 四态单选）
+    Component { id: bgSettingsComp; Loader { source: "qrc:/qt/qml/Readdict/ui/qml/SettingsBackgroundPage.qml" } }
 
     TestCase {
         id: testCase
@@ -271,42 +272,36 @@ Item {
         }
 
         function test_06_settingsPage() {
-            // 设置页：单选/滑条恢复 + 交互写 Settings + 越界钳制（不打开原生 FileDialog）
+            // 设置页背景配置（U5 迁入 SettingsBackgroundPage 子页）：KdRadioGrid
+            // 单选恢复 + 交互写 Settings + 越界钳制（不打开原生 FileDialog）。
+            // selectValue() 与单元格点击同路径（MouseArea.onClicked → selectValue）——
+            // 程序化 currentValue 赋值才不触发 selected（恢复路径，不写 Settings）。
             Settings.setValue("background/mode", "image")
             Settings.setValue("background/imagePath", "")
             Settings.setValue("background/blur", 0.6)
             Settings.setValue("background/brightness", 0.9)
-            var loader = settingsComp.createObject(root)
+            var loader = bgSettingsComp.createObject(root)
             loader.width = 1100; loader.height = 720
             var page = loader.item
-            verify(page !== null, "SettingsPage 应能加载")
-            // D3：返回按钮固定顶部后滚动内容下移，阅读背景卡在 720 高窗口内
-            // 需先滚入视口（mouseClick 要求目标落在窗口内；mapToItem 定位 +
-            // contentY 滚动，滚动量稳定可复现）
-            var fl = page.settingsScroll.contentItem
-            fl.contentY = Math.max(0, page.bgImageRadio.mapToItem(fl, 0, 0).y - 80)
-            wait(100)
-            verify(page.bgImageRadio.checked && !page.bgLightRadio.checked
-                   && !page.bgDarkRadio.checked && !page.bgPaperRadio.checked,
-                   "恢复后应恰好选中 image（其余未选）")
-            // E1：无 eink 单选句柄（四态单选）
-            verify(page.bgEinkRadio === undefined, "设置页不应再有 bgEinkRadio 句柄")
+            verify(page !== null, "SettingsBackgroundPage 应能加载")
+            verify(page.bgGrid !== undefined, "应暴露背景四态 KdRadioGrid 句柄")
+            compare(page.bgGrid.currentValue, "image", "恢复后应选中 image")
+            // E1：无 eink 句柄（四态单选）
+            verify(page.bgEinkRadio === undefined, "背景子页不应再有 bgEinkRadio 句柄")
             compare(page.bgBlurSlider.value, 0.6, "模糊滑条应恢复 0.6")
             compare(page.bgBrightnessSlider.value, 0.9, "亮度滑条应恢复 0.9")
-            // 单选切换用 mouseClick 模拟真实点击（程序化 checked=true 不触发 onToggled，Qt 6.11 实测）→ background/mode
-            mouseClick(page.bgLightRadio, page.bgLightRadio.width / 2, page.bgLightRadio.height / 2)
-            compare(Settings.value("background/mode"), "light", "点浅色应写 background/mode")
+            // 选浅色（selectValue 与点击同路径）→ background/mode
+            page.bgGrid.selectValue("light")
+            compare(Settings.value("background/mode"), "light", "选浅色应写 background/mode")
             // E1：旧值 eink → 归一 light（单选恰好选浅色）且回写 settings.json
             Settings.setValue("background/mode", "eink")
             loader.destroy()
-            loader = settingsComp.createObject(root)
+            loader = bgSettingsComp.createObject(root)
             loader.width = 1100; loader.height = 720
             page = loader.item
-            verify(page.bgLightRadio.checked && !page.bgDarkRadio.checked
-                   && !page.bgPaperRadio.checked && !page.bgImageRadio.checked,
-                   "旧 eink 值应归一为 light（恰好选中浅色）")
+            compare(page.bgGrid.currentValue, "light", "旧 eink 值应归一为 light（恰好选中浅色）")
             compare(Settings.value("background/mode"), "light", "归一应回写 background/mode")
-            mouseClick(page.bgImageRadio, page.bgImageRadio.width / 2, page.bgImageRadio.height / 2)
+            page.bgGrid.selectValue("image")
             compare(Settings.value("background/mode"), "image")
             // 滑条值变更（onValueChanged 经 setBgBlur/setBgBrightness）→ 持久化 + 钳制
             page.bgBlurSlider.value = 0.8
@@ -328,7 +323,7 @@ Item {
             verify(dest.length > 0, "导入成功应写 imagePath")
             verify(dest.indexOf("backgrounds") >= 0, "imagePath 应位于 backgrounds/：" + dest)
             compare(Settings.value("background/mode"), "image", "导入成功应写 mode=image")
-            verify(page.bgImageRadio.checked, "导入成功应选中自定义图片")
+            compare(page.bgGrid.currentValue, "image", "导入成功应选中自定义图片")
             loader.destroy()
         }
 
@@ -337,10 +332,10 @@ Item {
             // MultiEffect 模糊/亮度随滑条与页面属性实时联动（与 ReaderBackground 同换算）
             Settings.setValue("background/mode", "light")
             Settings.setValue("background/imagePath", "")
-            var loader = settingsComp.createObject(root)
+            var loader = bgSettingsComp.createObject(root)
             loader.width = 1100; loader.height = 720
             var page = loader.item
-            verify(page !== null, "SettingsPage 应能加载")
+            verify(page !== null, "SettingsBackgroundPage 应能加载")
             verify(page.bgThumb !== undefined, "缩略图容器句柄应存在")
             verify(!page.bgThumb.visible, "未选图时缩略图应隐藏")
             // 选图（真实图片）→ 缩略图可见、图片就绪后效果层显示
@@ -366,7 +361,7 @@ Item {
             // 清空路径后重启（启动恢复路径）→ 缩略图隐藏
             Settings.setValue("background/imagePath", "")
             loader.destroy()
-            loader = settingsComp.createObject(root)
+            loader = bgSettingsComp.createObject(root)
             loader.width = 1100; loader.height = 720
             page = loader.item
             verify(!page.bgThumb.visible, "无图路径恢复后缩略图应隐藏")
