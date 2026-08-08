@@ -36,6 +36,9 @@ Page {
     property alias ttsBar: ttsBar
     // C2：控制栏朗读按钮（冒烟测试经此点击启动朗读会话——TtsBar 门控后的唯一启动入口）
     property alias readAloudButton: controls.readAloudBtn
+    // D4：控制栏字体弹层句柄（冒烟经此打开弹层/驱动字体切换）
+    property alias fontPopup: controls.fontPopup
+    property alias fontList: controls.fontList
 
     ReaderBackground {
         anchors.fill: parent
@@ -205,6 +208,8 @@ Page {
             bgMode: page.bgMode
             fontSize: page.typography.fontSize ?? 18
             chapterProgress: page.chapterProgress
+            // D4：当前字族（存储 token）——打开弹层时经 onFontMenuOpenChanged 重读刷新
+            fontFamily: String(Settings.value("typography/fontFamily") || "思源宋体 VF")
             onPrevChapter: page.loadChapter(Books.currentChapter - 1)
             onNextChapter: page.loadChapter(Books.currentChapter + 1)
             onChangeFontSize: (size) => page.setFontSize(size)
@@ -217,6 +222,20 @@ Page {
             // C2：朗读入口——无会话/已暂停时启动（播放中忽略，TtsBar 已显示）；
             // Tts.play 对暂停态恢复、对空闲态开播，会话激活后 TtsBar 随门控显示
             onReadAloud: { if (Tts.state !== 1) Tts.play() }
+            // D4：字体切换——写 typography/fontFamily 并立即刷新排版（见 setFontFamily）
+            onSetFontFamily: (value) => page.setFontFamily(value)
+            // D4：弹层开合联动——打开时暂停控制栏 5s 自动隐藏（弹层是独立窗口，
+            // 其内点击不会重置页面 hideControlsTimer，不暂停会弹层开着控制栏就淡出）；
+            // 关闭且控制栏显示态时恢复计时。同时重读 Settings 刷新弹层高亮
+            //（Settings 无变更信号，靠打开时重读保证刚切换过的字体仍高亮正确）。
+            onFontMenuOpenChanged: {
+                if (controls.fontMenuOpen) {
+                    hideControlsTimer.stop()
+                    controls.fontFamily = String(Settings.value("typography/fontFamily") || "思源宋体 VF")
+                } else if (page.controlsVisible) {
+                    hideControlsTimer.restart()
+                }
+            }
         }
     }
 
@@ -518,6 +537,15 @@ Page {
     function setFontSize(size) {
         size = Math.max(12, Math.min(32, size))
         Settings.setValue("typography/fontSize", size)
+        page.typography = page.typographyFromSettings()
+    }
+
+    // D4：正文字体切换——写 typography/fontFamily（存储 token，Books.resolveFontFamily
+    // 在 typographyFromSettings 内映射到已安装字族）。Settings 无变更信号，与
+    // setFontSize 同模式：写后重组合 typography 属性 → ReaderContent 的
+    // font.family 绑定即时重渲染，无需重开阅读页。
+    function setFontFamily(family) {
+        Settings.setValue("typography/fontFamily", family)
         page.typography = page.typographyFromSettings()
     }
 

@@ -26,8 +26,18 @@ Rectangle {
     // C2：朗读入口——TtsBar 门控后默认隐藏，朗读只能从控制栏启动；
     // ReaderPage 接住：无会话/暂停时 Tts.play()（TtsBar 随 state 门控显示）
     signal readAloud()
+    // D4：正文字体选择——ReaderPage 接住写 typography/fontFamily 并刷新排版
+    signal setFontFamily(string family)
     // C2：朗读按钮句柄（ReaderPage 冒烟测试经此点击；同一文档内 alias，供外部实例访问）
     property alias readAloudBtn: readBtn
+    // D4：当前字族存储 token（ReaderPage 注入 Settings 值，驱动弹层高亮当前项）
+    property string fontFamily: ""
+    // D4：字体弹层开合状态——ReaderPage 暂停控制栏 5s 自动隐藏（弹层是独立窗口，
+    // 其内点击不会重置页面计时器，不暂停会弹层开着控制栏就淡出）
+    property bool fontMenuOpen: fontPopup.opened
+    // D4：测试句柄（QML 冒烟经此打开弹层/驱动选择）
+    property alias fontPopup: fontPopup
+    property alias fontList: fontPopupList
 
     // C5：46px 细条（与 TtsBar 同高、比旧 52px 更 Kindle）；ReaderPage 的
     // controlsHost 同高，tst_readerpage 几何断言同步（52→46）。
@@ -91,6 +101,50 @@ Rectangle {
             id: readBtn
             iconChar: "▶"; lbl: qsTr("朗读"); tip: qsTr("开始朗读")
             onClicked: controls.readAloud()
+        }
+        // D4：正文字体（行尾追加 children[13]，保持既有 0..12 索引不变——ControlsSmoke 依赖）
+        CtlBtn {
+            iconChar: "Aa"; lbl: qsTr("字体"); tip: qsTr("选择正文字体")
+            onClicked: fontPopup.open()
+        }
+    }
+
+    // D4：字体选择弹层——非模态 Popup 位于控制栏上方；数据源 fontListModel 的 value
+    // 为存储 token（与 Books.resolveFontFamily 映射链一致，见 D4 扩展），text 为显示名
+    //（可翻译；en/zh_TW 的译文不改变 token，避免破坏族名匹配——沿用旧设置页决策）。
+    // E3 上拉框统一前先用简单弹层（本任务优先完成功能，样式整合留给 E3）。
+    // Popup 不是 Item，不进入 controls.children（进度细条 children[2] 索引不受影响）。
+    property var fontListModel: [
+        { text: qsTr("思源宋体 VF"), value: "思源宋体 VF" },
+        { text: qsTr("思源黑体 VF"), value: "思源黑体 VF" },
+        { text: qsTr("思源黑体 HW VF"), value: "SourceHanSansHW-VF" },
+        { text: qsTr("得意黑"), value: "得意黑" }
+    ]
+    Popup {
+        id: fontPopup
+        parent: controls
+        x: Math.max(4, controls.width - fontPopup.width - 8)
+        y: -fontPopup.height - 10
+        width: 190
+        padding: 4
+        closePolicy: Popup.CloseOnPressOutside | Popup.CloseOnEscape
+        contentItem: ListView {
+            id: fontPopupList
+            width: fontPopup.availableWidth
+            implicitHeight: fontPopupList.count * 40 + 8
+            clip: true
+            model: controls.fontListModel
+            delegate: ItemDelegate {
+                width: ListView.view.width
+                height: 40
+                text: modelData.text
+                highlighted: modelData.value === controls.fontFamily
+                onClicked: {
+                    controls.setFontFamily(modelData.value)
+                    fontPopup.close()
+                }
+            }
+            ScrollBar.vertical: ScrollBar {}
         }
     }
 

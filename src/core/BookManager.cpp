@@ -435,6 +435,26 @@ void BookManager::setCurrentChapter(int index) {
 
 QString BookManager::resolveFontFamily(const QString &preferred) const {
     if (preferred.isEmpty() || QFontDatabase::hasFamily(preferred)) return preferred;
+    // D4：得意黑——name 表无中文族名，CoreText 只暴露 "Smiley Sans"；
+    // 按 token（得意黑/Smiley*）直接映射，避免落入系统字体兜底
+    if (preferred.contains(QStringLiteral("得意"))
+        || preferred.contains(QStringLiteral("Smiley"), Qt::CaseInsensitive)) {
+        if (QFontDatabase::hasFamily(QStringLiteral("Smiley Sans")))
+            return QStringLiteral("Smiley Sans");
+        return preferred;
+    }
+    // D4：思源黑体 HW VF——半宽字形变体，独立字族 "Source Han Sans HW VF"；
+    // 须在通用无衬线链之前命中，否则 HW token 会静默回退到非 HW 黑体（字形差异丢失）
+    if (preferred.contains(QStringLiteral("HW"), Qt::CaseInsensitive)) {
+        const QStringList hw = {
+            QStringLiteral("Source Han Sans HW VF"),
+            QStringLiteral("Source Han Sans HW SC VF"),
+            QStringLiteral("Source Han Sans HW K VF"),
+        };
+        for (const QString &f : hw)
+            if (QFontDatabase::hasFamily(f)) return f;
+        // 未命中 HW 族 → 回落通用无衬线链（保底渲染）
+    }
     // 思源 VF 字族在 CoreText 下可能只暴露英文族名（name 表含 "Source Han Sans VF" 等），
     // 按首选字体（衬线宋体 / 无衬线黑体）选择对应回退链；全部未命中则返回首选值
     // 交给 Qt 系统字体兜底。C5：默认字体为思源宋体 VF，衬线链不回退到黑体（避免

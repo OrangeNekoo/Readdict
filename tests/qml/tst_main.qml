@@ -310,7 +310,8 @@ Item {
             ctl.fontSize = 18
             var got = -1
             ctl.changeFontSize.connect(function (s) { got = s })
-            // RowLayout 子项顺序：0上一章 1目录 2spacer 3A− 4字号label 5A+ 6背景 7对齐 8页宽 9下一章
+            // RowLayout 子项顺序：0上一章 1目录 2spacer 3A− 4字号label 5A+ 6背景 7对齐
+            // 8页宽 9下一章 10笔记 11搜索 12朗读 13字体（D4 追加行尾，0..12 索引不变）
             var layout = ctl.children[1]
             var btnAplus = layout.children[5]
             btnAplus.clicked()
@@ -338,6 +339,95 @@ Item {
             compare(fill.width, 0, "进度 0 时细条填充应为 0")
             ctl.chapterProgress = 1.25
             compare(fill.width, 200, "进度超 1 应钳制到全宽，实际 " + fill.width)
+            loader.destroy()
+        }
+    }
+    TestCase {
+        name: "FontPickerSmoke"
+        // D4：字体切换移入阅读界面——控制栏字体按钮（行尾 children[13]）+ 弹层 4 项
+        //（宋体/黑体/HW/得意黑，value 为存储 token）；阅读页内选择即时生效
+        //（Settings/typography/正文 font.family 同步）；设置页外观卡不再有字体项。
+        function test_controlsFontButton() {
+            var loader = controlsComp.createObject(root)
+            var ctl = loader.item
+            verify(ctl !== null, "ReaderControls 应能加载")
+            ctl.fontSize = 18
+            ctl.fontFamily = "思源宋体 VF"
+            var layout = ctl.children[1]
+            var fontBtn = layout.children[13]
+            verify(fontBtn !== undefined, "字体按钮应存在（children[13]）")
+            var got = []
+            ctl.setFontFamily.connect(function (v) { got.push(v) })
+            fontBtn.clicked()
+            tryVerify(function () { return ctl.fontPopup.visible }, 2000,
+                      "点击字体按钮应打开弹层")
+            var list = ctl.fontList
+            verify(list !== undefined, "字体列表应暴露句柄")
+            compare(list.count, 4, "字体列表应为 4 项（宋体/黑体/HW/得意黑）")
+            compare(list.model[0].value, "思源宋体 VF")
+            compare(list.model[1].value, "思源黑体 VF")
+            compare(list.model[2].value, "SourceHanSansHW-VF")
+            compare(list.model[3].value, "得意黑")
+            // 选择第 3 项（HW）→ 发 setFontFamily(token) 并关闭弹层
+            tryVerify(function () { return list.itemAtIndex(2) !== null }, 2000,
+                      "弹层委托应就绪")
+            list.itemAtIndex(2).clicked()
+            compare(got.join(","), "SourceHanSansHW-VF", "选择应发 setFontFamily(token)")
+            tryVerify(function () { return !ctl.fontPopup.visible }, 2000,
+                      "选择后弹层应关闭")
+            // 当前项高亮：fontFamily 与列表 value 匹配
+            ctl.fontFamily = "得意黑"
+            tryVerify(function () { return list.itemAtIndex(3).highlighted }, 2000,
+                      "当前字体项应高亮")
+            loader.destroy()
+        }
+        // 阅读页内切换 4 字体即时生效：写 Settings → 重组合 typography → 正文 font.family
+        function test_readerFontSwitchApplies() {
+            var book = null
+            for (let b of Books.booksModel)
+                if ((b.format || "").toUpperCase() === "TXT") { book = b; break }
+            if (!book)
+                skip("书库无 TXT 书，跳过阅读页字体切换验证")
+            var loader = readerComp.createObject(root)
+            var page = loader.item
+            verify(page !== null, "ReaderPage 应能加载")
+            page.book = book
+            page.loadChapter(0)
+            tryVerify(function () { return page.contentView.paragraphRepeater.itemAt(0) !== null }, 3000,
+                      "首段应渲染完成")
+            var tokens = ["思源宋体 VF", "思源黑体 VF", "SourceHanSansHW-VF", "得意黑"]
+            for (var i = 0; i < tokens.length; ++i) {
+                page.fontPopup.open()
+                tryVerify(function () { return page.fontPopup.visible }, 2000, "弹层应打开")
+                tryVerify(function () { return page.fontList.itemAtIndex(i) !== null }, 2000,
+                          "委托应就绪")
+                page.fontList.itemAtIndex(i).clicked()
+                compare(String(Settings.value("typography/fontFamily")), tokens[i],
+                        "选择后 typography/fontFamily 应写入存储 token（第 " + i + " 项）")
+                compare(page.typography.fontFamily, Books.resolveFontFamily(tokens[i]),
+                        "阅读页 typography.fontFamily 应为解析后的字族（第 " + i + " 项）")
+                tryVerify(function () {
+                    var edit = page.contentView.paragraphRepeater.itemAt(0).children[0]
+                    return edit !== null && edit.font.family === page.typography.fontFamily
+                }, 2000, "正文段 font.family 应绑定 typography.fontFamily（第 " + i + " 项）")
+            }
+            // 恢复默认字体，避免影响后续用例（共享 Settings 单例）
+            Settings.setValue("typography/fontFamily", "思源宋体 VF")
+            loader.destroy()
+        }
+        // D4：设置页外观卡字体项已移除（避免与阅读界面双入口）
+        function test_settingsPageNoFontEntry() {
+            var loader = settingsComp.createObject(root)
+            var page = loader.item
+            verify(page !== null, "SettingsPage 应能加载")
+            verify(page.fontBox === undefined, "设置页不应再暴露字体下拉句柄（已移入阅读界面）")
+            // 外观卡 body：0=标题 1=深色模式 2=刷新封面（字体行移除后恰 3 子项）
+            var appearance = page.settingsLayout.children[0]
+            verify(appearance !== undefined, "外观卡应存在")
+            var body = appearance.children[0]
+            compare(body.children.length, 3,
+                    "外观卡应仅剩标题/深色模式/刷新封面（字体行移除后），实际 "
+                    + body.children.length)
             loader.destroy()
         }
     }

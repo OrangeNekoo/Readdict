@@ -2,6 +2,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QSet>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -222,6 +223,47 @@ private slots:
         for (int i = 0; i < titles.size(); ++i)
             QCOMPARE(m_mgr->loadChapter(id, i).toMap().value("title").toString(),
                      titles.at(i).toString());
+    }
+    void resolvesAllBundledFonts() {
+        // D4：加载 bundled 字体后，resolveFontFamily 应把 4 个存储 token 映射到实际字族：
+        // 宋体/黑体走英文族名回退链、HW 变体命中独立字族、得意黑映射 Smiley Sans。
+        // 测试 cwd 为 build/tests（ctest 默认），../../fronts 即仓库字体目录；
+        // 从仓库根手动运行则 fronts/ 命中（双候选互备）。
+        const QStringList rels = {
+            QStringLiteral("02_SourceHanSans-VF/02_SourceHanSans-VF/Variable/SourceHanSans-VF.otf.ttc"),
+            QStringLiteral("02_SourceHanSans-VF/02_SourceHanSans-VF/Variable/SourceHanSansHW-VF.otf.ttc"),
+            QStringLiteral("02_SourceHanSerif-VF/02_SourceHanSerif-VF/Variable/SourceHanSerif-VF.otf.ttc"),
+            QStringLiteral("smiley-sans-v2.0.1/SmileySans-Oblique.otf"),
+        };
+        QString base = QDir::current().filePath(QStringLiteral("fronts"));
+        if (!QDir(base).exists()) base = QDir::current().filePath(QStringLiteral("../../fronts"));
+        if (!QDir(base).exists())
+            QSKIP("未找到仓库 fronts 字体目录（cwd=" + QDir::current().path().toUtf8() + "），跳过字体映射验证");
+        int loaded = 0;
+        for (const QString &rel : rels) {
+            if (QFontDatabase::addApplicationFont(base + "/" + rel) >= 0)
+                ++loaded;
+        }
+        if (loaded < 4)
+            QSKIP("bundled 字体加载不完整，跳过字体映射验证");
+        // 4 族实际字族名都应在（CoreText 只暴露英文族名）
+        QVERIFY(QFontDatabase::hasFamily(QStringLiteral("Source Han Serif VF")));
+        QVERIFY(QFontDatabase::hasFamily(QStringLiteral("Source Han Sans VF")));
+        QVERIFY(QFontDatabase::hasFamily(QStringLiteral("Source Han Sans HW VF")));
+        QVERIFY(QFontDatabase::hasFamily(QStringLiteral("Smiley Sans")));
+        // 中文族名可能直接命中（系统已装同名族）——命中时返回首选值，否则回退英文族名
+        const QString serif = QFontDatabase::hasFamily(QStringLiteral("思源宋体 VF"))
+            ? QStringLiteral("思源宋体 VF") : QStringLiteral("Source Han Serif VF");
+        const QString sans = QFontDatabase::hasFamily(QStringLiteral("思源黑体 VF"))
+            ? QStringLiteral("思源黑体 VF") : QStringLiteral("Source Han Sans VF");
+        const QString smiley = QFontDatabase::hasFamily(QStringLiteral("得意黑"))
+            ? QStringLiteral("得意黑") : QStringLiteral("Smiley Sans");
+        QCOMPARE(m_mgr->resolveFontFamily(QStringLiteral("思源宋体 VF")), serif);
+        QCOMPARE(m_mgr->resolveFontFamily(QStringLiteral("思源黑体 VF")), sans);
+        // HW 变体：独立字族优先于通用无衬线链（旧实现会静默回退成非 HW 黑体）
+        QCOMPARE(m_mgr->resolveFontFamily(QStringLiteral("SourceHanSansHW-VF")),
+                 QStringLiteral("Source Han Sans HW VF"));
+        QCOMPARE(m_mgr->resolveFontFamily(QStringLiteral("得意黑")), smiley);
     }
 private:
     std::unique_ptr<QTemporaryDir> m_tmp;

@@ -145,29 +145,9 @@ Page {
                     }
                 }
             }
-            // C5：正文字体——Kindle 默认衬线感：思源宋体（衬线）/ 思源黑体（无衬线）
-            // 切换。写 typography/fontFamily（ReaderPage 打开时经 typographyFromSettings
-            // 读取，同其他排版设置模式）；显示名与存储值分离（存储值即字族名，
-            // 不做翻译，避免译文破坏 Books.resolveFontFamily 的族名匹配）。
-            RowLayout {
-                Label { text: qsTr("字体") }
-                ComboBox {
-                    id: fontBox
-                    Layout.fillWidth: true
-                    textRole: "text"
-                    model: [
-                        { text: qsTr("思源宋体（衬线）"), value: "思源宋体 VF" },
-                        { text: qsTr("思源黑体（无衬线）"), value: "思源黑体 VF" }
-                    ]
-                    Component.onCompleted: {
-                        const cur = String(Settings.value("typography/fontFamily") || "思源宋体 VF")
-                        currentIndex = cur === "思源黑体 VF" ? 1 : 0
-                    }
-                    onActivated: (index) => {
-                        Settings.setValue("typography/fontFamily", model[index].value)
-                    }
-                }
-            }
+            // D4：正文字体选择已移入阅读界面（ReaderControls 字体按钮 + 弹层，4 族全量）。
+            // 设置页移除避免双入口——阅读页切换即时生效（setFontFamily 写后重组合
+            // typography 属性），设置页旧下拉只能影响下次打开，两者并存会令用户困惑。
             // B2：存量书籍封面刷新——EPUB/PDF 重提真实封面覆盖早期导入的占位。
             // 同步调用（逐本提取，大书库可能数百 ms～秒级，属一次性维护操作，可接受）。
             // 更新经 Importer.coversRefreshed → Books.booksChanged 使书架封面即时生效。
