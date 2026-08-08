@@ -33,6 +33,13 @@ Flickable {
     // B3：正文前景色——浅色/米白背景默认深字；深色背景由 ReaderPage 按 bgMode 传浅色。
     // TextEdit.color 作为 QTextDocument 默认前景色，h1-h6 等无显式色的富文本继承。
     property color textColor: "#212121"
+    // E4：翻页方式——"scroll"（竖滚连续，默认）/ "paged"（横翻整页，按视口高度切页）。
+    // 由 ReaderPage 从 Settings 的 reading/pageMode 读取注入；键盘方向键按此分流：
+    // scroll 模式 ↑↓ 滚动一视口页、←→ 翻章；paged 模式四个方向键都整页翻动。
+    property string pageMode: "scroll"
+    // E4：键盘翻页——上一章请求（scroll 模式 ←，ReaderPage 接 loadChapter(current-1)；
+    // loadChapter 内部钳制到 [0, len-1]，边界不越）
+    signal requestPrevChapter()
     // B10：滚动位置恢复——ReaderPage 打开时赋保存的 scrollY（>=0），内容高度就绪后应用；
     // 默认 -1 表示"本次打开无需恢复"，避免内容高度变化时反复设置。
     // 应用时机：内容高度**收敛**（200ms 无变化）后——含图片段章节的首趟高度在图片
@@ -88,6 +95,16 @@ Flickable {
     clip: true
     contentWidth: width
     contentHeight: col.implicitHeight
+    // E4：阅读页获得键盘焦点时方向键翻页——Flickable focus:true（点击段落 TextEdit
+    // 的 activeFocusOnPress:false 不抢焦点，焦点常驻正文区）；Keys 委托 handleKey
+    //（冒烟测试经同一函数注入按键，避免 quicktest harness 合成键盘事件不可靠）。
+    // 修饰键不拦截（Ctrl/Cmd 快捷键、Shift 选择语义保留）；弹层/Dialog 打开时
+    // 焦点在弹层内，正文 Keys 不生效（不干扰输入框）。
+    focus: true
+    Keys.onPressed: (event) => {
+        if (flick.handleKey(event.key, event.modifiers))
+            event.accepted = true
+    }
 
     // 翻章回到顶部：不继承上一章的滚动偏移（否则新章内容矮时被 Flickable 钳制到中间）；
     // 同时取消未应用的恢复——restoreScrollY 属于打开时的章节，收敛窗口内翻章时若继续
@@ -127,8 +144,12 @@ Flickable {
     }
 
     function checkAutoNext() {
+        // E4：paged 模式不走滚动临近自动续章——翻到章末页只是"看到最后一页"，
+        // 再次翻页（pageNext 目标 == 当前 → requestNextChapter）才进入下一章，
+        // 与真实书籍"读完末页再翻"语义一致；scroll 模式保持原行为。
+        if (flick.pageMode === "paged") return
         if (flick.nextChapterRequested || flick.restorePending || flick.restoreApplied
-                || flick.ttsActive || followAnim.running
+                || flick.ttsActive || followAnim.running || pageAnim.running
                 || flick.contentHeight <= 0 || flick.height <= 0)
             return
         // 可滚动范围必须大于阈值带：maxY <= autoNextThreshold 的短章（内容仅超出视口
@@ -224,6 +245,98 @@ Flickable {
         followAnim.to = Math.max(0, Math.min(targetY, maxY))
         followAnim.start()
     }
+
+    // ---- E4：方向键翻页 + 横向翻页模式 ----
+    // 统一按键入口（Keys.onPressed 与冒烟测试共用；测试经 handleKey 注入，
+    // 避免 quicktest harness 合成键盘事件不可靠——同 C7 选择注入取舍）。
+    // 修饰键不拦截（Ctrl/Cmd/Shift 组合留给系统与文本选择）；弹层/Dialog
+    // 打开时焦点在弹层内，本组件 Keys 不触发（不干扰输入框）。
+    // scroll 模式：↑↓/PageUp/PageDown 滚动一视口页，←/→ 翻章；
+    // paged 模式：四向 + PageUp/PageDown 均按视口高度整页翻动（←/→ 翻页而非翻章）。
+    function handleKey(key, modifiers) {
+        if (modifiers !== Qt.NoModifier) return false
+        if (flick.pageMode === "paged") {
+            switch (key) {
+            case Qt.Key_Up: case Qt.Key_PageUp: case Qt.Key_Left:
+                flick.pagePrev(); return true
+            case Qt.Key_Down: case Qt.Key_PageDown: case Qt.Key_Right:
+                flick.pageNext(); return true
+            }
+            return false
+        }
+        switch (key) {
+        case Qt.Key_Up: case Qt.Key_PageUp:
+            flick.scrollPage(-1); return true
+        case Qt.Key_Down: case Qt.Key_PageDown:
+            flick.scrollPage(1); return true
+        case Qt.Key_Left:
+            flick.requestPrevChapter(); return true
+        case Qt.Key_Right:
+            flick.requestNextChapter(); return true
+        }
+        return false
+    }
+
+    // scroll 模式：滚动一视口页（± 视口高度，钳制到 [0, maxY]）
+    function scrollPage(dir) {
+        if (flick.contentHeight <= 0 || flick.height <= 0) return
+        var maxY = Math.max(0, flick.contentHeight - flick.height)
+        var target = Math.max(0, Math.min(flick.contentY + dir * flick.height, maxY))
+        if (Math.abs(target - flick.contentY) < 1) return
+        pageAnim.stop()
+        flick.checkNextOnStop = true
+        pageAnim.to = target
+        pageAnim.start()
+    }
+
+    // paged 模式：上一页——按视口高度整页回退（页边界定位：目标 = (当前页-1)*页高）
+    function pagePrev() {
+        if (flick.contentHeight <= 0 || flick.height <= 0) return
+        var maxY = Math.max(0, flick.contentHeight - flick.height)
+        var pageH = Math.max(1, flick.height)
+        var pageIdx = Math.floor(flick.contentY / pageH)
+        var target = Math.max(0, (pageIdx - 1) * pageH)
+        if (Math.abs(target - flick.contentY) < 1) return
+        pageAnim.stop()
+        pageAnim.to = target
+        pageAnim.start()
+    }
+
+    // paged 模式：下一页——整页前进；已到最后一页（目标 == 当前）时翻页语义
+    // 变为翻章（requestNextChapter → ReaderPage.autoNextChapter 兜底末章不换），
+    // 与"翻过章末进入下一章"的真实书籍语义一致；短章（一页放得下）同样触发。
+    function pageNext() {
+        if (flick.contentHeight <= 0 || flick.height <= 0) return
+        var maxY = Math.max(0, flick.contentHeight - flick.height)
+        var pageH = Math.max(1, flick.height)
+        var pageIdx = Math.floor(flick.contentY / pageH)
+        var target = Math.min((pageIdx + 1) * pageH, maxY)
+        if (Math.abs(target - flick.contentY) < 1) {
+            flick.requestNextChapter()
+            return
+        }
+        pageAnim.stop()
+        flick.checkNextOnStop = true
+        pageAnim.to = target
+        pageAnim.start()
+    }
+
+    // paged 模式：拖拽/惯性滚动结束后吸附到最近页边界（视口高度粒度）。
+    // 键盘翻页走 pagePrev/pageNext 已按边界定位，无需吸附；滚动恢复/搜索跳转
+    // 程序化设 contentY 不触发 movementEnded，不会在恢复窗口内被吸附拽走。
+    function snapToPage() {
+        if (flick.pageMode !== "paged") return
+        if (flick.restorePending || flick.restoreApplied || flick.ttsActive) return
+        if (flick.contentHeight <= 0 || flick.height <= 0) return
+        var maxY = Math.max(0, flick.contentHeight - flick.height)
+        var pageH = Math.max(1, flick.height)
+        var nearest = Math.max(0, Math.min(Math.round(flick.contentY / pageH) * pageH, maxY))
+        if (Math.abs(nearest - flick.contentY) < 1) return
+        pageAnim.stop()
+        pageAnim.to = nearest
+        pageAnim.start()
+    }
+    onMovementEnded: if (flick.pageMode === "paged") flick.snapToPage()
 
     // ---- C7：划线查表 ----
     // 从划线列表重建 "chapter|sentenceIndex" → 划线 map（供渲染与查重用）
@@ -372,6 +485,29 @@ Flickable {
         property: "contentY"
         duration: 320
         easing.type: Easing.OutCubic
+    }
+
+    // E4：按键翻页/横翻吸附专用动画（与 followAnim 分离：TTS 跟随/搜索跳转走
+    // followAnim，不受翻页动画 onStopped 检查干扰）。
+    // onStopped 兜底自动续章：动画期间的 onContentYChanged 被 pageAnim.running
+    // 守卫跳过，动画结束后 contentY 不再变化——scroll 模式 PageDown 到底/横翻
+    // 落到章末页若不在此补查，将不再触发自动续章（与拖拽滚动接近章末自动续章
+    // 保持同语义）。checkNextOnStop 标志区分自然结束与中途 stop（连按翻页时
+    // stop() 也会触发 onStopped，必须消费标志避免连按中途误判章末）。
+    property bool checkNextOnStop: false
+    NumberAnimation {
+        id: pageAnim
+        target: flick
+        property: "contentY"
+        duration: 300
+        easing.type: Easing.OutCubic
+        onStopped: {
+            if (flick.checkNextOnStop) {
+                flick.checkNextOnStop = false
+                if (flick.pageMode === "scroll")
+                    flick.checkAutoNext()
+            }
+        }
     }
 
     // C5：正文列 Kindle 化——页宽系数外再设**档位相关**上限：宽窗口下正文列不再无限

@@ -25,6 +25,9 @@ Page {
     property alias bgThumb: bgThumb
     property alias bgThumbImg: bgThumbImg
     property alias bgThumbFx: bgThumbFx
+    // E4：翻页方式单选测试句柄（QML 冒烟经此驱动 reading/pageMode 持久化）
+    property alias pageModeScrollRadio: pageModeScrollRadio
+    property alias pageModePagedRadio: pageModePagedRadio
     // D6：语言下拉测试句柄（QML 冒烟经此驱动三语切换）
     property alias languageBox: languageBox
     // B2：封面刷新按钮/提示测试句柄（QML 冒烟经此触发 refreshCovers 数据流）
@@ -422,6 +425,25 @@ Page {
                     horizontalAlignment: Text.AlignRight
                 }
             }
+            // E4：翻页方式——竖滚连续（scroll，默认）/ 整页翻动（paged，按视口高度切页）。
+            // 持久化 reading/pageMode；ReaderPage 打开时读取。单选互斥同背景模式模式；
+            // 冒烟测试句柄 pageModeScrollRadio/pageModePagedRadio（同 bgLightRadio 模式）。
+            RowLayout {
+                Label { text: qsTr("翻页方式") }
+                RadioButton {
+                    id: pageModeScrollRadio
+                    text: qsTr("连续滚动")
+                    ButtonGroup.group: pageModeGroup
+                    onToggled: if (checked) Settings.setValue("reading/pageMode", "scroll")
+                }
+                RadioButton {
+                    id: pageModePagedRadio
+                    text: qsTr("整页翻动")
+                    ButtonGroup.group: pageModeGroup
+                    onToggled: if (checked) Settings.setValue("reading/pageMode", "paged")
+                }
+                ButtonGroup { id: pageModeGroup }
+            }
             Label {
                 id: bgErrorText
                 text: ""
@@ -531,6 +553,11 @@ Page {
         page.bgBlur = Math.max(0, Math.min(1, blur))
         const bright = Number(Settings.value("background/brightness")) || 1.0
         page.bgBrightness = Math.max(0.5, Math.min(1.5, bright))
+        // E4：翻页方式——reading/pageMode 白名单归一后选中对应单选
+        //（程序化 checked=true 不触发 onToggled，不会回写 Settings，同背景模式恢复）
+        pageModeScrollRadio.checked = true
+        if (Settings.value("reading/pageMode") === "paged")
+            pageModePagedRadio.checked = true
     }
     Component.onCompleted: page.restoreBackground()
 }

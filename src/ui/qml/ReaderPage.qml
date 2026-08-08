@@ -10,6 +10,10 @@ import Readdict.Backend
 // 章节进度经 Books.currentChapter 持久化到 settings.json 的 progress/<bookId>。
 Page {
     id: page
+    // E4：阅读页获得键盘焦点——StackView push 时焦点随 currentItem 交给本页，
+    // 页内 focus:true 的 ReaderContent（Flickable）获得 activeFocus 接收方向键；
+    // 弹层/Dialog 打开时焦点在弹层内，正文 Keys 不触发（不干扰输入框）。
+    focus: true
     property var book: ({})
     property var chapter: ({})
     property var typography: ({})
@@ -17,6 +21,10 @@ Page {
     property string bgImagePath: ""          // background/imagePath（图片背景）
     property real bgBlur: 0.0                // background/blur（0..1）
     property real bgBrightness: 1.0          // background/brightness（0.5..1.5）
+    // E4：翻页方式——"scroll"（竖滚连续，默认）/ "paged"（横翻整页）。
+    // 由 Settings 的 reading/pageMode 读取（onCompleted），注入 ReaderContent
+    // 驱动方向键分流与页边界吸附；设置页"阅读背景"卡可切换（写 reading/pageMode）。
+    property string pageMode: "scroll"
     property var tocTitles: []
     // C7：本书全部划线（Highlights.highlightsForBook 结果，供渲染注入与笔记列表）
     property var highlights: []
@@ -114,8 +122,12 @@ Page {
         // C7：划线上下文——bookId 供 addHighlight，highlights 供逐句渲染查表
         bookId: (page.book && page.book.id) || -1
         highlights: page.highlights
+        // E4：翻页方式（方向键分流 + 页边界吸附）
+        pageMode: page.pageMode
         // 规格 §7：滚动接近章末 → 自动加载下一章（末章由 autoNextChapter 兜底不换）
         onRequestNextChapter: page.autoNextChapter()
+        // E4：方向键 ← 翻上一章（loadChapter 内部钳制到 [0, len-1]，边界不越）
+        onRequestPrevChapter: page.loadChapter(Books.currentChapter - 1)
     }
 
     // C2：朗读条门控——朗读会话激活（Tts.state != 0 播放/暂停）才显示，否则隐藏且正文
@@ -684,6 +696,8 @@ Page {
     // 注意：Timer.restart() 对停止态的计时器会重新启动（Qt 语义），隐藏态禁止
     // 调用——否则违反"隐藏后计时停止"；重置只发生在显示态。
     function handleContentTap(y) {
+        // E4：点击正文重新聚焦（弹层/控制栏按钮抢焦点后，方向键翻页随点击恢复）
+        content.forceActiveFocus()
         if (page.controlsVisible) {
             hideControlsTimer.restart()   // 显示态：任意轻点重置 5s 计时
         } else {
@@ -700,6 +714,9 @@ Page {
         hideControlsTimer.start()   // C3：初始可见 → 5s 无操作自动隐藏
         page.typography = page.typographyFromSettings()
         page.backgroundFromSettings()
+        // E4：翻页方式——reading/pageMode 白名单归一（非法值回退 scroll）
+        const pm = Settings.value("reading/pageMode")
+        page.pageMode = (pm === "paged") ? "paged" : "scroll"
         // 恢复：定位到保存的章节（progress/<bookId>），滚动偏移交给 ReaderContent
         // 在内容高度就绪后设置（progress/scroll_<bookId>）。
         // C8：全文搜索跳转打开时（initialChapter/initialParagraph >= 0）改用目标章节，
@@ -717,6 +734,10 @@ Page {
             page.reloadHighlights()   // C7：重新进入阅读页加载本书全部划线
             Books.startTracking(page.book.id)  // 阅读计时开始
         }
+        // E4：阅读页获得键盘焦点——Flickable focus:true 需要页内 activeFocus，
+        // 打开即聚焦正文（方向键立即可用）；点击正文（handleContentTap）同样
+        // 重新聚焦（弹层/按钮抢焦点后点击内容即恢复方向键）。
+        content.forceActiveFocus()
     }
 
     Component.onDestruction: {

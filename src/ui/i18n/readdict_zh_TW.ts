@@ -81,52 +81,52 @@
 <context>
     <name>ReaderContent</name>
     <message>
-        <location filename="../qml/ReaderContent.qml" line="70"/>
-        <location filename="../qml/ReaderContent.qml" line="70"/>
+        <location filename="../qml/ReaderContent.qml" line="77"/>
+        <location filename="../qml/ReaderContent.qml" line="77"/>
         <source>黄</source>
         <translation>黃</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderContent.qml" line="71"/>
-        <location filename="../qml/ReaderContent.qml" line="71"/>
+        <location filename="../qml/ReaderContent.qml" line="78"/>
+        <location filename="../qml/ReaderContent.qml" line="78"/>
         <source>绿</source>
         <translation>綠</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderContent.qml" line="72"/>
-        <location filename="../qml/ReaderContent.qml" line="72"/>
+        <location filename="../qml/ReaderContent.qml" line="79"/>
+        <location filename="../qml/ReaderContent.qml" line="79"/>
         <source>粉</source>
         <translation>粉</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderContent.qml" line="605"/>
-        <location filename="../qml/ReaderContent.qml" line="605"/>
+        <location filename="../qml/ReaderContent.qml" line="741"/>
+        <location filename="../qml/ReaderContent.qml" line="741"/>
         <source>复制</source>
         <translation>複製</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderContent.qml" line="613"/>
-        <location filename="../qml/ReaderContent.qml" line="613"/>
+        <location filename="../qml/ReaderContent.qml" line="749"/>
+        <location filename="../qml/ReaderContent.qml" line="749"/>
         <source>划线</source>
         <translation>劃線</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderContent.qml" line="617"/>
-        <location filename="../qml/ReaderContent.qml" line="661"/>
-        <location filename="../qml/ReaderContent.qml" line="617"/>
-        <location filename="../qml/ReaderContent.qml" line="661"/>
+        <location filename="../qml/ReaderContent.qml" line="753"/>
+        <location filename="../qml/ReaderContent.qml" line="797"/>
+        <location filename="../qml/ReaderContent.qml" line="753"/>
+        <location filename="../qml/ReaderContent.qml" line="797"/>
         <source>笔记</source>
         <translation>筆記</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderContent.qml" line="672"/>
-        <location filename="../qml/ReaderContent.qml" line="672"/>
+        <location filename="../qml/ReaderContent.qml" line="808"/>
+        <location filename="../qml/ReaderContent.qml" line="808"/>
         <source>为这条划线添加笔记：</source>
         <translation>為這條劃線新增筆記：</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderContent.qml" line="679"/>
-        <location filename="../qml/ReaderContent.qml" line="679"/>
+        <location filename="../qml/ReaderContent.qml" line="815"/>
+        <location filename="../qml/ReaderContent.qml" line="815"/>
         <source>写下你的想法…</source>
         <translation>寫下你的想法…</translation>
     </message>
@@ -322,32 +322,32 @@
         <translation>選擇正文字體</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderControls.qml" line="249"/>
-        <location filename="../qml/ReaderControls.qml" line="249"/>
+        <location filename="../qml/ReaderControls.qml" line="251"/>
+        <location filename="../qml/ReaderControls.qml" line="251"/>
         <source>自定义图片背景需先在设置页选择图片</source>
         <translation>自訂圖片背景需先在設定頁選擇圖片</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderControls.qml" line="278"/>
-        <location filename="../qml/ReaderControls.qml" line="278"/>
+        <location filename="../qml/ReaderControls.qml" line="280"/>
+        <location filename="../qml/ReaderControls.qml" line="280"/>
         <source>思源宋体 VF</source>
         <translation>思源宋體 VF</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderControls.qml" line="279"/>
-        <location filename="../qml/ReaderControls.qml" line="279"/>
+        <location filename="../qml/ReaderControls.qml" line="281"/>
+        <location filename="../qml/ReaderControls.qml" line="281"/>
         <source>思源黑体 VF</source>
         <translation>思源黑體 VF</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderControls.qml" line="280"/>
-        <location filename="../qml/ReaderControls.qml" line="280"/>
+        <location filename="../qml/ReaderControls.qml" line="282"/>
+        <location filename="../qml/ReaderControls.qml" line="282"/>
         <source>思源黑体 HW VF</source>
         <translation>思源黑體 HW VF</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderControls.qml" line="281"/>
-        <location filename="../qml/ReaderControls.qml" line="281"/>
+        <location filename="../qml/ReaderControls.qml" line="283"/>
+        <location filename="../qml/ReaderControls.qml" line="283"/>
         <source>得意黑</source>
         <translation>得意黑</translation>
     </message>
@@ -355,95 +355,95 @@
 <context>
     <name>ReaderPage</name>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="82"/>
-        <location filename="../qml/ReaderPage.qml" line="82"/>
+        <location filename="../qml/ReaderPage.qml" line="90"/>
+        <location filename="../qml/ReaderPage.qml" line="90"/>
         <source>返回</source>
         <translation>返回</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="289"/>
-        <location filename="../qml/ReaderPage.qml" line="289"/>
+        <location filename="../qml/ReaderPage.qml" line="301"/>
+        <location filename="../qml/ReaderPage.qml" line="301"/>
         <source>目录</source>
         <translation>目錄</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="319"/>
+        <location filename="../qml/ReaderPage.qml" line="331"/>
         <location filename="../../../tests/tst_language.cpp" line="26"/>
         <location filename="../../../tests/tst_language.cpp" line="45"/>
-        <location filename="../qml/ReaderPage.qml" line="319"/>
+        <location filename="../qml/ReaderPage.qml" line="331"/>
         <source>笔记</source>
         <translation>筆記</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="361"/>
-        <location filename="../qml/ReaderPage.qml" line="361"/>
+        <location filename="../qml/ReaderPage.qml" line="373"/>
+        <location filename="../qml/ReaderPage.qml" line="373"/>
         <source>笔记：</source>
         <translation>筆記：</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="361"/>
-        <location filename="../qml/ReaderPage.qml" line="361"/>
+        <location filename="../qml/ReaderPage.qml" line="373"/>
+        <location filename="../qml/ReaderPage.qml" line="373"/>
         <source>（无笔记）</source>
         <translation>（無筆記）</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="369"/>
-        <location filename="../qml/ReaderPage.qml" line="369"/>
+        <location filename="../qml/ReaderPage.qml" line="381"/>
+        <location filename="../qml/ReaderPage.qml" line="381"/>
         <source>跳转</source>
         <translation>跳轉</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="374"/>
-        <location filename="../qml/ReaderPage.qml" line="374"/>
+        <location filename="../qml/ReaderPage.qml" line="386"/>
+        <location filename="../qml/ReaderPage.qml" line="386"/>
         <source>编辑</source>
         <translation>編輯</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="383"/>
-        <location filename="../qml/ReaderPage.qml" line="383"/>
+        <location filename="../qml/ReaderPage.qml" line="395"/>
+        <location filename="../qml/ReaderPage.qml" line="395"/>
         <source>删除</source>
         <translation>刪除</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="398"/>
-        <location filename="../qml/ReaderPage.qml" line="398"/>
+        <location filename="../qml/ReaderPage.qml" line="410"/>
+        <location filename="../qml/ReaderPage.qml" line="410"/>
         <source>编辑笔记</source>
         <translation>編輯筆記</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="407"/>
-        <location filename="../qml/ReaderPage.qml" line="407"/>
+        <location filename="../qml/ReaderPage.qml" line="419"/>
+        <location filename="../qml/ReaderPage.qml" line="419"/>
         <source>修改这条划线的笔记：</source>
         <translation>修改這條劃線的筆記：</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="414"/>
-        <location filename="../qml/ReaderPage.qml" line="414"/>
+        <location filename="../qml/ReaderPage.qml" line="426"/>
+        <location filename="../qml/ReaderPage.qml" line="426"/>
         <source>写下你的想法…</source>
         <translation>寫下你的想法…</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="428"/>
+        <location filename="../qml/ReaderPage.qml" line="440"/>
         <location filename="../../../tests/tst_language.cpp" line="36"/>
-        <location filename="../qml/ReaderPage.qml" line="428"/>
+        <location filename="../qml/ReaderPage.qml" line="440"/>
         <source>书内搜索</source>
         <translation>書內搜尋</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="439"/>
-        <location filename="../qml/ReaderPage.qml" line="439"/>
+        <location filename="../qml/ReaderPage.qml" line="451"/>
+        <location filename="../qml/ReaderPage.qml" line="451"/>
         <source>输入关键词…</source>
         <translation>輸入關鍵字…</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="466"/>
-        <location filename="../qml/ReaderPage.qml" line="466"/>
+        <location filename="../qml/ReaderPage.qml" line="478"/>
+        <location filename="../qml/ReaderPage.qml" line="478"/>
         <source>无标题</source>
         <translation>無標題</translation>
     </message>
     <message>
-        <location filename="../qml/ReaderPage.qml" line="467"/>
-        <location filename="../qml/ReaderPage.qml" line="467"/>
+        <location filename="../qml/ReaderPage.qml" line="479"/>
+        <location filename="../qml/ReaderPage.qml" line="479"/>
         <source>第%1段</source>
         <translation>第%1段</translation>
     </message>
@@ -462,266 +462,284 @@
         <translation>設定</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="132"/>
-        <location filename="../qml/SettingsPage.qml" line="132"/>
+        <location filename="../qml/SettingsPage.qml" line="135"/>
+        <location filename="../qml/SettingsPage.qml" line="135"/>
         <source>外观</source>
         <translation>外觀</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="134"/>
-        <location filename="../qml/SettingsPage.qml" line="134"/>
+        <location filename="../qml/SettingsPage.qml" line="137"/>
+        <location filename="../qml/SettingsPage.qml" line="137"/>
         <source>深色模式</source>
         <translation>深色模式</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="137"/>
-        <location filename="../qml/SettingsPage.qml" line="137"/>
+        <location filename="../qml/SettingsPage.qml" line="140"/>
+        <location filename="../qml/SettingsPage.qml" line="140"/>
         <source>跟随系统</source>
         <translation>跟隨系統</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="137"/>
-        <location filename="../qml/SettingsPage.qml" line="310"/>
-        <location filename="../qml/SettingsPage.qml" line="137"/>
-        <location filename="../qml/SettingsPage.qml" line="310"/>
+        <location filename="../qml/SettingsPage.qml" line="140"/>
+        <location filename="../qml/SettingsPage.qml" line="313"/>
+        <location filename="../qml/SettingsPage.qml" line="140"/>
+        <location filename="../qml/SettingsPage.qml" line="313"/>
         <source>浅色</source>
         <translation>淺色</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="137"/>
-        <location filename="../qml/SettingsPage.qml" line="316"/>
-        <location filename="../qml/SettingsPage.qml" line="137"/>
-        <location filename="../qml/SettingsPage.qml" line="316"/>
+        <location filename="../qml/SettingsPage.qml" line="140"/>
+        <location filename="../qml/SettingsPage.qml" line="319"/>
+        <location filename="../qml/SettingsPage.qml" line="140"/>
+        <location filename="../qml/SettingsPage.qml" line="319"/>
         <source>深色</source>
         <translation>深色</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="160"/>
-        <location filename="../qml/SettingsPage.qml" line="160"/>
+        <location filename="../qml/SettingsPage.qml" line="163"/>
+        <location filename="../qml/SettingsPage.qml" line="163"/>
         <source>刷新封面</source>
         <translation>重新整理封面</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="163"/>
-        <location filename="../qml/SettingsPage.qml" line="163"/>
+        <location filename="../qml/SettingsPage.qml" line="166"/>
+        <location filename="../qml/SettingsPage.qml" line="166"/>
         <source>已刷新 %1 本书的封面</source>
         <translation>已重新整理 %1 本書的封面</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="181"/>
-        <location filename="../qml/SettingsPage.qml" line="181"/>
+        <location filename="../qml/SettingsPage.qml" line="184"/>
+        <location filename="../qml/SettingsPage.qml" line="184"/>
         <source>语言</source>
         <translation>語言</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="184"/>
-        <location filename="../qml/SettingsPage.qml" line="184"/>
+        <location filename="../qml/SettingsPage.qml" line="187"/>
+        <location filename="../qml/SettingsPage.qml" line="187"/>
         <source>简体中文</source>
         <translation>簡體中文</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="184"/>
-        <location filename="../qml/SettingsPage.qml" line="184"/>
+        <location filename="../qml/SettingsPage.qml" line="187"/>
+        <location filename="../qml/SettingsPage.qml" line="187"/>
         <source>繁體中文</source>
         <translation>繁體中文</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="184"/>
-        <location filename="../qml/SettingsPage.qml" line="184"/>
+        <location filename="../qml/SettingsPage.qml" line="187"/>
+        <location filename="../qml/SettingsPage.qml" line="187"/>
         <source>English</source>
         <translation>English</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="201"/>
-        <location filename="../qml/SettingsPage.qml" line="201"/>
+        <location filename="../qml/SettingsPage.qml" line="204"/>
+        <location filename="../qml/SettingsPage.qml" line="204"/>
         <source>朗读（TTS）</source>
         <translation>朗讀（TTS）</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="203"/>
-        <location filename="../qml/SettingsPage.qml" line="203"/>
+        <location filename="../qml/SettingsPage.qml" line="206"/>
+        <location filename="../qml/SettingsPage.qml" line="206"/>
         <source>引擎</source>
         <translation>引擎</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="209"/>
-        <location filename="../qml/SettingsPage.qml" line="209"/>
+        <location filename="../qml/SettingsPage.qml" line="212"/>
+        <location filename="../qml/SettingsPage.qml" line="212"/>
         <source>系统语音</source>
         <translation>系統語音</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="219"/>
-        <location filename="../qml/SettingsPage.qml" line="219"/>
+        <location filename="../qml/SettingsPage.qml" line="222"/>
+        <location filename="../qml/SettingsPage.qml" line="222"/>
         <source>引擎可用</source>
         <translation>引擎可用</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="219"/>
-        <location filename="../qml/SettingsPage.qml" line="219"/>
+        <location filename="../qml/SettingsPage.qml" line="222"/>
+        <location filename="../qml/SettingsPage.qml" line="222"/>
         <source>引擎不可用：请检查下方配置</source>
         <translation>引擎不可用：請檢查下方設定</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="228"/>
-        <location filename="../qml/SettingsPage.qml" line="228"/>
+        <location filename="../qml/SettingsPage.qml" line="231"/>
+        <location filename="../qml/SettingsPage.qml" line="231"/>
         <source>服务地址</source>
         <translation>服務位址</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="238"/>
-        <location filename="../qml/SettingsPage.qml" line="238"/>
+        <location filename="../qml/SettingsPage.qml" line="241"/>
+        <location filename="../qml/SettingsPage.qml" line="241"/>
         <source>API Key</source>
         <translation>API Key</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="243"/>
-        <location filename="../qml/SettingsPage.qml" line="243"/>
+        <location filename="../qml/SettingsPage.qml" line="246"/>
+        <location filename="../qml/SettingsPage.qml" line="246"/>
         <source>sk-…（仅保存在本机 settings.json）</source>
         <translation>sk-…（僅保存在本機 settings.json）</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="248"/>
-        <location filename="../qml/SettingsPage.qml" line="248"/>
+        <location filename="../qml/SettingsPage.qml" line="251"/>
+        <location filename="../qml/SettingsPage.qml" line="251"/>
         <source>模型</source>
         <translation>模型</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="257"/>
-        <location filename="../qml/SettingsPage.qml" line="257"/>
+        <location filename="../qml/SettingsPage.qml" line="260"/>
+        <location filename="../qml/SettingsPage.qml" line="260"/>
         <source>音色</source>
         <translation>音色</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="266"/>
-        <location filename="../qml/SettingsPage.qml" line="266"/>
+        <location filename="../qml/SettingsPage.qml" line="269"/>
+        <location filename="../qml/SettingsPage.qml" line="269"/>
         <source>语速（0.25–4.0）</source>
         <translation>語速（0.25–4.0）</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="278"/>
-        <location filename="../qml/SettingsPage.qml" line="278"/>
+        <location filename="../qml/SettingsPage.qml" line="281"/>
+        <location filename="../qml/SettingsPage.qml" line="281"/>
         <source>保存并应用</source>
         <translation>儲存並套用</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="282"/>
-        <location filename="../qml/SettingsPage.qml" line="282"/>
+        <location filename="../qml/SettingsPage.qml" line="285"/>
+        <location filename="../qml/SettingsPage.qml" line="285"/>
         <source>测试发音</source>
         <translation>測試發音</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="284"/>
-        <location filename="../qml/SettingsPage.qml" line="284"/>
+        <location filename="../qml/SettingsPage.qml" line="287"/>
+        <location filename="../qml/SettingsPage.qml" line="287"/>
         <source>你好，这是一段测试语音。</source>
         <translation>你好，這是一段測試語音。</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="305"/>
-        <location filename="../qml/SettingsPage.qml" line="305"/>
+        <location filename="../qml/SettingsPage.qml" line="308"/>
+        <location filename="../qml/SettingsPage.qml" line="308"/>
         <source>阅读背景</source>
         <translation>閱讀背景</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="307"/>
-        <location filename="../qml/SettingsPage.qml" line="307"/>
+        <location filename="../qml/SettingsPage.qml" line="310"/>
+        <location filename="../qml/SettingsPage.qml" line="310"/>
         <source>背景模式</source>
         <translation>背景模式</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="322"/>
-        <location filename="../qml/SettingsPage.qml" line="322"/>
+        <location filename="../qml/SettingsPage.qml" line="325"/>
+        <location filename="../qml/SettingsPage.qml" line="325"/>
         <source>米白</source>
         <translation>米白</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="328"/>
-        <location filename="../qml/SettingsPage.qml" line="328"/>
+        <location filename="../qml/SettingsPage.qml" line="331"/>
+        <location filename="../qml/SettingsPage.qml" line="331"/>
         <source>自定义图片</source>
         <translation>自訂圖片</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="335"/>
-        <location filename="../qml/SettingsPage.qml" line="335"/>
+        <location filename="../qml/SettingsPage.qml" line="338"/>
+        <location filename="../qml/SettingsPage.qml" line="338"/>
         <source>背景图片</source>
         <translation>背景圖片</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="337"/>
-        <location filename="../qml/SettingsPage.qml" line="337"/>
+        <location filename="../qml/SettingsPage.qml" line="340"/>
+        <location filename="../qml/SettingsPage.qml" line="340"/>
         <source>选择图片…</source>
         <translation>選擇圖片…</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="342"/>
-        <location filename="../qml/SettingsPage.qml" line="529"/>
-        <location filename="../qml/SettingsPage.qml" line="342"/>
-        <location filename="../qml/SettingsPage.qml" line="529"/>
+        <location filename="../qml/SettingsPage.qml" line="345"/>
+        <location filename="../qml/SettingsPage.qml" line="551"/>
+        <location filename="../qml/SettingsPage.qml" line="345"/>
+        <location filename="../qml/SettingsPage.qml" line="551"/>
         <source>未选择</source>
         <translation>未選擇</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="350"/>
-        <location filename="../qml/SettingsPage.qml" line="350"/>
+        <location filename="../qml/SettingsPage.qml" line="353"/>
+        <location filename="../qml/SettingsPage.qml" line="353"/>
         <source>选择背景图片</source>
         <translation>選擇背景圖片</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="389"/>
-        <location filename="../qml/SettingsPage.qml" line="389"/>
+        <location filename="../qml/SettingsPage.qml" line="392"/>
+        <location filename="../qml/SettingsPage.qml" line="392"/>
         <source>模糊度</source>
         <translation>模糊度</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="408"/>
-        <location filename="../qml/SettingsPage.qml" line="408"/>
+        <location filename="../qml/SettingsPage.qml" line="411"/>
+        <location filename="../qml/SettingsPage.qml" line="411"/>
         <source>亮度</source>
         <translation>亮度</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="439"/>
-        <location filename="../qml/SettingsPage.qml" line="439"/>
+        <location filename="../qml/SettingsPage.qml" line="432"/>
+        <location filename="../qml/SettingsPage.qml" line="432"/>
+        <source>翻页方式</source>
+        <translation>翻頁方式</translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="435"/>
+        <location filename="../qml/SettingsPage.qml" line="435"/>
+        <source>连续滚动</source>
+        <translation>連續滾動</translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="441"/>
+        <location filename="../qml/SettingsPage.qml" line="441"/>
+        <source>整页翻动</source>
+        <translation>整頁翻動</translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="461"/>
+        <location filename="../qml/SettingsPage.qml" line="461"/>
         <source>同步</source>
         <translation>同步</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="442"/>
-        <location filename="../qml/SettingsPage.qml" line="442"/>
+        <location filename="../qml/SettingsPage.qml" line="464"/>
+        <location filename="../qml/SettingsPage.qml" line="464"/>
         <source>WebDAV 同步设置</source>
         <translation>WebDAV 同步設定</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="448"/>
-        <location filename="../qml/SettingsPage.qml" line="448"/>
+        <location filename="../qml/SettingsPage.qml" line="470"/>
+        <location filename="../qml/SettingsPage.qml" line="470"/>
         <source>统计</source>
         <translation>統計</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="451"/>
-        <location filename="../qml/SettingsPage.qml" line="451"/>
+        <location filename="../qml/SettingsPage.qml" line="473"/>
+        <location filename="../qml/SettingsPage.qml" line="473"/>
         <source>阅读统计</source>
         <translation>閱讀統計</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="456"/>
-        <location filename="../qml/SettingsPage.qml" line="456"/>
+        <location filename="../qml/SettingsPage.qml" line="478"/>
+        <location filename="../qml/SettingsPage.qml" line="478"/>
         <source>版本 0.1.0</source>
         <translation>版本 0.1.0</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="481"/>
-        <location filename="../qml/SettingsPage.qml" line="481"/>
+        <location filename="../qml/SettingsPage.qml" line="503"/>
+        <location filename="../qml/SettingsPage.qml" line="503"/>
         <source>已保存并应用</source>
         <translation>已儲存並套用</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="504"/>
-        <location filename="../qml/SettingsPage.qml" line="504"/>
+        <location filename="../qml/SettingsPage.qml" line="526"/>
+        <location filename="../qml/SettingsPage.qml" line="526"/>
         <source>图片导入失败，请换一张重试</source>
         <translation>圖片匯入失敗，請換一張重試</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="104"/>
-        <location filename="../qml/SettingsPage.qml" line="104"/>
+        <location filename="../qml/SettingsPage.qml" line="107"/>
+        <location filename="../qml/SettingsPage.qml" line="107"/>
         <source>返回</source>
         <translation>返回</translation>
     </message>

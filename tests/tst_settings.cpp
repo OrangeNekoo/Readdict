@@ -10,6 +10,7 @@ private slots:
         QCOMPARE(s.value("theme/mode").toString(), QString("auto"));
         QCOMPARE(s.value("typography/fontSize").toInt(), 18);
         QCOMPARE(s.value("webdav/syncBooks").toBool(), false);
+        QCOMPARE(s.value("reading/pageMode").toString(), QString("scroll"));
     }
     void roundTrip() {
         QTemporaryDir dir;
