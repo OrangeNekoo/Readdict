@@ -89,6 +89,13 @@ Item {
             compare(c.sentenceStarts.length, 40, "应计算 40 个段落起始索引")
             compare(c.sentenceStarts[1], 2, "第 2 段起始句子索引应为 2")
             compare(c.totalSentences, 80)
+            // D2：未朗读（state=0，游标复位 0）首句不应黄标——TTS 黄底仅朗读会话激活
+            //（显式 stop 兜底：前置用例可能已把 state 置非 0）
+            Tts.stop()
+            wait(50)
+            var tPre = c.paragraphRepeater.itemAt(0).children[0].text
+            verify(tPre.toLowerCase().indexOf("#ffd54f") < 0,
+                   "未朗读时首句不应出现 TTS 黄底（D2），实际 " + tPre)
             // seekTo(3)：全局句 3 → 段 1 内第 2 句（"第二句！"）应包高亮 span
             Tts.seekTo(3)
             wait(50)

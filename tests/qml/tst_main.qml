@@ -240,12 +240,20 @@ Item {
                    "loadChapter 应返回带 paragraphs 的章节对象")
             verify(page.chapter.paragraphs.length > 0, "TXT 首章应有段落")
             compare(page.chapter.title, page.book.title, "TXT 首章标题应为书名")
-            // C5：打开书应把拍平的句子喂给 Tts（游标复位首句 → 首句被高亮）
+            // C5：打开书应把拍平的句子喂给 Tts（游标复位首句）
             compare(Tts.currentIndex, 0, "打开书后朗读游标应复位到 0")
+            // D2：未朗读（loadChapter 已 Tts.stop() → state=0）游标 0 落在首段但**不黄标**
             wait(50)
             var t0 = page.contentView.paragraphRepeater.itemAt(0).children[0].text
-            verify(t0.toLowerCase().indexOf("background-color:") >= 0,
-                   "游标 0 落在首段 → 首句应带高亮 span，实际 " + t0)
+            verify(t0.toLowerCase().indexOf("#ffd54f") < 0,
+                   "未朗读时首句不应黄标（D2），实际 " + t0)
+            // 朗读会话激活（openai 无 key 桩：seekTo 只驱动 state 0→1 不发声）→ 首句黄标恢复
+            Tts.reconfigure("openai", "https://api.openai.com/v1", "", "tts-1", "nova", 1.0)
+            Tts.seekTo(0)
+            tryVerify(function () {
+                return page.contentView.paragraphRepeater.itemAt(0).children[0].text.toLowerCase()
+                       .indexOf("#ffd54f") >= 0
+            }, 3000, "朗读会话激活后首句应恢复黄标")
             loader.destroy()
         }
     }

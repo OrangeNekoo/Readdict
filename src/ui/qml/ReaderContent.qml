@@ -14,6 +14,9 @@ import Readdict.Backend
 // 长度累加）判断 Tts.currentIndex 是否落在本段；纯文本段把每句包成独立 <span>（拼接后
 // 与原文逐字符一致，保持自然换行），当前句包黄色高亮 span；含 <b>/<i>/<hN>/<img> 的
 // 富文本段整体包高亮 span（无法安全定位句边界时退化为段级高亮）。
+// D2：朗读游标黄底（含富文本段整段黄标）仅朗读会话激活（flick.ttsActive，state!=0）
+// 时显示——Tts.currentIndex 初始为 0（setSentences 复位）且 state=0，未朗读不黄标首句；
+// 划线句底色保留（用户主动操作），仅"当前句"指示（黄底/下划线叠加）受朗读状态门控。
 // C7 划线渲染：ReaderPage 从 Highlights.highlightsForBook 加载本书全部划线，经 highlights
 // 属性注入；rebuildHighlightMap 以 "章节标题|句子全局索引" 为键建 map（与 addHighlight
 // 时记录的 chapterTitle + sentenceIndex 一致），逐句渲染时命中即包划线色 span；
@@ -510,7 +513,11 @@ Flickable {
                 // 深字一致，无视觉回归）。
                 function sentenceSpan(k, s) {
                     var mk = para.markerFor(k)
-                    var isCur = para.inHighlightRange && k === para.hlInPara
+                    // D2：朗读游标（黄底 / 划线句的下划线叠加）仅朗读会话激活时生效——
+                    // Tts.currentIndex 在 setSentences 时复位为 0 且 state=0，若不门控，
+                    // 未朗读也会把首段首句误标为"当前句"；划线句底色不受影响（划线是
+                    // 用户主动操作保留，见 C7），仅不再叠加"朗读游标"下划线
+                    var isCur = para.inHighlightRange && k === para.hlInPara && flick.ttsActive
                     var isFlash = (para.sentenceStart + k) === flick.flashIndex
                     var styles = []
                     if (mk && mk.color) {
@@ -551,7 +558,9 @@ Flickable {
                     var mc = para.paraMarkerColor()
                     if (mc.length > 0)
                         return "<div style='background-color:" + mc + ";color:#212121'>" + htmlSrc + "</div>"
-                    if (para.inHighlightRange && htmlSrc.length > 0)
+                    // D2：富文本段整段黄标同样仅朗读会话激活（未朗读 currentIndex=0
+                    // 不误标首段；划线色 div 分支在上方已优先返回，不受影响）
+                    if (para.inHighlightRange && flick.ttsActive && htmlSrc.length > 0)
                         return "<div style='background-color:" + flick.highlightColor + ";color:#212121'>" + htmlSrc + "</div>"
                     return htmlSrc
                 }
