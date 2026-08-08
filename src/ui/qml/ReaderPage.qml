@@ -39,6 +39,14 @@ Page {
     // D4：控制栏字体弹层句柄（冒烟经此打开弹层/驱动字体切换）
     property alias fontPopup: controls.fontPopup
     property alias fontList: controls.fontList
+    // E3：控制栏本体（冒烟经此按 children 索引点按钮）+ 三个上拉框句柄
+    property alias controlsBar: controls
+    property alias bgPopup: controls.bgPopup
+    property alias bgList: controls.bgList
+    property alias alignPopup: controls.alignPopup
+    property alias alignList: controls.alignList
+    property alias widthPopup: controls.widthPopup
+    property alias widthList: controls.widthList
 
     ReaderBackground {
         anchors.fill: parent
@@ -204,14 +212,20 @@ Page {
             bgMode: page.bgMode
             fontSize: page.typography.fontSize ?? 18
             chapterProgress: page.chapterProgress
+            // E3：当前值注入——bgImagePath 驱动上拉框 image 项启用态，
+            // align/pageWidth 驱动高亮当前项（Settings 无变更信号，页面属性作响应层）
+            bgImagePath: page.bgImagePath
+            align: page.typography.align ?? "left"
+            pageWidth: page.typography.pageWidth ?? "normal"
             // D4：当前字族（存储 token）——打开弹层时经 onFontMenuOpenChanged 重读刷新
             fontFamily: String(Settings.value("typography/fontFamily") || "思源宋体 VF")
             onPrevChapter: page.loadChapter(Books.currentChapter - 1)
             onNextChapter: page.loadChapter(Books.currentChapter + 1)
             onChangeFontSize: (size) => page.setFontSize(size)
-            onToggleBackground: page.cycleBackground()
-            onToggleAlign: page.cycleAlign()
-            onTogglePageWidth: page.cyclePageWidth()
+            // E3：上拉框直接选择——不再轮询循环
+            onSetBackgroundMode: (m) => page.setBackgroundMode(m)
+            onSetAlign: (a) => page.setAlign(a)
+            onSetPageWidth: (w) => page.setPageWidth(w)
             onOpenToc: tocDialog.open()
             onOpenNotes: notesDlg.open()
             onOpenSearch: searchDlg.open()
@@ -228,6 +242,15 @@ Page {
                 if (controls.fontMenuOpen) {
                     hideControlsTimer.stop()
                     controls.fontFamily = String(Settings.value("typography/fontFamily") || "思源宋体 VF")
+                } else if (page.controlsVisible) {
+                    hideControlsTimer.restart()
+                }
+            }
+            // E3：上拉框开合联动——任一打开暂停 5s 自动隐藏（同 fontMenuOpen 语义：
+            // 弹层是独立窗口，其内点击不重置页面计时器）；全部关闭且控制栏显示态时恢复
+            onSheetOpenChanged: {
+                if (controls.sheetOpen) {
+                    hideControlsTimer.stop()
                 } else if (page.controlsVisible) {
                     hideControlsTimer.restart()
                 }
@@ -545,27 +568,25 @@ Page {
         page.typography = page.typographyFromSettings()
     }
 
-    function cycleAlign() {
-        const order = ["left", "center", "right"]
-        const cur = Math.max(0, order.indexOf(page.typography.align ?? "left"))
-        Settings.setValue("typography/align", order[(cur + 1) % order.length])
+    // E3：上拉框直接选择——背景四态白名单校验后应用（写 background/mode）；
+    // image 无图时防御性拒绝（上拉框已禁用该选项，双保险防手改属性绕过）
+    function setBackgroundMode(mode) {
+        if (mode !== "light" && mode !== "paper" && mode !== "dark" && mode !== "image") return
+        if (mode === "image" && !page.bgImagePath) return
+        page.bgMode = mode
+        Settings.setValue("background/mode", mode)
+    }
+
+    function setAlign(a) {
+        if (a !== "left" && a !== "center" && a !== "right") return
+        Settings.setValue("typography/align", a)
         page.typography = page.typographyFromSettings()
     }
 
-    function cyclePageWidth() {
-        const order = ["narrow", "normal", "wide"]
-        const cur = Math.max(0, order.indexOf(page.typography.pageWidth ?? "normal"))
-        Settings.setValue("typography/pageWidth", order[(cur + 1) % order.length])
+    function setPageWidth(w) {
+        if (w !== "narrow" && w !== "normal" && w !== "wide") return
+        Settings.setValue("typography/pageWidth", w)
         page.typography = page.typographyFromSettings()
-    }
-
-    function cycleBackground() {
-        // 四态循环（浅→米白→深→图片）；未选图片时跳过 image，避免切到"无图可显"的态
-        const order = page.bgImagePath ? ["light", "paper", "dark", "image"]
-                                       : ["light", "paper", "dark"]
-        const cur = Math.max(0, order.indexOf(page.bgMode))
-        page.bgMode = order[(cur + 1) % order.length]
-        Settings.setValue("background/mode", page.bgMode)
     }
 
     // D5：启动恢复——从 Settings 的 background/ 分区读背景参数（含钳制）。
