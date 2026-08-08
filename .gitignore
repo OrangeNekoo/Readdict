@@ -85,3 +85,4 @@ CMakeLists.txt.user*
 
 # superpowers workflow docs (本地工作流，不提交)
 /docs/superpowers/
+/.omp
