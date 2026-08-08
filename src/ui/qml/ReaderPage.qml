@@ -126,8 +126,9 @@ Page {
         pageMode: page.pageMode
         // 规格 §7：滚动接近章末 → 自动加载下一章（末章由 autoNextChapter 兜底不换）
         onRequestNextChapter: page.autoNextChapter()
-        // E4：方向键 ← 翻上一章（loadChapter 内部钳制到 [0, len-1]，边界不越）
-        onRequestPrevChapter: page.loadChapter(Books.currentChapter - 1)
+        // E4：方向键 ← 翻上一章（autoPrevChapter：首章兜底不换，同 autoNextChapter 对称；
+        // paged 模式 pagePrev 在章首 contentY=0 时发本信号，见 E4 复审）
+        onRequestPrevChapter: page.autoPrevChapter()
     }
 
     // C2：朗读条门控——朗读会话激活（Tts.state != 0 播放/暂停）才显示，否则隐藏且正文
@@ -553,6 +554,15 @@ Page {
         const titles = Books.chapterTitles(page.book.id)
         if (!titles || Books.currentChapter + 1 >= titles.length) return
         page.loadChapter(Books.currentChapter + 1)
+    }
+
+    // E4 复审：paged 模式 ← 章首回上一章——ReaderContent.pagePrev 在 contentY=0
+    // 时请求翻上一章（与 pageNext 章末翻章对称，修复"章首 ← 死键"）；首章直接
+    // 返回，避免 loadChapter 的钳制把读者从章首重载回本章开头。
+    function autoPrevChapter() {
+        const titles = Books.chapterTitles(page.book.id)
+        if (!titles || Books.currentChapter - 1 < 0) return
+        page.loadChapter(Books.currentChapter - 1)
     }
 
     // 规格 §7：朗读续章——Tts.chapterCompleted（自然读完/下一句越过章末）→ 换下一章

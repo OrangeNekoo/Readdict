@@ -67,6 +67,10 @@ Flickable {
     property int totalSentences: 0
     property color highlightColor: "#FFD54F"   // 当前句高亮底色（黄，TTS 朗读游标）
     property alias paragraphRepeater: rep
+    // E4 复审：动画句柄（冒烟测试经此断言互斥——pageAnim 启动前 followAnim 已停，
+    // 两动画驱动同一 contentY，并发会让目标互相覆盖）
+    property alias pageAnimation: pageAnim
+    property alias followAnimation: followAnim
     // ---- C7：划线/笔记 ----
     property int bookId: -1                      // 当前书 id（addHighlight 参数）
     property var highlights: []                   // Highlights.highlightsForBook 结果（ReaderPage 注入）
@@ -102,7 +106,7 @@ Flickable {
     // 焦点在弹层内，正文 Keys 不生效（不干扰输入框）。
     focus: true
     Keys.onPressed: (event) => {
-        if (flick.handleKey(event.key, event.modifiers))
+        if (flick.handleKey(event.key, event.modifiers, event.isAutoRepeat))
             event.accepted = true
     }
 
@@ -136,11 +140,24 @@ Flickable {
     // 触发 requestNextChapter。恢复窗口内不触发（恢复把用户拽到保存位置，非主动滚动）；
     // TTS 会话活动（播放/暂停）与动画滚动（搜索跳转/朗读跟随）中同样不触发——
     // 朗读续章走 chapterCompleted 路径，暂停会话不应被滚动换章打断丢弃。
+    // E4 复审：paged 模式滚轮滚动吸附——滚轮滚动改变 contentY 但不触发
+    // movementEnded（仅手势/惯性触发），靠 contentY 变化收敛（200ms 无变化）
+    // 后 snapToPage 补齐滚轮吸附；snapToPage 内部有 ttsActive/恢复窗口门控，
+    // 键盘翻页动画（pageAnim）目标本就是页边界，吸附为幂等 no-op。
+    Timer {
+        id: snapTimer
+        interval: 200
+        repeat: false
+        onTriggered: flick.snapToPage()
+    }
     onContentYChanged: {
         if (flick.restoreApplied && flick.restoreAppliedY >= 0
                 && Math.abs(flick.contentY - flick.restoreAppliedY) > 1)
             flick.restoreApplied = false   // 用户接管滚动：恢复窗口结束
         flick.checkAutoNext()
+        // E4：paged 模式滚动停止后吸附页边界（滚轮/拖拽都经此收敛）
+        if (flick.pageMode === "paged" && !flick.ttsActive && !flick.restorePending)
+            snapTimer.restart()
     }
 
     function checkAutoNext() {
@@ -253,14 +270,17 @@ Flickable {
     // 打开时焦点在弹层内，本组件 Keys 不触发（不干扰输入框）。
     // scroll 模式：↑↓/PageUp/PageDown 滚动一视口页，←/→ 翻章；
     // paged 模式：四向 + PageUp/PageDown 均按视口高度整页翻动（←/→ 翻页而非翻章）。
-    function handleKey(key, modifiers) {
+    // isAutoRepeat（键盘按住自动重复 30-60Hz）：scroll 翻章与 paged 翻章
+    // 动作忽略重复事件（连按一次只翻一章/翻一页，不因按住连翻多章）；
+    // scroll 翻页/paged 翻页是内容位移动作，重复无害（同拖拽滚动语义）。
+    function handleKey(key, modifiers, isAutoRepeat) {
         if (modifiers !== Qt.NoModifier) return false
         if (flick.pageMode === "paged") {
             switch (key) {
             case Qt.Key_Up: case Qt.Key_PageUp: case Qt.Key_Left:
-                flick.pagePrev(); return true
+                flick.pagePrev(isAutoRepeat); return true
             case Qt.Key_Down: case Qt.Key_PageDown: case Qt.Key_Right:
-                flick.pageNext(); return true
+                flick.pageNext(isAutoRepeat); return true
             }
             return false
         }
@@ -270,9 +290,9 @@ Flickable {
         case Qt.Key_Down: case Qt.Key_PageDown:
             flick.scrollPage(1); return true
         case Qt.Key_Left:
-            flick.requestPrevChapter(); return true
+            if (!isAutoRepeat) flick.requestPrevChapter(); return true
         case Qt.Key_Right:
-            flick.requestNextChapter(); return true
+            if (!isAutoRepeat) flick.requestNextChapter(); return true
         }
         return false
     }
@@ -283,20 +303,28 @@ Flickable {
         var maxY = Math.max(0, flick.contentHeight - flick.height)
         var target = Math.max(0, Math.min(flick.contentY + dir * flick.height, maxY))
         if (Math.abs(target - flick.contentY) < 1) return
+        followAnim.stop()   // E4 复审：两动画驱动同一 contentY，启动前停掉对方
         pageAnim.stop()
         flick.checkNextOnStop = true
         pageAnim.to = target
         pageAnim.start()
     }
 
-    // paged 模式：上一页——按视口高度整页回退（页边界定位：目标 = (当前页-1)*页高）
-    function pagePrev() {
+    // paged 模式：上一页——按视口高度整页回退（页边界定位：目标 = (当前页-1)*页高）。
+    // 章首（contentY=0，目标==当前）时翻页语义变为翻上一章（requestPrevChapter →
+    // ReaderPage.autoPrevChapter 兜底首章不换），与 pageNext 章末翻章对称；
+    // 短章（一页放得下）同样触发。
+    function pagePrev(isAutoRepeat) {
         if (flick.contentHeight <= 0 || flick.height <= 0) return
-        var maxY = Math.max(0, flick.contentHeight - flick.height)
         var pageH = Math.max(1, flick.height)
         var pageIdx = Math.floor(flick.contentY / pageH)
+        if (pageIdx <= 0) {
+            if (!isAutoRepeat) flick.requestPrevChapter()
+            return
+        }
         var target = Math.max(0, (pageIdx - 1) * pageH)
         if (Math.abs(target - flick.contentY) < 1) return
+        followAnim.stop()
         pageAnim.stop()
         pageAnim.to = target
         pageAnim.start()
@@ -305,16 +333,17 @@ Flickable {
     // paged 模式：下一页——整页前进；已到最后一页（目标 == 当前）时翻页语义
     // 变为翻章（requestNextChapter → ReaderPage.autoNextChapter 兜底末章不换），
     // 与"翻过章末进入下一章"的真实书籍语义一致；短章（一页放得下）同样触发。
-    function pageNext() {
+    function pageNext(isAutoRepeat) {
         if (flick.contentHeight <= 0 || flick.height <= 0) return
         var maxY = Math.max(0, flick.contentHeight - flick.height)
         var pageH = Math.max(1, flick.height)
         var pageIdx = Math.floor(flick.contentY / pageH)
         var target = Math.min((pageIdx + 1) * pageH, maxY)
         if (Math.abs(target - flick.contentY) < 1) {
-            flick.requestNextChapter()
+            if (!isAutoRepeat) flick.requestNextChapter()
             return
         }
+        followAnim.stop()
         pageAnim.stop()
         flick.checkNextOnStop = true
         pageAnim.to = target
@@ -324,6 +353,8 @@ Flickable {
     // paged 模式：拖拽/惯性滚动结束后吸附到最近页边界（视口高度粒度）。
     // 键盘翻页走 pagePrev/pageNext 已按边界定位，无需吸附；滚动恢复/搜索跳转
     // 程序化设 contentY 不触发 movementEnded，不会在恢复窗口内被吸附拽走。
+    // E4 复审：滚轮滚动不触发 movementEnded（仅手势），经 onContentYChanged
+    // 的 snapTimer 收敛后同样吸附；TTS 跟随/恢复窗口内跳过（ttsActive 门控）。
     function snapToPage() {
         if (flick.pageMode !== "paged") return
         if (flick.restorePending || flick.restoreApplied || flick.ttsActive) return
@@ -332,6 +363,7 @@ Flickable {
         var pageH = Math.max(1, flick.height)
         var nearest = Math.max(0, Math.min(Math.round(flick.contentY / pageH) * pageH, maxY))
         if (Math.abs(nearest - flick.contentY) < 1) return
+        followAnim.stop()
         pageAnim.stop()
         pageAnim.to = nearest
         pageAnim.start()

@@ -156,6 +156,24 @@ Item {
                 if (b.title === title) return b
             return null
         }
+        // 等章节布局收敛：loadChapter 后 contentHeight 首趟可能仍是旧章残留值
+        //（Repeater 布局在事件循环 polish 阶段才更新，直接读会算错 maxY——
+        // 内容变矮时 Flickable 会把 contentY 钳回）。轮询到高度连续两次采样
+        // 一致（50ms 间隔）且 > 视口高为止。
+        function waitContentSettled(cv) {
+            var last = -1
+            var stable = 0
+            var t0 = new Date().getTime()
+            while (new Date().getTime() - t0 < 5000) {
+                var h = cv.contentHeight
+                if (Math.abs(h - last) < 0.5) stable++
+                else stable = 0
+                if (stable >= 2 && h > cv.height) return true
+                last = h
+                wait(50)
+            }
+            return cv.contentHeight > cv.height
+        }
         function openPage(book) {
             var stack = Qt.createQmlObject(
                 "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
@@ -203,12 +221,12 @@ Item {
             wait(450)
             verify(Math.abs(cv.contentY - pageH) < 4,
                    "paged ← 应回退到第 1 页边界，实际 contentY=" + cv.contentY)
-            // 首页 ←/↑ 不越界
+            // 首页 ←/↑ 不越界（autoPrevChapter 首章兜底不换，contentY 保持 0）
             cv.contentY = 0
             cv.handleKey(Qt.Key_Left, Qt.NoModifier)
             cv.handleKey(Qt.Key_Up, Qt.NoModifier)
             wait(450)
-            verify(cv.contentY === 0, "paged 首页 ←/↑ 应钳制在 0，实际 " + cv.contentY)
+            verify(cv.contentY === 0, "paged 首页 ←/↑ 应兜底不换，实际 " + cv.contentY)
             h.stack.destroy()
         }
 
@@ -243,6 +261,126 @@ Item {
             cv.handleKey(Qt.Key_Right, Qt.NoModifier)
             wait(100)
             compare(Books.currentChapter, titles.length - 1, "paged 末章章末 → 应钳制在末章")
+            h.stack.destroy()
+        }
+
+        // E4 复审：paged 模式 ← 章首回上一章——pagePrev 在 contentY=0 时不再死键，
+        // 转 requestPrevChapter → ReaderPage.autoPrevChapter（与 pageNext 章末翻章对称）；
+        // 首章章首 ← 由 autoPrevChapter 兜底不换。
+        function test_pagedPrevChapterAtChapterStart() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.pageMode = "paged"
+            var titles = Books.chapterTitles(book.id)
+            verify(titles.length >= 3, "multibook 应有 3 章，实际 " + titles.length)
+            Books.currentChapter = 1
+            page.loadChapter(1)
+            tryVerify(function () { return cv.contentHeight > cv.height }, 3000,
+                      "章 1 内容高度应就绪（contentHeight=" + cv.contentHeight + "）")
+            cv.contentY = 0
+            wait(50)
+            // 章首 ← → 上一章（旧实现 contentY=0 直接 return，← 为死键）
+            cv.handleKey(Qt.Key_Left, Qt.NoModifier)
+            tryVerify(function () { return Books.currentChapter === 0 }, 3000,
+                      "paged 章首 ← 应回上一章，实际 currentChapter=" + Books.currentChapter)
+            // 首章章首 ← 兜底不换（autoPrevChapter 边界）
+            cv.handleKey(Qt.Key_Left, Qt.NoModifier)
+            wait(100)
+            compare(Books.currentChapter, 0, "paged 首章章首 ← 应兜底不换")
+            h.stack.destroy()
+        }
+
+        // E4 复审：键盘按住自动重复（isAutoRepeat，30-60Hz）不连翻多章——scroll 模式
+        // ←/→ 与 paged 模式章末翻章只响应首次按下；内容位移（翻页）重复无害。
+        function test_autoRepeatThrottlesChapterChange() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            // scroll 模式：章 0 按住 →（autoRepeat）不应翻章；正常按下才翻
+            Books.currentChapter = 0
+            page.loadChapter(0)
+            wait(100)
+            cv.handleKey(Qt.Key_Right, Qt.NoModifier, true)
+            wait(100)
+            compare(Books.currentChapter, 0, "scroll 按住 → 自动重复不应翻章")
+            cv.handleKey(Qt.Key_Right, Qt.NoModifier, false)
+            tryVerify(function () { return Books.currentChapter === 1 }, 3000,
+                      "scroll 正常按下 → 应翻章，实际 currentChapter=" + Books.currentChapter)
+            // paged 模式：章 1 翻到章末最后一页——逐页按 →（pageNext 动画路径，
+            // 每按等 450ms 动画收敛；不用直设 contentY=maxY：连续 loadChapter 后
+            // Flickable 内部状态会把直设的非页边界值在下一帧重置回 0，动画路径免疫）
+            page.pageMode = "paged"
+            page.loadChapter(1)
+            verify(waitContentSettled(cv),
+                   "章 1 内容高度应就绪并收敛（contentHeight=" + cv.contentHeight + "）")
+            var maxY = Math.max(0, cv.contentHeight - cv.height)
+            var guard = 0
+            while (guard++ < 10) {
+                cv.handleKey(Qt.Key_Right, Qt.NoModifier)
+                wait(450)
+                if (cv.contentY >= maxY - 2) break
+            }
+            verify(cv.contentY >= maxY - 2,
+                   "pageNext 应推进到章末最后一页（contentY=" + cv.contentY + "，maxY=" + maxY + "）")
+            // 章末按住 →（autoRepeat）不应翻章；正常按下才翻
+            cv.handleKey(Qt.Key_Right, Qt.NoModifier, true)
+            wait(100)
+            compare(Books.currentChapter, 1, "paged 章末按住 → 自动重复不应翻章")
+            cv.handleKey(Qt.Key_Right, Qt.NoModifier, false)
+            tryVerify(function () { return Books.currentChapter === 2 }, 3000,
+                      "paged 章末正常按下 → 应翻章，实际 currentChapter=" + Books.currentChapter)
+            h.stack.destroy()
+        }
+
+        // E4 复审：paged 模式滚轮吸附——滚轮滚动改变 contentY 但不触发 movementEnded，
+        // 靠 onContentYChanged 的 snapTimer（200ms 收敛）补吸附到最近页边界；
+        // snapToPage 内部有 ttsActive/恢复窗口门控（此处 ttsActive=false 且恢复已关）。
+        function test_pagedWheelSnapToPageBoundary() {
+            var book = findBook("longbook")
+            verify(book !== null, "longbook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.pageMode = "paged"
+            tryVerify(function () { return cv.contentHeight > cv.height * 2 }, 3000,
+                      "longbook 内容应远超视口")
+            var pageH = cv.height
+            cv.contentY = 0
+            wait(50)
+            // 模拟滚轮：contentY 落到非页边界（pageH*0.5+10 → 最近页边界 pageH）
+            cv.contentY = pageH * 0.5 + 10
+            tryVerify(function () { return Math.abs(cv.contentY - pageH) < 4 }, 3000,
+                      "contentY 收敛后应吸附到最近页边界（期望 " + pageH
+                      + "，实际 " + cv.contentY + "）")
+            h.stack.destroy()
+        }
+
+        // E4 复审：动画互斥——pageAnim 启动前先停 followAnim（两动画驱动同一
+        // contentY，并发会让目标互相覆盖）；followAnim 由 TTS 跟随/搜索跳转驱动。
+        function test_pageAnimStopsFollowAnim() {
+            var book = findBook("longbook")
+            verify(book !== null, "longbook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.pageMode = "paged"
+            tryVerify(function () { return cv.contentHeight > cv.height * 2 }, 3000,
+                      "longbook 内容应远超视口")
+            cv.contentY = 0
+            // 启动 followAnim（TTS 跟随路径；段 50 的 y 远超视口 1/3，目标非 0 不会瞬停）
+            cv.followSentence(50)
+            verify(cv.followAnimation.running === true, "followAnim 应已启动")
+            // 键盘翻页启动 pageAnim → followAnim 必须先停（互斥断言）
+            cv.handleKey(Qt.Key_Right, Qt.NoModifier)
+            verify(cv.pageAnimation.running === true, "pageAnim 应运行")
+            verify(cv.followAnimation.running === false,
+                   "pageAnim 启动前 followAnim 应被停止")
+            wait(450)
             h.stack.destroy()
         }
 
