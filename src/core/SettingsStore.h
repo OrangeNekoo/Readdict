@@ -16,7 +16,13 @@ public:
     Q_INVOKABLE QString copyToBackgrounds(const QString &sourceUrl);
     void save();
     QString filePath() const { return m_path; }
+    // 从磁盘重读并替换内存根对象（同步合并后调用），随后补默认分区
+    void reloadFromDisk();
+    QJsonObject root() const { return m_root; }
+    // 整体替换根对象并原子落盘（同步合并写盘的唯一入口）
+    void setRoot(const QJsonObject &root);
 private:
+    void applyDefaults();
     QString m_path;
     QJsonObject m_root;
 };

@@ -1,9 +1,11 @@
 #include "SettingsStore.h"
 #include <QDebug>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QJsonParseError>
 #include <QUrl>
 
 // 沿 key 链逐级下钻：每层取现有子对象（保留兄弟键）递归写入，再写回父对象。
@@ -21,8 +23,25 @@ static void insertPath(QJsonObject &obj, const QStringList &parts, int idx, cons
 
 SettingsStore::SettingsStore(const QString &path, QObject *parent) : QObject(parent), m_path(path) {
     QFile f(m_path);
-    if (f.open(QIODevice::ReadOnly))
-        m_root = QJsonDocument::fromJson(f.readAll()).object();
+    if (f.open(QIODevice::ReadOnly)) {
+        const QByteArray data = f.readAll();
+        f.close();
+        QJsonParseError err{};
+        m_root = QJsonDocument::fromJson(data, &err).object();
+        if (err.error != QJsonParseError::NoError && !data.trimmed().isEmpty()) {
+            // 损坏：备份原文件后回退默认，绝不静默覆盖丢失用户数据
+            qWarning("SettingsStore: %s 解析失败(%s)，备份后回退默认",
+                     qPrintable(m_path), qPrintable(err.errorString()));
+            QFile::copy(m_path, m_path + QStringLiteral(".corrupt-")
+                        + QString::number(QDateTime::currentSecsSinceEpoch()));
+            m_root = QJsonObject();
+        }
+    }
+    applyDefaults();
+    save();
+}
+
+void SettingsStore::applyDefaults() {
     // 默认值
     if (!m_root.contains("theme")) m_root.insert("theme", QJsonObject{{"mode", "auto"}});
     // C5：Kindle 默认衬线感——默认字体改思源宋体（衬线）；已有配置（含旧默认黑体）
@@ -61,7 +80,6 @@ SettingsStore::SettingsStore(const QString &path, QObject *parent) : QObject(par
         else
             m_root.insert(QStringLiteral("reader"), reader);
     }
-    save();
 }
 
 QJsonValue SettingsStore::value(const QString &dottedKey) const {
@@ -105,12 +123,37 @@ QString SettingsStore::copyToBackgrounds(const QString &sourceUrl) {
 }
 
 void SettingsStore::save() {
-    QFile f(m_path);
+    const QByteArray data = QJsonDocument(m_root).toJson(QJsonDocument::Indented);
+    const QString tmp = m_path + QStringLiteral(".tmp");
+    QFile f(tmp);
     if (!f.open(QIODevice::WriteOnly)) {
-        qWarning("SettingsStore: 无法写入 %s: %s", qPrintable(m_path), qPrintable(f.errorString()));
+        qWarning("SettingsStore: 无法写入 %s: %s", qPrintable(tmp), qPrintable(f.errorString()));
         return;
     }
-    const QByteArray data = QJsonDocument(m_root).toJson(QJsonDocument::Indented);
-    if (f.write(data) != data.size())
-        qWarning("SettingsStore: 写入 %s 不完整: %s", qPrintable(m_path), qPrintable(f.errorString()));
+    if (f.write(data) != data.size()) {
+        qWarning("SettingsStore: 写入 %s 不完整", qPrintable(tmp));
+        return;
+    }
+    f.close();
+    // rename 覆盖是原子的；QFile::rename 不覆盖已存在目标，先移除
+    QFile::remove(m_path);
+    if (!QFile::rename(tmp, m_path))
+        qWarning("SettingsStore: rename %s -> %s 失败", qPrintable(tmp), qPrintable(m_path));
+}
+
+void SettingsStore::reloadFromDisk() {
+    QFile f(m_path);
+    if (!f.open(QIODevice::ReadOnly)) return;
+    const QByteArray data = f.readAll();
+    QJsonParseError err{};
+    QJsonObject root = QJsonDocument::fromJson(data, &err).object();
+    if (err.error != QJsonParseError::NoError) return; // 盘上损坏：保留内存，不污染
+    m_root = root;
+    applyDefaults();
+}
+
+void SettingsStore::setRoot(const QJsonObject &root) {
+    m_root = root;
+    applyDefaults();
+    save();
 }

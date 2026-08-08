@@ -81,6 +81,56 @@ private slots:
         SettingsStore s(path);
         QCOMPARE(s.value("background/mode").toString(), QString("light"));
     }
+    void atomicSaveLeavesNoTmpAndReloads() {
+        QTemporaryDir dir;
+        const QString path = dir.path() + "/settings.json";
+        SettingsStore s(path);
+        s.setValue("tts/engine", "openai");
+        QVERIFY(!QFile::exists(path + ".tmp"));           // 无临时文件残留
+        SettingsStore s2(path);
+        QCOMPARE(s2.value("tts/engine").toString(), QString("openai"));
+    }
+    void reloadFromDiskPicksExternalChange() {
+        QTemporaryDir dir;
+        const QString path = dir.path() + "/settings.json";
+        SettingsStore s(path);
+        // 外部写者（模拟同步）直接改盘
+        QFile f(path);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("{\"theme\":{\"mode\":\"dark\"},\"tts\":{\"engine\":\"system\"}}");
+        f.close();
+        QCOMPARE(s.value("theme/mode").toString(), QString("auto")); // 内存仍是旧值
+        s.reloadFromDisk();
+        QCOMPARE(s.value("theme/mode").toString(), QString("dark"));
+    }
+    void corruptFileBackedUpNotSilentlyReset() {
+        QTemporaryDir dir;
+        const QString path = dir.path() + "/settings.json";
+        {
+            QFile f(path);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("{\"theme\":{\"mode\":\"dark\"}, trailing garbage");
+        }
+        SettingsStore s(path);
+        QCOMPARE(s.value("theme/mode").toString(), QString("auto")); // 回退默认
+        // 原损坏内容已备份，且备份文件存在
+        const QStringList backups = QDir(dir.path()).entryList(QStringList() << "settings.json.corrupt-*");
+        QCOMPARE(backups.size(), 1);
+        QFile b(dir.path() + "/" + backups.first());
+        QVERIFY(b.open(QIODevice::ReadOnly));
+        QVERIFY(b.readAll().contains("trailing garbage"));
+    }
+    void setRootPersistsAndPreservesViaValue() {
+        QTemporaryDir dir;
+        const QString path = dir.path() + "/settings.json";
+        SettingsStore s(path);
+        QJsonObject root = s.root();
+        root.insert("webdav", QJsonObject{{"url", "https://x"}});
+        s.setRoot(root);
+        SettingsStore s2(path);
+        QCOMPARE(s2.value("webdav/url").toString(), QString("https://x"));
+        QCOMPARE(s2.value("theme/mode").toString(), QString("auto")); // 默认分区仍在
+    }
 };
 QTEST_MAIN(TestSettings)
 #include "tst_settings.moc"
