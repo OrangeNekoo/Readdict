@@ -372,6 +372,14 @@ Page {
         }
     }
 
+    // L8（P1#18）：同步成功应用远端划线后重载本书划线——SyncManager 直连
+    // readdict_sync 连接写库，Highlights 单例（readdict_highlights 连接）的
+    // highlightsChanged 不会触发，经 Sync.dataApplied 信号驱动刷新
+    Connections {
+        target: Sync
+        function onDataApplied() { page.reloadHighlights() }
+    }
+
     Dialog {
         id: tocDialog
         title: qsTr("目录")

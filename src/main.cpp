@@ -175,6 +175,10 @@ int main(int argc, char *argv[]) {
     // 解析→addBook→封面→索引）。SyncManager 不依赖 BookImporter 类型，经钩子注入。
     syncController->setAdoptHandler([importer](const QString &p) { return importer->adoptFile(p); });
     syncController->setAutoSync(settings->value("webdav/autoSync").toBool());
+    // L8（P1#18）：同步成功应用远端数据（进度/划线/书目/书体注册）→ 刷新 Books 单例
+    // （书架进度/书目即时生效；ReaderPage 的划线刷新经其 Sync.onDataApplied 连接）
+    QObject::connect(syncController, &SyncController::dataApplied,
+                     books, [books] { emit books->booksChanged(); });
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Sync", syncController);
     // B10：应用退出时结算阅读计时（页面 onDestruction 只在正常退出 QML 引擎销毁时触发，
     // 直接退进程/崩溃时兜底由这里结算，保证已读秒数不丢失）。

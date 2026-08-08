@@ -47,4 +47,7 @@ signals:
     void runningChanged();
     void logChanged();
     void finished(bool ok, const QString &error);
+    // L8（P1#18）：转发 SyncManager::syncApplied——本次同步成功应用远端数据
+    // （进度/划线/书目/书体注册）；main.cpp 据此刷新 Books 单例，ReaderPage 重载划线
+    void dataApplied();
 };

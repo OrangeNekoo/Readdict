@@ -3,10 +3,12 @@ import QtTest
 import Readdict.Backend
 
 // D3 冒烟：SyncPage 可加载（WebDAV 配置 + 日志列表编译检查）；错误配置
-// （空 URL/无服务器）下 saveAndSync 不崩溃、finished(false, error) 到达、
+// （空 URL/无服务器）下 syncNow 不崩溃、finished(false, error) 到达、
 // 日志记录失败行、running 复位。tst_qmlmain 注册的 Sync 指向测试临时目录的
 // settings.json（与 Settings 单例同文件），run() 走真实 WebDavClient——
 // 空 URL / 未注册协议使 QNetworkReply 立即失败，无网络依赖、确定性快速。
+// L8（P1#11）：配置项即改即写（CheckBox/TextField 的 onChanged 直写 Settings），
+// syncNow() 只触发同步。
 Item {
     id: root
     width: 1100; height: 720
@@ -33,7 +35,7 @@ Item {
             verify(page !== null, "SyncPage 应能加载")
             var got = null
             Sync.finished.connect(function (ok, error) { got = { ok: ok, error: error } })
-            page.saveAndSync()
+            page.syncNow()
             verify(got !== null, "finished 信号应同步到达（run 是阻塞的）")
             compare(got.ok, false, "空 URL 的同步应判定失败")
             verify((got.error || "").length > 0, "失败应带 error 文本，实际 " + got.error)
@@ -59,20 +61,20 @@ Item {
             verify(stack.currentItem !== settingsPage, "点击后应导航离开设置页")
             verify(stack.depth === 2, "栈深度应为 2（设置页 + 同步页），实际 " + stack.depth)
             var syncPage = stack.currentItem
-            verify(syncPage !== null && syncPage.saveAndSync !== undefined,
-                   "栈顶应为 SyncPage（含 saveAndSync 函数）")
+            verify(syncPage !== null && syncPage.syncNow !== undefined,
+                   "栈顶应为 SyncPage（含 syncNow 函数）")
             stack.destroy()
         }
 
-        // 保存应把配置与勾选项持久化到 settings.json（含 autoSync），
-        // 并置 Sync 的自动同步开关；未注册协议 URL 立即失败（不联网）
+        // 即改即写：url/autoSync 经 onChanged 直接持久化到 settings.json，
+        // 未勾选项保持默认；syncNow 用未注册协议 URL 立即失败（不联网）
         function test_savePersistsSettingsAndAutoSync() {
             var loader = syncPageComp.createObject(root)
             var page = loader.item
             verify(page !== null, "SyncPage 应能加载")
             page.syncUrlField.text = "notarealscheme://dav.example.invalid/dav"
             page.syncAutoCheck.checked = true
-            page.saveAndSync()
+            page.syncNow()
             compare(String(Settings.value("webdav/url")), "notarealscheme://dav.example.invalid/dav",
                     "服务器地址应持久化")
             compare(Settings.value("webdav/autoSync"), true, "autoSync 勾选应持久化")

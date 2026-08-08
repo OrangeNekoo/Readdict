@@ -6,7 +6,8 @@ import Readdict.UI 1.0
 
 // D3：WebDAV 同步设置页。配置（url/user/password/勾选项）落 SettingsStore 的
 // webdav 分区（password 明文存本机 settings.json，设计文档已定，永不上传——
-// 见 SyncManager.cpp 的 kSyncSections 白名单）；"保存并立即同步"触发 Sync.run。
+// 见 SyncManager.cpp 的 kSyncSections 白名单）。L8（P1#11）：所有配置项即改即写
+// （与设置页即时生效语义一致），「立即同步」按钮只触发 Sync.run。
 // 同步日志来自 SyncController.log（SyncManager 逐条操作记录，含时间戳）。
 Page {
     id: page
@@ -40,6 +41,8 @@ Page {
                 Layout.fillWidth: true
                 text: Settings.value("webdav/url").toString()
                 placeholderText: "https://dav.example.com/dav/readdict"
+                // L8（P1#11）：即改即写——按钮不再承担保存职责
+                onTextChanged: Settings.setValue("webdav/url", text.trim())
             }
         }
         RowLayout {
@@ -48,6 +51,7 @@ Page {
                 id: userField
                 Layout.fillWidth: true
                 text: Settings.value("webdav/user").toString()
+                onTextChanged: Settings.setValue("webdav/user", text.trim())
             }
         }
         RowLayout {
@@ -57,6 +61,7 @@ Page {
                 Layout.fillWidth: true
                 echoMode: TextInput.Password
                 text: Settings.value("webdav/password").toString()
+                onTextChanged: Settings.setValue("webdav/password", text)
             }
         }
         Label { text: qsTr("同步内容") }
@@ -66,34 +71,44 @@ Page {
                 id: cbSettings
                 text: qsTr("设置")
                 checked: Settings.value("webdav/syncSettings") === true
+                // L8（P1#11）：勾选即写
+                onCheckedChanged: Settings.setValue("webdav/syncSettings", checked)
             }
             CheckBox {
                 id: cbProgress
                 text: qsTr("阅读进度")
                 checked: Settings.value("webdav/syncProgress") === true
+                onCheckedChanged: Settings.setValue("webdav/syncProgress", checked)
             }
             CheckBox {
                 id: cbNotes
                 text: qsTr("划线笔记")
                 checked: Settings.value("webdav/syncHighlights") === true
+                onCheckedChanged: Settings.setValue("webdav/syncHighlights", checked)
             }
             CheckBox {
                 id: cbBooks
                 text: qsTr("书籍文件")
                 checked: Settings.value("webdav/syncBooks") === true
+                onCheckedChanged: Settings.setValue("webdav/syncBooks", checked)
             }
             CheckBox {
                 id: cbAuto
                 text: qsTr("每 30 分钟自动同步")
                 // autoSync 持久化（webdav/autoSync，默认 false）：重启后恢复上次选择，
-                // main.cpp 启动时据此调 Sync.setAutoSync
+                // main.cpp 启动时据此调 Sync.setAutoSync。L8：勾选即写并即时启停定时器
                 checked: Settings.value("webdav/autoSync") === true
+                onCheckedChanged: {
+                    Settings.setValue("webdav/autoSync", checked)
+                    Sync.setAutoSync(checked)
+                }
             }
         }
         RowLayout {
             Button {
-                text: qsTr("保存并立即同步")
-                onClicked: page.saveAndSync()
+                // L8（P1#11）：配置已即改即写，按钮只触发同步
+                text: qsTr("立即同步")
+                onClicked: page.syncNow()
             }
             BusyIndicator { running: Sync.running }
             Label {
@@ -114,7 +129,8 @@ Page {
                 width: ListView.view.width
                 wrapMode: Text.Wrap
                 font.pixelSize: 12
-                // 失败行 = 时间戳后紧跟"失败"的消息（books 信息行可能含书名里的"失败"字）
+                // 失败行 = 时间戳后紧跟"失败"/"注册失败"的消息（与 SyncManager::fail
+                // 的两类消息前缀同源；books 信息行可能含书名里的"失败"字）
                 color: page.isFailureLine(modelData) ? UITheme.danger : UITheme.textSecondary
             }
             ScrollBar.vertical: ScrollBar {}
@@ -122,22 +138,17 @@ Page {
     }
 
     // 日志行是否真实失败：SyncManager::log 格式 "yyyy-MM-dd HH:mm:ss <消息>"，
-    // 只认消息起始为"失败"（与 SyncController::doSync 的判定同源）
+    // 只认消息起始为"失败"/"注册失败"（失败消息全集见 SyncManager::fail；
+    // 仅展示着色用——成败判定在 SyncController 经结构化 Result，不在此）
     function isFailureLine(line) {
-        return line.length > 20 && line.substring(20).startsWith("失败")
+        if (line.length <= 20) return false
+        const msg = line.substring(20)
+        return msg.startsWith("失败") || msg.startsWith("注册失败")
     }
 
-    // 保存配置并立即同步（SettingsPage.saveTts 同模式：函数可被测试直接调用）
-    function saveAndSync() {
-        Settings.setValue("webdav/url", urlField.text.trim())
-        Settings.setValue("webdav/user", userField.text.trim())
-        Settings.setValue("webdav/password", passField.text)
-        Settings.setValue("webdav/syncSettings", cbSettings.checked)
-        Settings.setValue("webdav/syncProgress", cbProgress.checked)
-        Settings.setValue("webdav/syncHighlights", cbNotes.checked)
-        Settings.setValue("webdav/syncBooks", cbBooks.checked)
-        Settings.setValue("webdav/autoSync", cbAuto.checked)
-        Sync.setAutoSync(cbAuto.checked)
+    // L8（P1#11）：立即同步——配置项已即改即写，此处只按当前勾选触发 Sync.run
+    // （函数可被测试直接调用）
+    function syncNow() {
         Sync.run(cbSettings.checked, cbProgress.checked, cbNotes.checked, cbBooks.checked)
     }
 

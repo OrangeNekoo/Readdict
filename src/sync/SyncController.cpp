@@ -22,6 +22,9 @@ SyncController::SyncController(const QString &dbPath, const QString &libraryDir,
         opts.books = st->value(QStringLiteral("webdav/syncBooks")).toBool(false);
         doSync(opts);
     });
+    // L8（P1#18）：转发 SyncManager::syncApplied → dataApplied（main.cpp 据此刷新
+    // Books 单例，ReaderPage 重载划线）
+    connect(&m_mgr, &SyncManager::syncApplied, this, &SyncController::dataApplied);
 }
 
 QString SyncController::settingsPath() const {
@@ -66,23 +69,14 @@ void SyncController::doSync(const SyncManager::Options &opts) {
     WebDavClient client(st->value(QStringLiteral("webdav/url")).toString(),
                         st->value(QStringLiteral("webdav/user")).toString(),
                         st->value(QStringLiteral("webdav/password")).toString());
-    // 同步阻塞（QEventLoop 网络）；完成与否由日志判定（SyncManager 无返回值）
-    m_mgr.sync(client, opts);
+    // 同步阻塞（QEventLoop 网络）；L8（P1#12）：成败由结构化 Result 判定——
+    // 失败路径在 SyncManager 内统一记入 Result.failures（与日志失败行同源），
+    // 不再按日志字符串匹配判败（书名含"失败"字样的误判与信息行漏判一并根除）
+    const SyncManager::Result r = m_mgr.sync(client, opts);
     m_log = m_mgr.log();
     emit logChanged();
 
-    // 失败判定：SyncManager 失败路径统一 log "… 失败 <name>: <error>"（见 syncOne），
-    // 行格式固定为 "yyyy-MM-dd HH:mm:ss <消息>"（19 字符时间戳 + 空格，见 SyncManager::log）。
-    // 只认时间戳后紧跟"失败"的消息——books 路径的信息行（"上传书籍 b<id>_<文件名>"、
-    // "远端书目本地无文件体，待书籍同步后注册: <书名>"）可能含书名/文件名里的"失败"字
-    // （如《失败的逻辑》），子串匹配会误判成功同步为失败。
-    QStringList failed;
-    for (const QString &line : m_log)
-        if (line.mid(20).startsWith(QStringLiteral("失败")))
-            failed.append(line);
-    const QString error = failed.join(QLatin1Char('\n'));
-
     m_running = false;
     emit runningChanged();
-    emit finished(failed.isEmpty(), error);
+    emit finished(r.ok, r.failures.join(QLatin1Char('\n')));
 }

@@ -101,6 +101,15 @@ void SyncManager::log(const QString &line) {
                  + QStringLiteral(" ") + line);
 }
 
+// L8（P1#12）：失败路径统一入口——日志行与结构化 failures 同源（SyncController 判败
+// 只读 Result，不再按日志字符串匹配；日志保留供 SyncPage 展示）。line 为不含时间戳的
+// 完整消息（"失败 <name>: <error>"；书体注册失败为 "注册失败 <name>: <error>"）。
+void SyncManager::fail(const QString &line) {
+    log(line);
+    m_result.failures.append(line);
+    m_result.ok = false;
+}
+
 // ---- 打包 ----
 
 QByteArray SyncManager::buildSettingsJson() const {
@@ -269,6 +278,9 @@ bool SyncManager::applyProgressJson(const QByteArray &data) {
     const QJsonObject root = QJsonDocument::fromJson(data).object();
     const QJsonArray arr = root[QStringLiteral("books")].toArray();
     bool ok = true;
+    // L8（P2#40）：批处理外套事务——整批一次提交（逐条 autocommit 的 fsync 开销），
+    // 失败退回自动提交（同 BookManager::addBook 先例）；提交失败回滚释放事务
+    const bool inTx = m_db.transaction();
     for (const QJsonValue &v : arr) {
         const QJsonObject o = v.toObject();
         const qint64 id = o[QStringLiteral("bookId")].toVariant().toLongLong();
@@ -302,6 +314,10 @@ bool SyncManager::applyProgressJson(const QByteArray &data) {
         if (!up.exec())
             ok = false;
     }
+    if (inTx && !m_db.commit()) {
+        ok = false;
+        m_db.rollback(); // 提交失败事务仍激活：回滚释放，避免污染后续调用
+    }
     return ok;
 }
 
@@ -309,11 +325,23 @@ bool SyncManager::applyHighlightsJson(const QByteArray &data) {
     const QJsonObject root = QJsonDocument::fromJson(data).object();
     const QJsonArray arr = root[QStringLiteral("highlights")].toArray();
     bool ok = true;
+    // L8（P2#40）：批处理外套事务（同 applyProgressJson；提交失败回滚释放）
+    const bool inTx = m_db.transaction();
     for (const QJsonValue &v : arr) {
         const QJsonObject o = v.toObject();
         const qint64 bookId = o[QStringLiteral("bookId")].toVariant().toLongLong();
         // NULL 语义保留：JSON null → 绑定 SQL NULL，与本地 NULL 行匹配（避免压平为 ""/0
         // 造成去重失效、重复插入）
+        // L8（P1#18）：孤儿划线跳过——bookId 本地无此书（跨设备 id 各设备独立自增，
+        // 远端书尚未同步/未注册时其 id 本地不存在）→ 不插入孤儿行（笔记列表/渲染按
+        // book_id 查询永不命中，且 books.json 同步后同一 id 可能指向另一本书造成串书）
+        {
+            QSqlQuery chk(m_db);
+            chk.prepare(QStringLiteral("SELECT 1 FROM books WHERE id=?"));
+            chk.addBindValue(bookId);
+            if (!chk.exec() || !chk.next())
+                continue; // 查询失败 ≠ 无行：保守跳过，不产生孤儿
+        }
         const QJsonValue chV = o[QStringLiteral("chapter")];
         const QJsonValue siV = o[QStringLiteral("sentenceIndex")];
         const QJsonValue txV = o[QStringLiteral("text")];
@@ -384,6 +412,10 @@ bool SyncManager::applyHighlightsJson(const QByteArray &data) {
         ins.addBindValue(o[QStringLiteral("chapterIndex")].toInt());
         if (!ins.exec())
             ok = false;
+    }
+    if (inTx && !m_db.commit()) {
+        ok = false;
+        m_db.rollback();
     }
     return ok;
 }
@@ -488,7 +520,7 @@ void SyncManager::syncOne(WebDavClient &client, const QVector<DavEntry> &remote,
             if (client.put(name, payload))
                 log(QStringLiteral("上传 %1").arg(name));
             else
-                log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
+                fail(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
         }
         return;
     }
@@ -496,7 +528,7 @@ void SyncManager::syncOne(WebDavClient &client, const QVector<DavEntry> &remote,
         // 本地无数据：下载并应用（新设备首次同步）。远端损坏同样不下载空转
         const QByteArray data = client.get(name);
         if (!client.lastError().isEmpty()) {
-            log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
+            fail(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
             return;
         }
         QJsonParseError parseErr;
@@ -506,9 +538,10 @@ void SyncManager::syncOne(WebDavClient &client, const QVector<DavEntry> &remote,
             return;
         }
         if (!apply(data)) {
-            log(QStringLiteral("失败 %1: 应用远端数据失败").arg(name));
+            fail(QStringLiteral("失败 %1: 应用远端数据失败").arg(name));
             return; // 不推进 adopted：失败可重试
         }
+        m_applied = true; // L8：成功应用远端数据 → syncApplied 信号（sync() 末尾统一发）
         if (onAdopt)
             onAdopt(data); // 新设备首次采纳：记录版本，避免后续重复下载
         log(QStringLiteral("下载 %1").arg(name));
@@ -521,7 +554,7 @@ void SyncManager::syncOne(WebDavClient &client, const QVector<DavEntry> &remote,
     if (remoteVersionOf || sameAsLocal) {
         remoteData = client.get(name);
         if (!client.lastError().isEmpty()) {
-            log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
+            fail(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
             return;
         }
         // 远端载荷不可解析（截断/手改损坏）→ 跳过并 log：不下载空转，也不让损坏内容
@@ -561,7 +594,7 @@ void SyncManager::syncOne(WebDavClient &client, const QVector<DavEntry> &remote,
                     onAdopt(payload); // 上传后远端即含载荷内容：adopted 对齐其版本
                 log(QStringLiteral("保留本地 %1").arg(name));
             } else {
-                log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
+                fail(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
             }
         }
         break;
@@ -569,13 +602,14 @@ void SyncManager::syncOne(WebDavClient &client, const QVector<DavEntry> &remote,
         if (remoteData.isEmpty())
             remoteData = client.get(name);
         if (!client.lastError().isEmpty()) {
-            log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
+            fail(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
             return;
         }
         if (!apply(remoteData)) {
-            log(QStringLiteral("失败 %1: 应用远端数据失败").arg(name));
+            fail(QStringLiteral("失败 %1: 应用远端数据失败").arg(name));
             return; // 不推进 adopted：元数据丢失可重试
         }
+        m_applied = true; // L8：成功应用远端数据 → syncApplied 信号
         if (onAdopt)
             onAdopt(remoteData); // 采用远端：adopted 对齐载荷版本，本地版本时钟随之追赶
         log(QStringLiteral("采用远端 %1").arg(name));
@@ -621,7 +655,7 @@ void SyncManager::syncBookBodies(WebDavClient &client, const QVector<DavEntry> &
             if (client.put(name, f.readAll()))
                 log(QStringLiteral("上传书籍 %1").arg(name));
             else
-                log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
+                fail(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
         }
     }
     // 下载：远端书籍文件体缺失于本地 → 写入 libraryDir/books/<basename>，落盘后经
@@ -648,8 +682,14 @@ void SyncManager::syncBookBodies(WebDavClient &client, const QVector<DavEntry> &
             continue;
         if (m_adopt) {
             const QString regErr = m_adopt(dest);
-            log(regErr.isEmpty() ? QStringLiteral("下载并注册书籍 %1").arg(e.name)
-                                 : QStringLiteral("注册失败 %1: %2").arg(e.name, regErr));
+            if (regErr.isEmpty()) {
+                log(QStringLiteral("下载并注册书籍 %1").arg(e.name));
+                m_applied = true; // L8：新书注册成功 → 书架/划线需刷新（syncApplied）
+            } else {
+                // L3 复审遗留（L8 过渡态）：注册失败此前仅 log、字符串判败不认（行首是
+                // "注册失败"而非"失败"）；结构化结果下计入 failures，失败可见可重试
+                fail(QStringLiteral("注册失败 %1: %2").arg(e.name, regErr));
+            }
         } else {
             log(QStringLiteral("下载书籍 %1").arg(e.name));
         }
@@ -701,11 +741,13 @@ static QByteArray mergeBooksPayloads(const QByteArray &remoteData, const QByteAr
         .toJson(QJsonDocument::Compact);
 }
 
-void SyncManager::sync(WebDavClient &client, const Options &opts) {
+SyncManager::Result SyncManager::sync(WebDavClient &client, const Options &opts) {
     // 日志按"本次同步"记账：清空历史，避免 D3 SyncController 按全量累积日志
     // 判定成败——历史失败行会让后续完全成功的同步误报 finished(false)，
-    // 且错误文本无限增长（D3 复审发现）。
+    // 且错误文本无限增长（D3 复审发现）。L8：结构化结果同样按次重置。
     m_log.clear();
+    m_result = Result();
+    m_applied = false;
     // 快照式决策：list() 只取一次（简报"client.list() 得远端文件与 mtime"），
     // 单次同步内所有项的 有无/冲突 判定基于同一快照。
     const QVector<DavEntry> remote = client.list();
@@ -834,4 +876,10 @@ void SyncManager::sync(WebDavClient &client, const Options &opts) {
                 });
         syncBookBodies(client, remote);
     }
+    // L8（P1#18）：本次成功应用过远端数据（进度/划线/书目元数据/书体注册）→ 发
+    // syncApplied，main.cpp 经 SyncController::dataApplied 转发刷新 Books 单例、
+    // ReaderPage 重载划线。部分项失败不影响已应用数据的 UI 刷新
+    if (m_applied)
+        emit syncApplied();
+    return m_result;
 }

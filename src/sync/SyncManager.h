@@ -3,6 +3,7 @@
 #include <QDateTime>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QObject>
 #include <QPair>
 #include <QSqlDatabase>
 #include <QString>
@@ -27,7 +28,8 @@ class SettingsStore;
 // - 远端文件命名：settings.json / progress.json / highlights.json / books.json；
 //   书籍文件体 h<sha1(前256KB)前16位hex>_<basename>（内容哈希命名，L3）；下载兼容
 //   旧 b<id>_<basename> 命名。扁平命名，list() depth 1 可见，子目录不可见。
-class SyncManager {
+class SyncManager : public QObject {
+    Q_OBJECT
 public:
     enum Conflict { KeepLocal, TakeRemote, Skip };
     // connection：SQLite 连接名，默认 readdict_sync；测试可注入避免全局连接名冲突。
@@ -51,10 +53,18 @@ public:
     void setAdoptHandler(std::function<QString(const QString &)> h) { m_adopt = std::move(h); }
     Conflict resolveConflict(const QDateTime &local, const QDateTime &remote) const;
     struct Options { bool settings = false, progress = true, highlights = false, books = false; };
-    void sync(WebDavClient &client, const Options &opts);
+    // L8（P1#12）：结构化同步结果——ok=全部项成功；failures=失败项明细（与 log 失败行
+    // 同源，供 SyncController 判败/透传 QML，替代按日志字符串匹配判败）
+    struct Result { bool ok = true; QStringList failures; };
+    Result sync(WebDavClient &client, const Options &opts);
     QStringList log() const { return m_log; }
+signals:
+    // L8（P1#18）：同步成功应用远端数据后发出——main.cpp 经 SyncController 转发
+    // （dataApplied）刷新 Books 单例；ReaderPage 据此重载划线
+    void syncApplied();
 private:
     void log(const QString &line);                       // 时间 + 动作 + 文件名
+    void fail(const QString &line);     // L8：log 失败行并记入 m_result.failures
     QString settingsPath() const;                        // db 同目录 settings.json
     QVector<QPair<qint64, double>> progressPairs() const; // books 表 progress>0 的书
     // 通用单项同步：按 远端有无 × 本地有无 分派；两边都有时先做内容相等检查
@@ -84,6 +94,8 @@ private:
     QString m_dbPath, m_libraryDir;
     QSqlDatabase m_db;
     QStringList m_log;
+    Result m_result;                    // L8：本次 sync 的结构化结果（sync() 开始重置）
+    bool m_applied = false;             // L8：本次 sync 是否成功应用过远端数据
     SettingsStore *m_settings = nullptr; // L2：注入的设置单例（非拥有，main.cpp 持有）
     std::function<QString(const QString &)> m_adopt; // L3：下载落盘后的注册钩子
 };

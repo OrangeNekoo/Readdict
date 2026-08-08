@@ -11,6 +11,7 @@
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QTemporaryDir>
+#include <QSignalSpy>
 #include "core/DatabaseManager.h"
 #include "core/SettingsStore.h"
 #include "SyncController.h"
@@ -56,6 +57,65 @@ private:
         }
         const QByteArray resp = "HTTP/1.1 " + status + "\r\n"
             "Content-Type: application/xml\r\n"
+            "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
+            "Connection: close\r\n\r\n" + body;
+        s->write(resp);
+        s->flush();
+        s->disconnectFromHost();
+    }
+};
+
+// L8（P1#18）：带数据的远端 mock——PROPFIND 列出 progress.json（mtime 较新），
+// GET 返回载荷——驱动 SyncController 的 TakeRemote 应用路径（dataApplied 转发）
+class ProgressDav : public QTcpServer {
+    Q_OBJECT
+protected:
+    void incomingConnection(qintptr fd) override {
+        QTcpSocket *s = new QTcpSocket(this);
+        s->setSocketDescriptor(fd);
+        m_buf[s] = QByteArray();
+        connect(s, &QTcpSocket::readyRead, this, [this, s] { onReadyRead(s); });
+        connect(s, &QTcpSocket::disconnected, s, &QObject::deleteLater);
+        connect(s, &QTcpSocket::disconnected, this, [this, s] { m_buf.remove(s); });
+    }
+private:
+    QHash<QTcpSocket *, QByteArray> m_buf;
+    // 载荷版本 2026-08-02（晚于本地 08-01）→ TakeRemote 应用。
+    // char 数组（非指针）：QByteArrayLiteral 需字面量数组推导长度
+    static constexpr char kPayload[] =
+        "{\"books\":[{\"bookId\":1,\"progress\":0.9,\"ts\":\"2026-08-02T00:00:00Z\"}]}";
+    void onReadyRead(QTcpSocket *s) {
+        QByteArray &req = m_buf[s];
+        req += s->readAll();
+        const int hdrEnd = req.indexOf("\r\n\r\n");
+        if (hdrEnd < 0)
+            return;
+        int contentLength = 0;
+        for (const QByteArray &line : req.left(hdrEnd).split('\n')) {
+            const QByteArray l = line.trimmed().toLower();
+            if (l.startsWith("content-length:"))
+                contentLength = l.mid(15).trimmed().toInt();
+        }
+        if (req.size() < hdrEnd + 4 + contentLength)
+            return;
+        QByteArray status = "201 Created"; // MKCOL/PUT
+        QByteArray body;
+        if (req.left(hdrEnd).startsWith("PROPFIND")) {
+            status = "207 Multi-Status";
+            body = QByteArrayLiteral("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                   "<d:multistatus xmlns:d=\"DAV:\">"
+                   "<d:response><d:href>/dav/progress.json</d:href>"
+                   "<d:propstat><d:prop>"
+                   "<d:getlastmodified>2026-08-02T00:00:00Z</d:getlastmodified>"
+                   "<d:getcontentlength>71</d:getcontentlength>"
+                   "</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>"
+                   "</d:response></d:multistatus>");
+        } else if (req.left(hdrEnd).startsWith("GET")) {
+            status = "200 OK";
+            body = QByteArrayLiteral(kPayload);
+        }
+        const QByteArray resp = "HTTP/1.1 " + status + "\r\n"
+            "Content-Type: application/json\r\n"
             "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
             "Connection: close\r\n\r\n" + body;
         s->write(resp);
@@ -239,6 +299,48 @@ private slots:
         QVERIFY2(logText.contains(QStringLiteral("失败的逻辑")),
                  ("日志应含书籍文件上传行，实际:\n" + logText).toUtf8());
         QVERIFY2(!ctl.running(), "同步结束后 running 应为 false");
+    }
+
+    // L8（P1#18）：TakeRemote 成功应用远端数据 → SyncController::dataApplied 转发到达，
+    // finished(true)；数据确实落库（SyncManager::syncApplied → dataApplied 接线回归）
+    void appliedDataEmitsDataApplied() {
+        ProgressDav server;
+        QVERIFY2(server.listen(QHostAddress::LocalHost, 0), "mock 服务器应能监听");
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString conn = QStringLiteral("synccontroller_conn") + QTest::currentTestFunction();
+        {
+            DatabaseManager dbm(dir.path() + "/t.db", conn);
+            QSqlQuery q(dbm.database());
+            QVERIFY2(q.exec("INSERT INTO books(title,format,path,progress,last_read_at,added_at) "
+                            "VALUES('测试书','TXT','/tmp/t.txt',0.5,"
+                            "'2026-08-01T10:00:00Z','2026-08-01T09:00:00Z')"),
+                     q.lastError().text().toUtf8());
+        }
+        SettingsStore st(dir.path() + "/settings.json");
+        st.setValue("webdav/url",
+                    QStringLiteral("http://127.0.0.1:%1/dav/").arg(server.serverPort()));
+        st.save();
+        SyncController ctl(dir.path() + "/t.db", dir.path(), conn);
+        QSignalSpy dataSpy(&ctl, &SyncController::dataApplied);
+        bool got = false, ok = false;
+        QObject::connect(&ctl, &SyncController::finished,
+                         [&](bool o, const QString &) { got = true; ok = o; });
+        ctl.run(false, true, false, false); // 仅 progress
+        QVERIFY2(got, "finished 信号应到达");
+        QVERIFY2(ok, "远端应用成功应判定成功");
+        QCOMPARE(dataSpy.count(), 1); // syncApplied 已转发为 dataApplied
+        // 数据确实落库：SyncManager 构造时同名 addDatabase 移除了种子 dbm 的连接，
+        // 用独立验证连接（tst_syncmanager 的 progressOf 同模式）
+        QSqlDatabase v = QSqlDatabase::addDatabase("QSQLITE", "synccontroller_verify");
+        v.setDatabaseName(dir.path() + "/t.db");
+        QVERIFY(v.open());
+        QSqlQuery q(v);
+        q.prepare("SELECT progress FROM books WHERE id=1");
+        QVERIFY(q.exec() && q.next());
+        QCOMPARE(q.value(0).toDouble(), 0.9); // 远端进度已应用
+        v = QSqlDatabase(); // 先释放句柄再移除连接，避免 "still in use" 告警
+        QSqlDatabase::removeDatabase("synccontroller_verify");
     }
 };
 

@@ -7,6 +7,7 @@
 // mock 方案：WebDavClient 方法抽成 virtual，测试内嵌 MockWebDavClient 以内存
 // QHash 模拟远端存储（list/put/get/remove），避免为 sync 多轮有状态交互搭 TCP mock。
 #include <QtTest>
+#include <QSignalSpy>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -223,6 +224,7 @@ private slots:
         const QString db = dir.filePath("t.db");
         {
             QSqlDatabase seed = seedDb(db);
+            seedBook(seed, 1, "a", 0.0, QString()); // L8：孤儿跳过生效——划线须有本地书
             seedHighlight(seed, 1, 1, "第一章", 3, "高亮文本", "2026-01-01T00:00:00");
             seedHighlight(seed, 2, 1, "第一章", 4, "另一句", "2026-01-02T00:00:00");
         }
@@ -723,17 +725,19 @@ private slots:
         const QString seed = "INSERT INTO highlights(id,book_id,chapter,sentence_index,text,"
                              "color,note,created_at) VALUES(1,1,'ch',3,'text','#FFF','',"
                              "'2026-01-01T00:00:00')";
+        // L8：孤儿跳过生效——两端都须有 book 1 行，远端划线才能合并
         {
             QSqlDatabase a = seedDb(dbA);
+            seedBook(a, 1, "a", 0.0, QString());
             QSqlQuery qa(a);
             QVERIFY2(qa.exec(seed), qPrintable(qa.lastError().text()));
         }
         {
             QSqlDatabase b = seedDb(dbB);
+            seedBook(b, 1, "a", 0.0, QString());
             QSqlQuery qb(b);
             QVERIFY2(qb.exec(seed), qPrintable(qb.lastError().text()));
         }
-        // A 改笔记：updateNote bump created_at（编辑端版本前移到 T）→ 版本时钟感知编辑
         HighlightManager hmA(dbA, "readdict_hl_a");
         hmA.updateNote(1, "新笔记");
         MockWebDavClient mock;
@@ -828,10 +832,10 @@ private slots:
         const QString db = dir.filePath("t.db");
         {
             QSqlDatabase seed = seedDb(db);
+            seedBook(seed, 1, "a", 0.0, QString()); // L8：孤儿跳过生效——划线须有本地书
             seedHighlight(seed, 1, 1, "ch", 3, "text", "2026-01-01T00:00:00");
         }
         SyncManager m(db, dir.path());
-        // 双设备独立划线同句：四元组同、color/note 同，但载荷 createdAt 更新 → 采纳版本
         m.applyHighlightsJson("{\"highlights\":[{\"bookId\":1,\"chapter\":\"ch\","
                               "\"sentenceIndex\":3,\"text\":\"text\",\"color\":\"#FFD54F\","
                               "\"note\":\"\",\"createdAt\":\"2026-06-01T00:00:00Z\"}]}");
@@ -1108,6 +1112,75 @@ private slots:
         QCOMPARE(downloaded.size(), 1);
         QVERIFY(downloaded.first().endsWith("sample.epub"));
         QVERIFY(QFile::exists(downloaded.first())); // 落盘成功
+    }
+
+    // ---- L8（P1#18）：载荷含本地不存在的 bookId → 不产生孤儿划线行 ----
+    void applyHighlightsSkipsUnknownBooks() {
+        QTemporaryDir dir;
+        const QString db = dir.filePath("t.db");
+        {
+            QSqlDatabase seed = seedDb(db);
+            seedBook(seed, 1, "a", 0.0, QString()); // 本地只有 book 1
+        }
+        SyncManager m(db, dir.path());
+        // bookId=999 本地不存在 → 跳过，不插入孤儿行
+        m.applyHighlightsJson("{\"highlights\":[{\"bookId\":999,\"chapter\":\"ch\","
+                              "\"sentenceIndex\":1,\"text\":\"孤儿\",\"color\":\"#FFF\","
+                              "\"createdAt\":\"2026-06-01T00:00:00Z\"}]}");
+        QCOMPARE(countRows(db, "highlights"), 0);
+        // 同载荷混合本地存在的书：存在的插入、不存在的跳过
+        m.applyHighlightsJson("{\"highlights\":[{\"bookId\":999,\"chapter\":\"ch\","
+                              "\"sentenceIndex\":1,\"text\":\"孤儿\",\"color\":\"#FFF\"},"
+                              "{\"bookId\":1,\"chapter\":\"ch\",\"sentenceIndex\":2,"
+                              "\"text\":\"有效\",\"color\":\"#FFF\"}]}");
+        QCOMPARE(countRows(db, "highlights"), 1);
+    }
+
+    // ---- L8（P1#12）：sync 返回结构化 Result（失败路径 ok=false 且 failures 非空） ----
+    void syncReturnsStructuredResult() {
+        QTemporaryDir dir;
+        const QString db = dir.filePath("t.db");
+        {
+            QSqlDatabase seed = seedDb(db);
+            seedBook(seed, 1, "a", 0.5, "2026-08-01T10:00:00"); // 有进度 → 走上传路径
+        }
+        MockWebDavClient mock;
+        mock.putReturnsFalse = true; // settings/progress PUT 失败
+        SyncManager m(db, dir.path());
+        SyncManager::Options o; o.settings = false; o.progress = true;
+        o.highlights = false; o.books = false;
+        const SyncManager::Result r = m.sync(mock, o);
+        QVERIFY(!r.ok);
+        QVERIFY(!r.failures.isEmpty());
+        QVERIFY(r.failures.join('\n').contains("progress.json"));
+    }
+
+    // ---- L8（P1#18）：syncApplied 信号——成功应用远端数据才发（上传路径不发） ----
+    void syncEmitsSyncAppliedOnlyWhenApplied() {
+        QTemporaryDir dir;
+        const QString db = dir.filePath("t.db");
+        {
+            QSqlDatabase seed = seedDb(db);
+            seedBook(seed, 1, "a", 0.5, "2026-08-01T10:00:00");
+        }
+        MockWebDavClient mock;
+        mock.files["progress.json"] =
+            "{\"books\":[{\"bookId\":1,\"progress\":0.9,\"ts\":\"2026-08-02T00:00:00Z\"}]}";
+        mock.mtimes["progress.json"] = QDateTime(QDate(2026, 8, 2), QTime(0, 0, 0), QTimeZone::UTC);
+        SyncManager m(db, dir.path());
+        QSignalSpy spy(&m, &SyncManager::syncApplied);
+        SyncManager::Options o; o.settings = false; o.progress = true;
+        o.highlights = false; o.books = false;
+        m.sync(mock, o); // 远端 8/2 > 本地 8/1 → TakeRemote 应用 → 发信号
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(progressOf(db, 1).toDouble(), 0.9); // 确实应用了
+        // 再同步：Skip（无应用）→ 不再发
+        m.sync(mock, o);
+        QCOMPARE(spy.count(), 1);
+        // 纯上传路径（远端空）也不发——本地数据上传不属"应用远端数据"
+        MockWebDavClient empty;
+        m.sync(empty, o);
+        QCOMPARE(spy.count(), 1);
     }
 };
 QTEST_MAIN(TestSync)
