@@ -35,12 +35,39 @@ Page {
     property alias contentView: content
     // C7：笔记列表 Dialog（冒烟测试经此打开/关闭）
     property alias notesDialog: notesDlg
+    // U4：Kindle 底部 Sheet 工具栏——点屏幕中部/边缘弹出（Kindle 语义：Sheet 本身
+    // 含操作，无需 5s 隐藏；Sheet 打开时暂停控制栏计时）；C3 控制栏保留为快捷条
+    //（上/下章、A±、朗读），唤出整合见 handleContentTap 注释与 task-U4-report。
+    property bool sheetOpen: false
+    property string sheetTab: "theme"
+    property bool menuOpen: false
+    // U4：MoreSheet 开关——自动续章（reading/autoContinue，默认开，门控
+    // autoNextChapter）与深色跟随（reading/darkFollow，默认关，effectiveBg 派生
+    // 跟随应用主题深浅，覆盖显式背景选择；关闭后还原显式选择——page.bgMode 未被覆盖）
+    property bool autoContinue: true
+    property bool darkFollow: false
+    // U4：当前字族存储 token（FontSheet 高亮/选择；setFontFamily 同步更新，
+    // 与 controls.fontFamily 同源——Settings typography/fontFamily）
+    property string fontFamily: ""
+    // U4：有效背景模式——darkFollow 开时跟随应用主题（UITheme.isDark 实时绑定），
+    // 否则显式选择（bgMode）；驱动背景渲染/顶栏/控制栏/朗读条的文字与底色
+    property string effectiveBg: page.darkFollow
+        ? (UITheme.isDark ? "dark" : "light") : page.bgMode
+    // U4：测试句柄（冒烟经此驱动 Sheet 开合/标签/面板与右上角菜单）
+    property alias bottomSheet: bottomSheet
+    property alias readerMenu: menuOverlay
+    property alias menuItems: menuRepeater
+    // U4：控制栏自动隐藏计时器（冒烟断言 Sheet 开合对计时的暂停/恢复）
+    property alias hideTimer: hideControlsTimer
+
     // C8：全文搜索结果跳转目标（书架全文搜索 push 时传入；-1 表示正常打开）。
     // 打开后 loadChapter(initialChapter) 并滚动到 initialParagraph，跳过滚动恢复。
     property int initialChapter: -1
     property int initialParagraph: -1
     // C8：书内搜索 Dialog（冒烟测试经此打开/关闭）
     property alias searchDialog: searchDlg
+    // U4：目录 Dialog（右上角菜单/MoreSheet 入口冒烟经此断言打开）
+    property alias tocDlg: tocDialog
     // C1：顶栏返回按钮（冒烟测试经此点击验证返回导航链路，同 SettingsPage.backButton 模式）
     property alias backButton: backBtn
     // C1：朗读条（冒烟测试经此断言贴底布局——y=0 即 D7 锚失效回归，见 ttsBar 锚注释）
@@ -61,7 +88,7 @@ Page {
 
     ReaderBackground {
         anchors.fill: parent
-        mode: page.bgMode
+        mode: page.effectiveBg
         imagePath: page.bgImagePath
         blur: page.bgBlur
         brightness: page.bgBrightness
@@ -75,13 +102,13 @@ Page {
         anchors.left: parent.left
         anchors.right: parent.right
         height: 36
-        color: page.bgMode === "dark" ? "#E6121212" : "#E6FFFFFF"
+        color: page.effectiveBg === "dark" ? "#E6121212" : "#E6FFFFFF"
         Rectangle {
             anchors.bottom: parent.bottom
             anchors.left: parent.left
             anchors.right: parent.right
             height: 1
-            color: page.bgMode === "dark" ? "#33FFFFFF" : "#1A000000"
+            color: page.effectiveBg === "dark" ? "#33FFFFFF" : "#1A000000"
         }
         RowLayout {
             anchors.fill: parent
@@ -106,7 +133,15 @@ Page {
                 }
                 elide: Text.ElideRight
                 font.pixelSize: 13
-                color: page.bgMode === "dark" ? "#CCCCCC" : "#555555"
+                color: page.effectiveBg === "dark" ? "#CCCCCC" : "#555555"
+            }
+            // U4：右上角菜单入口（§5：点击弹出下拉菜单 + 遮罩）——"⋯" 三点按钮
+            ToolButton {
+                id: menuBtn
+                text: "⋯"
+                font.pixelSize: 18
+                padding: 4
+                onClicked: page.menuOpen = !page.menuOpen
             }
         }
     }
@@ -123,7 +158,8 @@ Page {
         // #E8E8E3）；其余（light/paper/image）视为浅底用暖白系深字（lightTextPrimary
         // #1A1A1A，image 模式内容区域透明露出自定义图片，按浅色处理）。
         // U1：两色均引用 UITheme Token（原 #E0E0E0/#212121）。
-        textColor: page.bgMode === "dark" ? UITheme.darkTextPrimary : UITheme.lightTextPrimary
+        // U4：随 effectiveBg（darkFollow 开时跟随主题深浅）
+        textColor: page.effectiveBg === "dark" ? UITheme.darkTextPrimary : UITheme.lightTextPrimary
         // C7：划线上下文——bookId 供 addHighlight，highlights 供逐句渲染查表
         bookId: (page.book && page.book.id) || -1
         highlights: page.highlights
@@ -157,7 +193,7 @@ Page {
         // 几何不变（controlsHost 恒 52px 贴底，可见性动画不影响布局）。
         anchors.bottom: controlsHost.top
         visible: page.ttsBarVisible
-        bgMode: page.bgMode
+        bgMode: page.effectiveBg
         onPlayClicked: Tts.play()
         onPauseClicked: Tts.pause()
         onStopClicked: Tts.stop()
@@ -227,7 +263,7 @@ Page {
         ReaderControls {
             id: controls
             anchors.fill: parent
-            bgMode: page.bgMode
+            bgMode: page.effectiveBg
             fontSize: page.typography.fontSize ?? 18
             chapterProgress: page.chapterProgress
             // E3：当前值注入——bgImagePath 驱动上拉框 image 项启用态，
@@ -555,7 +591,9 @@ Page {
     // 规格 §7：章末自动续章——ReaderContent 滚动接近底部触发，当前章非末章时换下一章。
     // 与手动换章（控制栏/目录）同走 loadChapter（含 Tts.stop 复位）；末章直接返回，
     // 避免 loadChapter 的钳制把读者从章尾拽回本章开头。
+    // U4：自动续章开关（MoreSheet/reading/autoContinue）——关时滚动触底不换章
     function autoNextChapter() {
+        if (!page.autoContinue) return
         const titles = Books.chapterTitles(page.book.id)
         if (!titles || Books.currentChapter + 1 >= titles.length) return
         page.loadChapter(Books.currentChapter + 1)
@@ -592,7 +630,42 @@ Page {
     // font.family 绑定即时重渲染，无需重开阅读页。
     function setFontFamily(family) {
         Settings.setValue("typography/fontFamily", family)
+        page.fontFamily = family
         page.typography = page.typographyFromSettings()
+    }
+
+    // U4：Sheet 方向选择——写 reading/pageMode 并即时生效（pageMode 注入
+    // ReaderContent 驱动方向键分流与页边界吸附；设置页同键，双入口一致）
+    function setPageMode(m) {
+        if (m !== "scroll" && m !== "paged") return
+        Settings.setValue("reading/pageMode", m)
+        page.pageMode = m
+    }
+
+    // U4：Sheet 行间距选择——写 typography/lineHeight 并重组合排版
+    function setLineHeight(lh) {
+        lh = Math.max(1.2, Math.min(2.4, Number(lh) || 1.6))
+        Settings.setValue("typography/lineHeight", lh)
+        page.typography = page.typographyFromSettings()
+    }
+
+    // U4：自动续章开关——写 reading/autoContinue（门控 autoNextChapter）
+    function setAutoContinue(on) {
+        page.autoContinue = !!on
+        Settings.setValue("reading/autoContinue", page.autoContinue)
+    }
+
+    // U4：深色跟随开关——写 reading/darkFollow（effectiveBg 派生跟随应用主题；
+    // 显式背景选择保存在 page.bgMode 不被覆盖，关闭后自动还原）
+    function setDarkFollow(on) {
+        page.darkFollow = !!on
+        Settings.setValue("reading/darkFollow", page.darkFollow)
+    }
+
+    // U4：Sheet 底部"保存当前设置"按钮（§4 占位）——保存主题预设功能待 U 审核后
+    // 实现；当前为占位：记录操作不改变任何设置
+    function onSaveThemeRequested() {
+        console.log("U4 占位：保存当前设置为主题预设（功能待 U 审核）")
     }
 
     // E3：上拉框直接选择——背景四态白名单校验后应用（写 background/mode）；
@@ -703,9 +776,12 @@ Page {
     // C3：点击唤出热区——TapHandler 观察页面内全部轻点（DragThreshold 手势策略：
     // 按下后位移超过阈值即取消，正文拖拽选择/滚动不受影响；观察模式不拦截任何
     // 按钮的 hover 与点击，D7b 区域限定修复不回归。同 PdfReaderPage 双击检测模式）。
-    // 语义：任意轻点重置 5s 计时；控件隐藏时轻点正文底部 1/4（content.y + 0.75*高
-    // 至控制栏顶，含隐藏时控制栏空位带）→ 唤出控制栏。TtsBar 显隐由 C2 门控独立
-    // 决定，本框架不作用于朗读条（决策见 task-C3-report）。
+    // 语义（U4 整合，决策见 task-U4-report）：
+    //   · Sheet 打开时任意轻点关闭（Kindle"点面板外关闭"）；菜单打开时轻点关闭
+    //   · 控件隐藏且轻点正文底部 1/4（content.y + 0.75*高至控制栏顶，含隐藏时
+    //     控制栏空位带）→ 唤出快捷控制栏（C3 保留为快捷条）
+    //   · 其余轻点（屏幕中部/边缘）→ 弹出 KdBottomSheet（Kindle 主操作面）
+    // TtsBar 显隐由 C2 门控独立决定，本框架不作用于朗读条。
     // 状态机收敛在 handleContentTap（页面坐标 y）——TapHandler 手势桥接 + 冒烟
     // 注入共用同一入口（quicktest harness 无法可靠合成鼠标事件，见 C7 同款取舍）。
     // 注意：Timer.restart() 对停止态的计时器会重新启动（Qt 语义），隐藏态禁止
@@ -713,16 +789,194 @@ Page {
     function handleContentTap(y) {
         // E4：点击正文重新聚焦（弹层/控制栏按钮抢焦点后，方向键翻页随点击恢复）
         content.forceActiveFocus()
-        if (page.controlsVisible) {
-            hideControlsTimer.restart()   // 显示态：任意轻点重置 5s 计时
+        if (page.sheetOpen) { page.sheetOpen = false; return }
+        if (page.menuOpen) { page.menuOpen = false; return }
+        const summonBottom = content.y + content.height * 0.75
+        if (!page.controlsVisible && y >= summonBottom) {
+            // 隐藏态：底部轻点唤出快捷控制栏（计时经 onControlsVisibleChanged 启动）
+            page.controlsVisible = true
         } else {
-            const summonBottom = content.y + content.height * 0.75
-            if (y >= summonBottom)
-                page.controlsVisible = true   // 隐藏态：底部轻点唤出（启动经 onControlsVisibleChanged）
+            // 中部/边缘轻点（含显示态任意轻点）→ 弹 Sheet（onSheetOpenChanged 暂停计时）
+            page.sheetOpen = true
         }
+    }
+    // U4：Sheet 开合联动——打开暂停控制栏 5s 自动隐藏（Sheet 是页面内覆盖层，
+    // 其内点击不重置页面计时器）；关闭且控制栏显示态时恢复（同 E3 弹层语义）
+    onSheetOpenChanged: {
+        if (page.sheetOpen) hideControlsTimer.stop()
+        else if (page.controlsVisible) hideControlsTimer.restart()
     }
     TapHandler {
         onTapped: page.handleContentTap(point.position.y)
+    }
+
+    // ---- U4：Kindle 底部 Sheet 工具栏（点屏幕中部弹出）----
+    // 四个标签面板以 ReaderPage 内联 Component 注入（创建上下文为 ReaderPage，
+    // 面板可直接引用 page/Settings；经 KdBottomSheet 的 Loader 按 currentId 切换）。
+    // 面板只渲染与上报，业务读写集中在 ReaderPage（与 ReaderControls 同模式）。
+
+    // 右上角下拉菜单数据（§5：KdListItem 风格列表）——功能入口与 MoreSheet 一致
+    property var menuModel: [
+        { icon: "toc", text: qsTr("目录"), act: "openToc" },
+        { icon: "notes", text: qsTr("笔记"), act: "openNotes" },
+        { icon: "search", text: qsTr("书内搜索"), act: "openSearch" },
+        { icon: "read", text: qsTr("朗读"), act: "readAloud" },
+        { icon: "prev", text: qsTr("上一章"), act: "prevChapter" },
+        { icon: "next", text: qsTr("下一章"), act: "nextChapter" }
+    ]
+
+    // 菜单项分发（关闭菜单后执行对应动作——与 MoreSheet 入口同一组功能）
+    function menuAction(act) {
+        page.menuOpen = false
+        switch (act) {
+        case "openToc": tocDialog.open(); break
+        case "openNotes": notesDlg.open(); break
+        case "openSearch": searchDlg.open(); break
+        case "readAloud": if (Tts.state !== 1) Tts.play(); break
+        case "prevChapter": page.loadChapter(Books.currentChapter - 1); break
+        case "nextChapter": page.loadChapter(Books.currentChapter + 1); break
+        }
+    }
+
+    // 右上角下拉菜单（§5：右上弹出、60-65% 宽、实色面板 + 全页遮罩，点击遮罩关闭）
+    Item {
+        id: menuOverlay
+        anchors.fill: parent
+        visible: page.menuOpen
+        // 遮罩（rgba(0,0,0,0.3)，淡入）
+        Rectangle {
+            anchors.fill: parent
+            color: UITheme.overlay
+            opacity: page.menuOpen ? 1 : 0
+            Behavior on opacity {
+                NumberAnimation { duration: 150 }
+            }
+            MouseArea {
+                anchors.fill: parent
+                onClicked: page.menuOpen = false
+            }
+        }
+        // 菜单面板：贴右上角（顶栏下方），实色背景 + 细边框，无圆角（§5 组件样式）
+        Rectangle {
+            anchors.top: parent.top
+            anchors.topMargin: 38
+            anchors.right: parent.right
+            anchors.rightMargin: 8
+            width: parent.width * 0.62
+            color: UITheme.bgPrimary
+            border.color: UITheme.divider
+            border.width: 1
+            Column {
+                width: parent.width
+                Repeater {
+                    id: menuRepeater
+                    model: page.menuModel
+                    Rectangle {
+                        required property var modelData
+                        width: parent.width
+                        height: 48
+                        color: menuRowMouse.containsMouse ? "#0A000000" : "transparent"
+                        MouseArea {
+                            id: menuRowMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: page.menuAction(modelData.act)
+                        }
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 16
+                            anchors.rightMargin: 16
+                            spacing: 14
+                            KdIcons {
+                                name: modelData.icon
+                                size: 22
+                                color: UITheme.textPrimary
+                            }
+                            Label {
+                                text: modelData.text
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                                font.pixelSize: 15
+                                color: UITheme.textPrimary
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 主题标签面板：四态背景网格（与 bgMode/Settings background/mode 一致）
+    Component {
+        id: themePanelComp
+        ThemeSheet {
+            bgMode: page.bgMode
+            bgImagePath: page.bgImagePath
+            onSetBackgroundMode: (m) => page.setBackgroundMode(m)
+        }
+    }
+    // 字体标签面板：4 字体族 + 字号分段（current 经 page.fontFamily/typography 注入）
+    Component {
+        id: fontPanelComp
+        FontSheet {
+            fontFamily: page.fontFamily
+            fontSize: page.typography.fontSize ?? 18
+            onSetFontFamily: (v) => page.setFontFamily(v)
+            onSetFontSize: (s) => page.setFontSize(s)
+        }
+    }
+    // 布局标签面板：方向/页边距/行间距（current 经 page.pageMode/typography 注入）
+    Component {
+        id: layoutPanelComp
+        LayoutSheet {
+            pageMode: page.pageMode
+            pageWidth: page.typography.pageWidth ?? "normal"
+            lineHeight: page.typography.lineHeight ?? 1.6
+            onSetPageMode: (m) => page.setPageMode(m)
+            onSetPageWidth: (w) => page.setPageWidth(w)
+            onSetLineHeight: (lh) => page.setLineHeight(lh)
+        }
+    }
+    // 更多标签面板：开关 + 功能菜单入口
+    Component {
+        id: morePanelComp
+        MoreSheet {
+            autoContinue: page.autoContinue
+            darkFollow: page.darkFollow
+            onSetAutoContinue: (on) => page.setAutoContinue(on)
+            onSetDarkFollow: (on) => page.setDarkFollow(on)
+            onRequestToc: tocDialog.open()
+            onRequestNotes: notesDlg.open()
+            onRequestSearch: searchDlg.open()
+            onRequestReadAloud: { if (Tts.state !== 1) Tts.play() }
+            onRequestPrevChapter: page.loadChapter(Books.currentChapter - 1)
+            onRequestNextChapter: page.loadChapter(Books.currentChapter + 1)
+        }
+    }
+
+    // Sheet 本体（声明在最后 → 覆盖全页，含顶栏；遮罩/面板按 open 显隐）
+    KdBottomSheet {
+        id: bottomSheet
+        anchors.fill: parent
+        open: page.sheetOpen
+        tabs: [
+            { id: "theme", text: qsTr("主题") },
+            { id: "font", text: qsTr("字体") },
+            { id: "layout", text: qsTr("布局") },
+            { id: "more", text: qsTr("更多") }
+        ]
+        pages: [
+            { id: "theme", source: themePanelComp },
+            { id: "font", source: fontPanelComp },
+            { id: "layout", source: layoutPanelComp },
+            { id: "more", source: morePanelComp }
+        ]
+        currentId: page.sheetTab
+        // §4：底部描边按钮"保存当前设置"——仅主题标签显示（占位：功能待 U 审核）
+        actionText: page.sheetTab === "theme" ? qsTr("保存当前设置") : ""
+        onTabClicked: (id) => page.sheetTab = id
+        onActionClicked: page.onSaveThemeRequested()
+        onMaskClicked: page.sheetOpen = false
     }
 
     Component.onCompleted: {
@@ -732,6 +986,11 @@ Page {
         // E4：翻页方式——reading/pageMode 白名单归一（非法值回退 scroll）
         const pm = Settings.value("reading/pageMode")
         page.pageMode = (pm === "paged") ? "paged" : "scroll"
+        // U4：MoreSheet 开关与当前字族初值（reading/autoContinue 默认开、
+        // darkFollow 默认关；fontFamily 供 FontSheet 高亮/选择）
+        page.autoContinue = Settings.value("reading/autoContinue") !== false
+        page.darkFollow = Settings.value("reading/darkFollow") === true
+        page.fontFamily = String(Settings.value("typography/fontFamily") || "思源宋体 VF")
         // 恢复：定位到保存的章节（progress/<bookId>），滚动偏移交给 ReaderContent
         // 在内容高度就绪后设置（progress/scroll_<bookId>）。
         // C8：全文搜索跳转打开时（initialChapter/initialParagraph >= 0）改用目标章节，
