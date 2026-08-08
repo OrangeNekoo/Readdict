@@ -15,6 +15,8 @@ class TestBookManager : public QObject {
 private slots:
     void init() {
         m_tmp.reset(new QTemporaryDir);
+        dbPath = m_tmp->filePath("bm.db"); // L6：独立文件库用例的临时库路径（同 tst_highlights 模式）
+        m_seq = 0;
         m_settings.reset(new SettingsStore(m_tmp->path() + "/settings.json"));
         m_mgr.reset(new BookManager(":memory:"));
         m_mgr->setSettingsStore(m_settings.get());
@@ -128,16 +130,17 @@ private slots:
         QCOMPARE(m_mgr->lastChapter(2), 0);
         QCOMPARE(m_mgr->lastScrollY(2), 0.0);
     }
-    void loadChapterUpdatesProgressPercent() {
-        // B10：换章时 books.progress 更新为 章节数/总章节数，并刷新 last_read_at
+    void loadChapterNoLongerWritesProgress() {
+        // L6（P1#13）：loadChapter 不再写 books.progress（setProgress 副作用移除，
+        // 进度上报改由 QML 章节加载成功后显式 reportProgress）；章节加载本身不受影响
         m_mgr->addBook(Book{-1, "fixture", "作者", "出版社", "", "EPUB",
                             QStringLiteral(EPUB_FIXTURES_DIR) + "/sample.epub", QString(), 0.0});
         const qint64 id = 3; // init 已添加 id 1、2
         QVERIFY(!m_mgr->loadChapter(id, 1).toMap().isEmpty());
+        QCOMPARE(m_mgr->bookById(id).progress, 0.0); // loadChapter 不改进度
+        m_mgr->reportProgress(id, 2, m_mgr->chapterCount(id));
         QCOMPARE(m_mgr->bookById(id).progress, 1.0); // 第 2 章 / 共 2 章
         QVERIFY(!m_mgr->bookById(id).lastReadAt.isEmpty());
-        m_mgr->loadChapter(id, 0);
-        QCOMPARE(m_mgr->bookById(id).progress, 0.5); // 第 1 章 / 共 2 章
     }
     void readingTimerAccumulates() {
         // B10：startTracking 后实测 elapsed，stopTracking 结算到 read_seconds（mock 计时）
@@ -283,8 +286,46 @@ private slots:
                  QStringLiteral("Source Han Sans HW VF"));
         QCOMPARE(m_mgr->resolveFontFamily(QStringLiteral("得意黑")), smiley);
     }
+    void progressNeverRegresses() {
+        // L6（P1#13）：读到 50% 后跳回第 1 章 → progress 保持 0.5（只进不退）。
+        // 简报行内注释写 0.6/0.1，但其公式 p=ch1/total 下 5/10=0.5、0/10=0.0，
+        // 简报首行注释"保持 0.5"亦同——按公式取值
+        BookManager m(dbPath, "readdict_bm_t1");
+        const qint64 id = addSampleBook(m);
+        m.reportProgress(id, 5, 10);   // 0.5
+        m.reportProgress(id, 0, 10);   // 0.0 → 不 regress
+        QCOMPARE(m.bookById(id).progress, 0.5);
+    }
+    void bookByIdModelIgnoresFilter() {
+        // L6（P0#7）：bookByIdModel 全库查——setFilter 后过滤外的书仍可查（全文搜索跳转用）
+        BookManager m(dbPath, "readdict_bm_t2");
+        const qint64 a = addSampleBook(m, "分类A");
+        const qint64 b = addSampleBook(m, "分类B");
+        m.setFilter("分类A");
+        QCOMPARE(m.bookByIdModel(b).value("id").toLongLong(), b); // 过滤外仍可查
+        QCOMPARE(m.bookByIdModel(a).value("category").toString(), QString("分类A"));
+    }
+    void chapterCountCached() {
+        // L6（P1#14）：chapterTitles 解析后刷新章节数缓存，chapterCount 直接命中
+        BookManager m(dbPath, "readdict_bm_t3");
+        const qint64 id = addSampleBookFromEpub(m);
+        m.chapterTitles(id);
+        QCOMPARE(m.chapterCount(id), 2); // sample.epub 实际 2 章（chap1/chap2.xhtml，tst_epubparser 同断言）
+    }
 private:
+    // L6：独立文件库（dbPath）用例的加书辅助——books.path 为 UNIQUE 列，序号保证唯一
+    qint64 addSampleBook(BookManager &m, const QString &category = QString()) {
+        const QString n = QString::number(++m_seq);
+        return m.addBook(Book{-1, "样例书" + n, "作者", "出版社", category, "TXT",
+                              m_tmp->path() + "/sample_" + n + ".txt", QString(), 0.0});
+    }
+    qint64 addSampleBookFromEpub(BookManager &m) {
+        return m.addBook(Book{-1, "fixture", "作者", "出版社", "", "EPUB",
+                              QStringLiteral(EPUB_FIXTURES_DIR) + "/sample.epub", QString(), 0.0});
+    }
     std::unique_ptr<QTemporaryDir> m_tmp;
+    QString dbPath;
+    int m_seq = 0;
     std::unique_ptr<SettingsStore> m_settings;
     std::unique_ptr<BookManager> m_mgr;
 };

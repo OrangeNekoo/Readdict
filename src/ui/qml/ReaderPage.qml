@@ -274,7 +274,9 @@ Page {
     property real chapterProgress: {
         const id = page.book ? page.book.id : -1
         if (id <= 0) return 0
-        const n = Books.chapterTitles(id).length
+        // L6（P1#14）：改读 Books.chapterCount 缓存（chapterTitles/loadChapter 已解析本书
+        // 时直接命中；绑定随 currentChapter 变更重算，不再每次构造完整标题列表）
+        const n = Books.chapterCount(id)
         return n > 0 ? Math.min(1, (Books.currentChapter + 1) / n) : 0
     }
 
@@ -631,6 +633,9 @@ Page {
         page.loadError = ""
         page.chapter = loaded
         Books.currentChapter = i   // 写时持久化 progress/<bookId>
+        // L6（P1#13）：章节加载成功后上报书架进度——reportProgress 取 max 不 regress：
+        // 前进刷新 progress 与书架，回翻只刷 last_read_at（不 emit，书架模型不重建）
+        Books.reportProgress(page.book.id, i + 1, Books.chapterCount(page.book.id))
         // C5：拍平本段全部段落句子喂给 Tts（顺序与 ReaderContent 的 sentenceStarts 一致），
         // 换章复位游标 → 高亮回到首句；Tts.currentIndex 驱动逐句高亮与滚动跟随。
         const all = []

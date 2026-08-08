@@ -6,7 +6,7 @@
 #include <QObject>
 #include <QSqlDatabase>
 #include <QStringList>
-#include <QVariantList>
+#include <QPair>
 #include <QVariantMap>
 #include <QVector>
 
@@ -31,6 +31,10 @@ public:
     Book bookById(qint64 id) const;
     Q_INVOKABLE void setProgress(qint64 id, double progress);
     void addReadSeconds(qint64 id, qint64 seconds);
+    // L6（P1#13）：章节进度上报——p=chapterOneBased/totalChapters 只在超过库内进度时
+    // 写 progress 并发 booksChanged；否则只刷新 last_read_at（位置变化不让进度回退，
+    // 也不重建书架模型）。totalChapters<=0 忽略。
+    Q_INVOKABLE void reportProgress(qint64 id, int chapterOneBased, int totalChapters);
     // 阅读页写入进度：章节索引 + 章内滚动偏移（settings.json 的 progress/<bookId> 与 progress/scroll_<bookId>）
     Q_INVOKABLE void savePosition(qint64 bookId, int chapter, double scrollY);
     // 阅读页恢复滚动偏移（无记录返回 0）
@@ -50,6 +54,12 @@ public:
     Q_INVOKABLE void setSort(int index); // 0 Added 1 Author 2 Publisher 3 Category 4 Recent
     Q_INVOKABLE void setFilter(const QString &category);
     Q_INVOKABLE void setCategory(qint64 bookId, const QString &category);
+    // L6（P0#7）：按 id 全库查单书（QML 友好 map），不受 filter/search 影响——
+    // 全文搜索结果跳转时目标书可能不在当前过滤后的书架模型中
+    Q_INVOKABLE QVariantMap bookByIdModel(qint64 id) const;
+    // L6（P1#14）：总章数（chapterTitles/loadChapter 解析时刷新的缓存值；
+    // 无缓存时按需 documentFor 计算）——chapterProgress 绑定不再每次重算 chapterTitles
+    Q_INVOKABLE int chapterCount(qint64 bookId);
     Q_INVOKABLE void doSearch(const QString &query);
     // D4：阅读统计聚合——{totalBooks, totalReadSeconds, totalProgress(平均进度 0..1),
     // byCategory:[{name,count}]}；空库时 COUNT=0、SUM/AVG 的 NULL 归零、byCategory 为空
@@ -71,6 +81,8 @@ private:
     // 解析并缓存文档（QHash<bookId, DocumentModel>）；清缓存时机见 B10
     DocumentModel documentFor(qint64 bookId);
     static QVariantMap paragraphToVariant(const Paragraph &p);
+    // L6：单书 → QML map（booksModel 逐行与 bookByIdModel 共用单一构造源）
+    static QVariantMap bookToMap(const Book &b);
     // C7b：章节标题唯一化——划线查重键（"章节标题|句索引"）依赖标题唯一。
     // FB2 无 <title> 的 section 与 TXT 重复 h2 会产出空/重复标题 → 跨章键碰撞
     // （渲染串染、updateColor 误改他章行、笔记跳转恒指首章）。空/重复标题兜底
@@ -90,6 +102,10 @@ private:
     // loadChapter 对空文档+错误的书上抛 {error} 供 QML 错误页显示；
     // 空文档无错误（零章 TXT 等）维持旧行为返回空 map
     QHash<qint64, QString> m_docError;
+    // L6（P1#14）：总章数缓存——chapterTitles/loadChapter 解析文档后刷新；chapterCount 命中
+    QHash<qint64, int> m_chapterCounts;
+    // L6（P1#16）：savePosition 变化写记忆——上次 (chapter, scrollY)，相同跳过 settings 写
+    QHash<qint64, QPair<int, double>> m_lastPos;
     qint64 m_activeBookId = 0;   // 最近打开的阅读书（currentChapter 持久化目标）
     int m_currentChapter = 0;
     QElapsedTimer m_trackTimer;  // 阅读计时：startTracking 启动，stopTracking 结算

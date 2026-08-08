@@ -484,18 +484,19 @@ Item {
             compare(page2.chapter.title, "第二章", "重开应恢复到第二章")
             loader2.destroy()
         }
-        // 书架进度百分比联动：loadChapter 换章后 books.progress = 章节数/总章节数
+        // L6（P1#13）：书架进度百分比联动——进度由 reportProgress 上报（前进才刷新）；
+        // loadChapter 不再直接写 books.progress（阅读页加载成功后显式上报），回翻不回退
         function test_progressPercent() {
             var book = findBook("EPUB", "")
             if (!book) skip("未导入 EPUB fixture")
-            Books.loadChapter(book.id, 1)
+            Books.reportProgress(book.id, 2, Books.chapterCount(book.id))
             var cur = findBook("EPUB", "")
             verify(cur !== null && Math.abs(cur.progress - 1.0) < 0.01,
                    "第 2 章 / 共 2 章 进度应为 1.0，实际 " + (cur ? cur.progress : "?"))
             Books.loadChapter(book.id, 0)
             cur = findBook("EPUB", "")
-            verify(cur !== null && Math.abs(cur.progress - 0.5) < 0.01,
-                   "第 1 章 / 共 2 章 进度应为 0.5，实际 " + (cur ? cur.progress : "?"))
+            verify(cur !== null && Math.abs(cur.progress - 1.0) < 0.01,
+                   "loadChapter 不再改进度，回翻应保持 1.0 不回退，实际 " + (cur ? cur.progress : "?"))
         }
         function test_scrollRestore() {
             var book = findBook("TXT", "longbook")

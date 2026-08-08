@@ -235,10 +235,11 @@ Page {
     }
 
     // ---- C8：全文搜索结果辅助 ----
+    // L6（P0#7）：改走 Books.bookByIdModel 全库查——目标书被分类过滤/搜索词
+    // 挤出 booksModel 时跳转仍能取到书；书不存在时后端返回空 map → 归一为 null
     function bookById(id) {
-        for (let b of Books.booksModel)
-            if (b.id === id) return b
-        return null
+        const m = Books.bookByIdModel(id)
+        return m && m.id !== undefined ? m : null
     }
     function bookTitleFor(id) {
         const b = shelf.bookById(id)

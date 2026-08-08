@@ -68,6 +68,8 @@ void BookManager::removeBook(qint64 id) {
     }
     m_docCache.remove(id); // 阅读器文档缓存一并失效
     m_docError.remove(id); // 解析错误缓存同步失效
+    m_chapterCounts.remove(id); // L6：总章数缓存同步失效
+    m_lastPos.remove(id);       // L6：位置变化写记忆同步失效
     emit booksChanged();
 }
 
@@ -195,6 +197,32 @@ void BookManager::setProgress(qint64 id, double progress) {
     if (q.exec()) emit booksChanged();
 }
 
+void BookManager::reportProgress(qint64 id, int ch1, int total) {
+    // L6（P1#13）：进度取 max 不 regress——回翻章节只刷 last_read_at，不动 progress，
+    // 且不 emit booksChanged（避免书架模型无意义重建）
+    if (total <= 0) return;
+    const double p = double(ch1) / total;
+    QSqlQuery q(m_db);
+    q.prepare("SELECT progress FROM books WHERE id=?");
+    q.addBindValue(id);
+    double old = 0;
+    if (q.exec() && q.next()) old = q.value(0).toDouble();
+    QSqlQuery up(m_db);
+    if (p > old) {
+        up.prepare("UPDATE books SET progress=?, last_read_at=? WHERE id=?");
+        up.addBindValue(p);
+    } else {
+        up.prepare("UPDATE books SET last_read_at=? WHERE id=?"); // 位置变化不 regress 进度
+        up.addBindValue(QDateTime::currentDateTime().toString(Qt::ISODate));
+        up.addBindValue(id);
+        if (!up.exec()) return;
+        return; // 进度未变：不 emit（避免书架模型重建，P1#13）
+    }
+    up.addBindValue(QDateTime::currentDateTime().toString(Qt::ISODate));
+    up.addBindValue(id);
+    if (up.exec()) emit booksChanged();
+}
+
 void BookManager::addReadSeconds(qint64 id, qint64 seconds) {
     if (seconds <= 0) return;
     QSqlQuery q(m_db);
@@ -206,6 +234,12 @@ void BookManager::addReadSeconds(qint64 id, qint64 seconds) {
 
 void BookManager::savePosition(qint64 bookId, int chapter, double scrollY) {
     if (!m_settings) return;
+    // L6（P1#16）：变化写——(chapter, scrollY) 与上次相同直接跳过（阅读页 5s 定时 +
+    // 退出补写高频触发，无变化不落盘不触发 SettingsStore 原子写）
+    const auto it = m_lastPos.constFind(bookId);
+    if (it != m_lastPos.constEnd() && it->first == chapter && it->second == scrollY)
+        return;
+    m_lastPos.insert(bookId, qMakePair(chapter, scrollY));
     m_settings->setValue(QStringLiteral("progress/%1").arg(bookId), chapter);
     m_settings->setValue(QStringLiteral("progress/scroll_%1").arg(bookId), scrollY);
 }
@@ -236,23 +270,35 @@ QVariantList BookManager::booksModel() const {
     const QVector<Book> list = m_searchQuery.isEmpty() ? books() : search(m_searchQuery);
     QVariantList out;
     out.reserve(list.size());
-    for (const Book &b : list) {
-        QVariantMap m;
-        m.insert("id", b.id);
-        m.insert("title", b.title);
-        m.insert("author", b.author);
-        m.insert("publisher", b.publisher);
-        m.insert("category", b.category);
-        m.insert("format", b.format);
-        m.insert("path", b.path);
-        m.insert("cover", b.cover);
-        m.insert("progress", b.progress);
-        m.insert("readSeconds", b.readSeconds);
-        m.insert("lastReadAt", b.lastReadAt);
-        m.insert("addedAt", b.addedAt);
-        out.append(m);
-    }
+    for (const Book &b : list) out.append(bookToMap(b));
     return out;
+}
+
+QVariantMap BookManager::bookToMap(const Book &b) {
+    // L6：单书 → QML map 的唯一构造源（booksModel 逐行 / bookByIdModel 单行共用）
+    QVariantMap m;
+    m.insert("id", b.id);
+    m.insert("title", b.title);
+    m.insert("author", b.author);
+    m.insert("publisher", b.publisher);
+    m.insert("category", b.category);
+    m.insert("format", b.format);
+    m.insert("path", b.path);
+    m.insert("cover", b.cover);
+    m.insert("progress", b.progress);
+    m.insert("readSeconds", b.readSeconds);
+    m.insert("lastReadAt", b.lastReadAt);
+    m.insert("addedAt", b.addedAt);
+    return m;
+}
+
+QVariantMap BookManager::bookByIdModel(qint64 id) const {
+    // L6（P0#7）：全库单书查询——绕过 books()/search() 的 filter/search 条件，
+    // 全文搜索结果跳转时目标书可能不在当前过滤后的书架中，仍能取到完整字段。
+    // 书不存在返回空 map（QML 侧按 m.id === undefined 判 null，见 ShelfPage）
+    const Book b = bookById(id);
+    if (b.id < 0) return QVariantMap();
+    return bookToMap(b);
 }
 
 QVariantList BookManager::categoriesModel() const {
@@ -399,6 +445,7 @@ QStringList BookManager::uniqueChapterTitles(const DocumentModel &doc) {
 QVariantList BookManager::chapterTitles(qint64 bookId) {
     m_activeBookId = bookId;
     const DocumentModel doc = documentFor(bookId);
+    m_chapterCounts[bookId] = doc.chapters.size(); // L6（P1#14）：解析即刷新总章数缓存
     const QStringList titles = uniqueChapterTitles(doc);
     QVariantList out;
     out.reserve(titles.size());
@@ -409,6 +456,7 @@ QVariantList BookManager::chapterTitles(qint64 bookId) {
 QVariant BookManager::loadChapter(qint64 bookId, int index) {
     m_activeBookId = bookId;
     const DocumentModel doc = documentFor(bookId);
+    m_chapterCounts[bookId] = doc.chapters.size(); // L6（P1#14）：解析即刷新总章数缓存
     // L4（P0#5）：空文档且解析报错 → 上抛错误信息（QML 错误页）；
     // 空文档且无错误（如零章 TXT）维持旧行为返回空 map
     if (doc.empty() && m_docError.value(bookId).isEmpty() == false) {
@@ -425,9 +473,19 @@ QVariant BookManager::loadChapter(qint64 bookId, int index) {
     paras.reserve(c.paragraphs.size());
     for (const Paragraph &p : c.paragraphs) paras.append(paragraphToVariant(p));
     out.insert("paragraphs", paras);
-    // B10：换章/开书即更新书架进度百分比（章节数/总章节数，首章=1/n）与最近阅读时间
-    setProgress(bookId, double(index + 1) / doc.chapters.size());
+    // L6（P1#13）：进度上报移出 loadChapter——换章不直接写 books.progress，
+    // 改由阅读页章节加载成功后显式 Books.reportProgress（取 max 不 regress）
     return out;
+}
+
+int BookManager::chapterCount(qint64 bookId) {
+    // L6（P1#14）：优先命中缓存（chapterTitles/loadChapter 已解析过本书）；
+    // 无缓存时按需 documentFor 计算（documentFor 自带解析缓存，不重复解盘）
+    const auto it = m_chapterCounts.constFind(bookId);
+    if (it != m_chapterCounts.constEnd()) return it.value();
+    const DocumentModel doc = documentFor(bookId);
+    m_chapterCounts.insert(bookId, doc.chapters.size());
+    return doc.chapters.size();
 }
 
 int BookManager::lastChapter(qint64 bookId) {
