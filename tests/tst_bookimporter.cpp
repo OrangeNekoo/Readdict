@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QDir>
 #include <QTemporaryDir>
 
 #include <zip.h>   // minizip 写端（构造测试 EPUB）
@@ -179,7 +180,7 @@ private slots:
         QFile src(srcDir.path() + "/book.txt");
         QVERIFY(src.open(QIODevice::WriteOnly)); src.write("hello world"); src.close();
         BookImporter imp(libDir.path(), ":memory:");
-        const QString err = imp.importFile(src.fileName(), true);
+        const QString err = imp.importFile(src.fileName());
         QVERIFY(err.isEmpty());
         QVERIFY(QFile::exists(src.fileName())); // 复制语义：源文件保留
         QVERIFY(QFile::exists(libDir.path() + "/books/book.txt"));
@@ -191,7 +192,7 @@ private slots:
         QFile src(srcDir.path() + "/书.txt");
         QVERIFY(src.open(QIODevice::WriteOnly)); src.write("正文"); src.close();
         BookImporter imp(libDir.path(), ":memory:");
-        QVERIFY(imp.importFile(src.fileName(), true).isEmpty());
+        QVERIFY(imp.importFile(src.fileName()).isEmpty());
         const QString cover = imp.books()[0].cover;
         QVERIFY(QFile::exists(cover));
         // 占位封面命名：MD5(标题) 前 6 位 + .png（非真实封面的 cover_<md5>.png）
@@ -209,7 +210,7 @@ private slots:
         const QString epubPath = makeCoverEpub(srcDir.path() + "/coverbook.epub");
         QVERIFY(!epubPath.isEmpty());
         BookImporter imp(libDir.path(), ":memory:");
-        const QString err = imp.importFile(epubPath, true);
+        const QString err = imp.importFile(epubPath);
         QVERIFY(err.isEmpty());
         QCOMPARE(imp.books().size(), 1);
         const QString cover = imp.books()[0].cover;
@@ -239,7 +240,7 @@ private slots:
         QVERIFY(bad.open(QIODevice::WriteOnly));
         bad.write("this is not a zip file at all"); bad.close();
         BookImporter imp(libDir.path(), ":memory:");
-        const QString err = imp.importFile(bad.fileName(), true);
+        const QString err = imp.importFile(bad.fileName());
         QVERIFY(err.isEmpty()); // 解析失败不影响入库
         QCOMPARE(imp.books().size(), 1);
         const QString cover = imp.books()[0].cover;
@@ -255,7 +256,7 @@ private slots:
         const QString epubPath = makeNoCoverMetaEpub(srcDir.path() + "/twoc.epub");
         QVERIFY(!epubPath.isEmpty());
         BookImporter imp(libDir.path(), ":memory:");
-        QVERIFY(imp.importFile(epubPath, true).isEmpty());
+        QVERIFY(imp.importFile(epubPath).isEmpty());
         const QString cover = imp.books()[0].cover;
         QVERIFY(QFileInfo(cover).fileName().startsWith(QStringLiteral("cover_")));
         QImage img(cover);
@@ -272,7 +273,7 @@ private slots:
         const QString epubPath = makeIriCoverEpub(srcDir.path() + "/iri.epub");
         QVERIFY(!epubPath.isEmpty());
         BookImporter imp(libDir.path(), ":memory:");
-        QVERIFY(imp.importFile(epubPath, true).isEmpty());
+        QVERIFY(imp.importFile(epubPath).isEmpty());
         const QString cover = imp.books()[0].cover;
         QVERIFY(QFileInfo(cover).fileName().startsWith(QStringLiteral("cover_")));
         QImage img(cover);
@@ -292,7 +293,7 @@ private slots:
         const QString dbPath = libDir.path() + "/lib.db";
         BookImporter imp(libDir.path(), dbPath);
         qint64 id = -1;
-        const QString err = imp.importFile(src.fileName(), true, &id);
+        const QString err = imp.importFile(src.fileName(), &id);
         QVERIFY(err.isEmpty());
         QVERIFY(id > 0);
         SearchEngine se(dbPath);
@@ -344,7 +345,7 @@ private slots:
         QVERIFY(!epubPath.isEmpty());
         const QString dbPath = libDir.path() + "/lib.db";
         BookImporter imp(libDir.path(), dbPath);
-        QVERIFY(imp.importFile(epubPath, true).isEmpty());
+        QVERIFY(imp.importFile(epubPath).isEmpty());
         QCOMPARE(imp.books().size(), 1);
         const QString realCover = imp.books()[0].cover;
         QVERIFY(QFileInfo(realCover).fileName().startsWith(QStringLiteral("cover_")));
@@ -372,7 +373,7 @@ private slots:
         const QString epubPath = makeCoverEpub(srcDir.path() + "/idem.epub");
         QVERIFY(!epubPath.isEmpty());
         BookImporter imp(libDir.path(), ":memory:");
-        QVERIFY(imp.importFile(epubPath, true).isEmpty());
+        QVERIFY(imp.importFile(epubPath).isEmpty());
         const QString cover = imp.books()[0].cover;
         QVERIFY(QFileInfo(cover).fileName().startsWith(QStringLiteral("cover_")));
         QCOMPARE(imp.refreshCovers(), 0);
@@ -388,8 +389,8 @@ private slots:
         QFile badPdf(srcDir.path() + "/fake.pdf");
         QVERIFY(badPdf.open(QIODevice::WriteOnly)); badPdf.write("not a pdf"); badPdf.close();
         BookImporter imp(libDir.path(), ":memory:");
-        QVERIFY(imp.importFile(txt.fileName(), true).isEmpty());
-        QVERIFY(imp.importFile(badPdf.fileName(), true).isEmpty());
+        QVERIFY(imp.importFile(txt.fileName()).isEmpty());
+        QVERIFY(imp.importFile(badPdf.fileName()).isEmpty());
         QCOMPARE(imp.books().size(), 2);
         const QString txtCover = imp.books()[0].cover;
         const QString pdfCover = imp.books()[1].cover;
@@ -407,7 +408,7 @@ private slots:
         const QString dbPath = libDir.path() + "/lib.db";
         BookImporter imp(libDir.path(), dbPath);
         qint64 id = -1;
-        QVERIFY(imp.importFile(real, true, &id).isEmpty());
+        QVERIFY(imp.importFile(real, &id).isEmpty());
         QVERIFY(id > 0);
         SearchEngine se(dbPath);
         // 从书内容提取真实词：加载首章文本，取第一个 ≥4 字的 CJK 片段。
@@ -445,7 +446,7 @@ private slots:
             QSKIP("未设置 READDICT_REAL_EPUB，跳过真实书封面验证");
         QTemporaryDir libDir;
         BookImporter imp(libDir.path(), ":memory:");
-        const QString err = imp.importFile(real, true);
+        const QString err = imp.importFile(real);
         QVERIFY(err.isEmpty());
         QCOMPARE(imp.books().size(), 1);
         const QString cover = imp.books()[0].cover;
@@ -463,7 +464,7 @@ private slots:
             QSKIP("未设置 READDICT_REAL_PDF，跳过真实 PDF 封面验证");
         QTemporaryDir libDir;
         BookImporter imp(libDir.path(), ":memory:");
-        const QString err = imp.importFile(real, true);
+        const QString err = imp.importFile(real);
         QVERIFY(err.isEmpty());
         QCOMPARE(imp.books().size(), 1);
         const QString cover = imp.books()[0].cover;
@@ -473,6 +474,22 @@ private slots:
         QVERIFY(!img.isNull());
         QCOMPARE(img.size(), QSize(300, 400));
         QVERIFY(imp.lastError().isEmpty()); // 真实封面成功，不得记入占位回退原因
+    }
+    // L3（P0#3）：同步下载落盘注册——文件已在书库目录内，adoptFile 跳过复制直接注册
+    void adoptFileRegistersWithoutCopy() {
+        // 已在书库目录内的文件（模拟同步下载落盘）→ adoptFile 直接注册不复制
+        QTemporaryDir dir;
+        QDir().mkpath(dir.path() + "/books");
+        const QString src = QStringLiteral(EPUB_FIXTURES_DIR) + "/sample.epub";
+        const QString dest = dir.path() + "/books/sample.epub";
+        QVERIFY(QFile::copy(src, dest));
+        BookImporter imp(dir.path(), dir.path() + "/Readdict.db");
+        const QString err = imp.adoptFile(dest);
+        QVERIFY2(err.isEmpty(), qPrintable(err));
+        bool found = false;
+        for (const Book &b : imp.books())
+            if (b.path == dest) found = true;
+        QVERIFY(found); // 注册且 path 指向原文件（无二次复制）
     }
 };
 QTEST_MAIN(TestImporter)

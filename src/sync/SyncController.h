@@ -31,6 +31,8 @@ public:
     // L2（P0#2）：注入应用级 SettingsStore 单例——转发给 SyncManager（合并写盘经单例），
     // 并供 doSync/定时器读取 webdav 配置；未注入时各处临时构造兜底（测试旧夹具）。
     void setSettingsStore(SettingsStore *s);
+    // L3（P0#3）：注入书体注册钩子——转发给 SyncManager（下载落盘后经导入管线注册）
+    void setAdoptHandler(std::function<QString(const QString &)> h);
     QStringList log() const { return m_log; }
 private:
     QString settingsPath() const;   // db 同目录 settings.json（与 SyncManager::settingsPath 同源）

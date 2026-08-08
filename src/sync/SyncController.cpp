@@ -44,6 +44,10 @@ void SyncController::setSettingsStore(SettingsStore *s) {
     m_mgr.setSettingsStore(s);
 }
 
+void SyncController::setAdoptHandler(std::function<QString(const QString &)> h) {
+    m_mgr.setAdoptHandler(std::move(h));
+}
+
 void SyncController::setAutoSync(bool enabled) {
     if (enabled)
         m_timer.start();

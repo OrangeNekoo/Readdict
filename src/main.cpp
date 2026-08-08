@@ -160,6 +160,9 @@ int main(int argc, char *argv[]) {
     // L2（P0#2）：注入设置单例——同步合并结果经 SettingsStore::setRoot 原子落盘并刷新
     // 内存，杜绝 SyncManager 直写文件后单例旧快照再保存覆盖合并结果。
     syncController->setSettingsStore(settings);
+    // L3（P0#3）：书体同步下载落盘后经导入管线注册（adoptFile：跳过复制直接
+    // 解析→addBook→封面→索引）。SyncManager 不依赖 BookImporter 类型，经钩子注入。
+    syncController->setAdoptHandler([importer](const QString &p) { return importer->adoptFile(p); });
     syncController->setAutoSync(settings->value("webdav/autoSync").toBool());
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Sync", syncController);
     // B10：应用退出时结算阅读计时（页面 onDestruction 只在正常退出 QML 引擎销毁时触发，

@@ -25,7 +25,8 @@ class SettingsStore;
 //   progress/highlights/books 用各自数据的最新时间戳（last_read_at/created_at/added_at）。
 // - 载荷 ts 统一 UTC 序列化（ISODate + Z），跨设备时区不偏移。
 // - 远端文件命名：settings.json / progress.json / highlights.json / books.json；
-//   书籍文件体 b<id>_<basename>（扁平命名，list() 是 depth 1，子目录不可见）。
+//   书籍文件体 h<sha1(前256KB)前16位hex>_<basename>（内容哈希命名，L3）；下载兼容
+//   旧 b<id>_<basename> 命名。扁平命名，list() depth 1 可见，子目录不可见。
 class SyncManager {
 public:
     enum Conflict { KeepLocal, TakeRemote, Skip };
@@ -45,6 +46,9 @@ public:
     // L2（P0#2）：注入应用级 SettingsStore 单例——applySettingsJson 合并结果经单例
     // setRoot 原子落盘并刷新内存；未注入（纯单元测试夹具）时原子直写文件兜底。
     void setSettingsStore(SettingsStore *s) { m_settings = s; }
+    // L3（P0#3）：注入书体注册钩子——下载落盘后经此钩子走导入管线注册
+    // （BookImporter::adoptFile）；返回空串=注册成功。未注入（纯单元测试夹具）时仅落盘。
+    void setAdoptHandler(std::function<QString(const QString &)> h) { m_adopt = std::move(h); }
     Conflict resolveConflict(const QDateTime &local, const QDateTime &remote) const;
     struct Options { bool settings = false, progress = true, highlights = false, books = false; };
     void sync(WebDavClient &client, const Options &opts);
@@ -81,4 +85,5 @@ private:
     QSqlDatabase m_db;
     QStringList m_log;
     SettingsStore *m_settings = nullptr; // L2：注入的设置单例（非拥有，main.cpp 持有）
+    std::function<QString(const QString &)> m_adopt; // L3：下载落盘后的注册钩子
 };

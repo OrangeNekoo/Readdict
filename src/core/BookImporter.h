@@ -12,9 +12,12 @@ public:
     ~BookImporter();
     static QString detectFormat(const QString &fileName);
     // 返回空串表示成功，否则为错误信息
-    // moveIntoLibrary：当前恒为复制语义（QFile::copy），参数保留供后续启用移动语义
     // importedId（可选）：导入成功后回填新书 id（C8：全文索引由导入流程驱动）
-    QString importFile(const QString &srcPath, bool moveIntoLibrary, qint64 *importedId = nullptr);
+    QString importFile(const QString &srcPath, qint64 *importedId = nullptr);
+    // 同步下载落盘后的注册入口：文件已在书库目录内，跳过复制直接走
+    // 解析→addBook→封面→索引；成功返回空串。去重：(title,author,format)
+    // 或 path 命中已有书 → 仅返回空串不重复注册。
+    QString adoptFile(const QString &pathInLibrary);
     // C8：为指定书同步建 FTS5 全文索引（解析全书 → SearchEngine 逐章入库）。
     // ":memory:" 库（每连接独立实例）下索引无从共享，直接跳过。
     void indexBook(qint64 bookId);
@@ -26,7 +29,7 @@ public:
     // 最近一次导入的非致命错误（如 EPUB 解析失败导致封面回退占位）；成功或
     // 无错误时为空串。致命错误仍由 importFile 的返回值表达。
     QString lastError() const { return m_lastError; }
-    // QML 导入入口：本地文件 URL → importFile(file, true)；成功发 imported() 由
+    // QML 导入入口：本地文件 URL → importFile(file)；成功发 imported() 由
     // 主程序连接刷新 Books 单例（本实例内部 BookManager 用独立连接名，booksChanged
     // 不会到达 UI 绑定的 Books 单例）；失败发 importFailed(message, fileName) 供 UI 提示。
     Q_INVOKABLE void doImport(const QUrl &url);
@@ -41,6 +44,9 @@ signals:
     // 连接）收不到，需经本信号由 main 重新 emit books->booksChanged()。
     void coversRefreshed();
 private:
+    // 入库注册（复制之后共用的段）：detectFormat→解析→addBook→封面→indexBook。
+    // destPath：书库内最终文件路径；format：detectFormat 结果；失败回滚封面副作用。
+    QString registerBook(const QString &destPath, const QString &format, qint64 *importedId);
     // 回填队列的逐本处理（经 QTimer::singleShot 调度）
     void backfillNext();
     static QString coverPathFor(const QString &title, const QString &destDir);

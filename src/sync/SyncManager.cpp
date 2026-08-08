@@ -1,6 +1,7 @@
 #include "SyncManager.h"
 #include "../core/SettingsStore.h"
 #include "../core/DatabaseManager.h"
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -584,42 +585,52 @@ void SyncManager::syncOne(WebDavClient &client, const QVector<DavEntry> &remote,
 }
 
 void SyncManager::syncBookBodies(WebDavClient &client, const QVector<DavEntry> &remote) {
-    // 上传：本地书籍文件体缺失于远端 → 远端名 b<id>_<basename>（扁平命名，list() depth 1 可见）
+    // 上传：本地书籍文件体缺失于远端 → 远端名 h<sha1(前256KB)前16位hex>_<basename>。
+    // L3（P0#3）：内容哈希命名替代 b<id>_——id 各设备独立自增，同一本书在两台设备
+    // 上 id 不同、旧命名永不命中导致重复上传；哈希内容两端同名即视为同一文件体。
     QSqlQuery q(m_db);
     if (q.exec(QStringLiteral("SELECT id,path FROM books"))) {
         while (q.next()) {
-            const qint64 id = q.value(0).toLongLong();
             const QString path = q.value(1).toString();
             if (!QFileInfo::exists(path))
                 continue;
-            const QString name = QStringLiteral("b%1_%2").arg(id).arg(QFileInfo(path).fileName());
+            QFile f(path);
+            if (!f.open(QIODevice::ReadOnly))
+                continue;
+            const QByteArray head = f.read(262144);           // 前 256KB
+            const QString hash = QString::fromLatin1(
+                QCryptographicHash::hash(head, QCryptographicHash::Sha1).toHex().left(16));
+            const QString basename = QFileInfo(path).fileName();
+            const QString name = QStringLiteral("h%1_%2").arg(hash, basename);
             bool present = false;
+            // 旧 b<id>_<basename> 前缀视为已存在，避免对已上传的旧命名文件体重复上传
+            const QRegularExpression legacy(
+                QStringLiteral("^b\\d+_") + QRegularExpression::escape(basename) + QStringLiteral("$"));
             for (const DavEntry &e : remote) {
-                if (e.name == name) {
+                if (e.name == name || legacy.match(e.name).hasMatch()) {
                     present = true;
                     break;
                 }
             }
             if (present)
-                continue; // 远端已有同名校验体：按需跳过
-            QFile f(path);
-            if (!f.open(QIODevice::ReadOnly))
-                continue;
+                continue; // 远端已有同内容/旧命名文件体：跳过
+            f.seek(0);
             if (client.put(name, f.readAll()))
                 log(QStringLiteral("上传书籍 %1").arg(name));
             else
                 log(QStringLiteral("失败 %1: %2").arg(name, client.lastError()));
         }
     }
-    // 下载：远端书籍文件体缺失于本地 → 写入 libraryDir/books/<basename>
-    // 文件名白名单校验：仅接受 b<id>_<basename> 且 basename 无路径分隔符/无 ".."，
+    // 下载：远端书籍文件体缺失于本地 → 写入 libraryDir/books/<basename>，落盘后经
+    // m_adopt 钩子走导入管线注册（BookImporter::adoptFile）。
+    // 文件名白名单校验：接受 h<16hex>_ 与旧 b<id>_ 前缀且 basename 无路径分隔符/无 ".."，
     // 防恶意远端用路径穿越写出 libraryDir（见报告）。
-    const QRegularExpression re(QStringLiteral("^b(\\d+)_([^/]+)$"));
+    const QRegularExpression re(QStringLiteral("^(?:h[0-9a-f]{16}|b\\d+)_([^/]+)$"));
     for (const DavEntry &e : remote) {
         const QRegularExpressionMatch m = re.match(e.name);
         if (!m.hasMatch())
             continue;
-        const QString basename = m.captured(2);
+        const QString basename = m.captured(1);
         if (basename.contains(QStringLiteral("..")))
             continue;
         const QString dest = m_libraryDir + QStringLiteral("/books/") + basename;
@@ -630,8 +641,15 @@ void SyncManager::syncBookBodies(WebDavClient &client, const QVector<DavEntry> &
             continue;
         QDir().mkpath(QFileInfo(dest).absolutePath());
         QFile out(dest);
-        if (out.open(QIODevice::WriteOnly) && out.write(data) == data.size())
+        if (!(out.open(QIODevice::WriteOnly) && out.write(data) == data.size()))
+            continue;
+        if (m_adopt) {
+            const QString regErr = m_adopt(dest);
+            log(regErr.isEmpty() ? QStringLiteral("下载并注册书籍 %1").arg(e.name)
+                                 : QStringLiteral("注册失败 %1: %2").arg(e.name, regErr));
+        } else {
             log(QStringLiteral("下载书籍 %1").arg(e.name));
+        }
     }
 }
 

@@ -63,6 +63,8 @@ qt_add_executable(tst_bookimporter
 )
 target_include_directories(tst_bookimporter PRIVATE ../src ../src/parsers ../third_party/libmobi/src)
 target_link_libraries(tst_bookimporter PRIVATE Qt6::Test Qt6::Sql Qt6::Gui Qt6::Pdf MINIZIP::minizipstatic mobi zlibstatic)
+# L3：adoptFileRegistersWithoutCopy 需 sample.epub fixture（绝对路径注入，同 tst_epubparser 模式）
+target_compile_definitions(tst_bookimporter PRIVATE EPUB_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 if(APPLE)
     target_link_libraries(tst_bookimporter PRIVATE iconv)
 endif()

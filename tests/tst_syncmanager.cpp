@@ -16,6 +16,7 @@
 #include <QTemporaryDir>
 #include <QFile>
 #include <QTimeZone>
+#include <QDir>
 #include <QRegularExpression>
 #include "core/SettingsStore.h"
 #include "SyncManager.h"
@@ -595,18 +596,20 @@ private slots:
             "\"addedAt\":\"2026-08-02T00:00:00\"}]}";
         mock.mtimes["books.json"] = QDateTime(QDate(2026, 8, 2), QTime(0, 0, 0), QTimeZone::UTC);
         mock.files["b2_r.epub"] = "REMOTE-EPUB-CONTENT";
+        // L3：空 books.json 已存在 → 元数据轮不上传（用例只关注文件体）
+        mock.files["books.json"] = "{\"books\":[]}";
         SyncManager m(db, dir.path());
         SyncManager::Options o; o.settings = false; o.progress = false;
         o.highlights = false; o.books = true;
         m.sync(mock, o);
-        // 本地书籍文件体缺失于远端 → 上传 b1_a.epub
-        QCOMPARE(mock.files.value("b1_a.epub"), QByteArray("LOCAL-EPUB-CONTENT"));
+        // 本地书籍文件体缺失于远端 → 上传内容哈希命名体（L3：h<sha1(前256KB)前16hex>_<basename>）
+        QCOMPARE(mock.files.value("h300ae5657ff11eb6_a.epub"), QByteArray("LOCAL-EPUB-CONTENT"));
         // 远端书籍文件体缺失于本地 → 下载到 libraryDir/books/r.epub
         QFile downloaded(dir.path() + "/books/r.epub");
         QVERIFY(downloaded.open(QIODevice::ReadOnly));
         QCOMPARE(downloaded.readAll(), QByteArray("REMOTE-EPUB-CONTENT"));
         const QString joined = m.log().join('\n');
-        QVERIFY(joined.contains("上传书籍 b1_a.epub"));
+        QVERIFY(joined.contains("上传书籍 h300ae5657ff11eb6_a.epub"));
         QVERIFY(joined.contains("下载书籍 b2_r.epub"));
         // 复审：addedAt UTC 归一化（跨设备时区不偏移）
         const QJsonArray meta = QJsonDocument::fromJson(m.buildBooksJson())
@@ -1065,6 +1068,46 @@ private slots:
         // 单例后续 setValue 不冲掉同步结果
         store->setValue("tts/rate", 1.5);
         QCOMPARE(store->value("theme/mode").toString(), QString("dark"));
+    }
+
+    // ---- L3（P0#3）：书籍文件体内容哈希命名 + 下载落盘经 adopt 钩子注册 ----
+    void bookBodyNamesUseContentHash() {
+        QTemporaryDir dir;
+        QDir().mkpath(dir.path() + "/books");
+        const QString dbPath = dir.path() + "/Readdict.db";
+        QSqlDatabase db = seedDb(dbPath);
+        // 书库内真实文件（写任意字节，哈希对其内容计算）
+        const QString dest = dir.path() + "/books/sample.epub";
+        QFile f(dest);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(QByteArray(300000, 'x'));
+        f.close();
+        seedBook(db, 1, "样书", 0.0, "2026-01-01T00:00:00");
+        QSqlQuery upd(db);
+        upd.exec(QStringLiteral("UPDATE books SET path='%1' WHERE id=1").arg(dest));
+        SyncManager mgr(dbPath, dir.path(), "readdict_sync_h1");
+        QStringList adopted;
+        mgr.setAdoptHandler([&adopted](const QString &p) { adopted.append(p); return QString(); });
+        MockWebDavClient client;
+        SyncManager::Options opts;
+        opts.books = true;
+        client.files["books.json"] = "{\"books\":[]}"; // 远端已有元数据 → 元数据轮无上传
+        mgr.sync(client, opts);
+        // 上传名 = h<16hex>_<basename>
+        QCOMPARE(client.putNames.size(), 1);
+        QVERIFY2(QRegularExpression("^h[0-9a-f]{16}_sample\\.epub$")
+                     .match(client.putNames.first()).hasMatch(),
+                 qPrintable(client.putNames.first()));
+        // 下载端：清空本地文件表重开 → 同 mock 远端再 sync，adopt 钩子收到落盘路径
+        QStringList downloaded;
+        mgr.setAdoptHandler([&downloaded](const QString &p) { downloaded.append(p); return QString(); });
+        QFile::remove(dest);
+        SyncManager mgr2(dbPath, dir.path(), "readdict_sync_h2");
+        mgr2.setAdoptHandler([&downloaded](const QString &p) { downloaded.append(p); return QString(); });
+        mgr2.sync(client, opts);
+        QCOMPARE(downloaded.size(), 1);
+        QVERIFY(downloaded.first().endsWith("sample.epub"));
+        QVERIFY(QFile::exists(downloaded.first())); // 落盘成功
     }
 };
 QTEST_MAIN(TestSync)

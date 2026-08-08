@@ -198,7 +198,7 @@ QString BookImporter::detectFormat(const QString &fileName) {
     return {};
 }
 
-QString BookImporter::importFile(const QString &srcPath, bool moveIntoLibrary, qint64 *importedId) {
+QString BookImporter::importFile(const QString &srcPath, qint64 *importedId) {
     const QString format = detectFormat(srcPath);
     if (format.isEmpty()) return "不支持的文件格式";
     QDir lib(m_libraryDir); lib.mkpath("books");
@@ -206,8 +206,27 @@ QString BookImporter::importFile(const QString &srcPath, bool moveIntoLibrary, q
     const QString dest = m_libraryDir + "/books/" + fileName;
     if (QFile::exists(dest)) return "同名文件已存在于书库";
     if (!QFile::copy(srcPath, dest)) return "复制文件失败";
+    return registerBook(dest, format, importedId);
+}
+
+QString BookImporter::adoptFile(const QString &pathInLibrary) {
+    // 同步下载落盘入口：文件已在书库目录内，不复制。去重命中（(title,author,format)
+    // 或 path 与已有书相同）→ 返回空串视为成功，不重复注册。
+    const QString format = detectFormat(pathInLibrary);
+    if (format.isEmpty()) return "不支持的文件格式";
+    if (!QFile::exists(pathInLibrary)) return "文件不存在";
+    const QString title = QFileInfo(pathInLibrary).completeBaseName();
+    for (const Book &b : m_books->books()) {
+        if (b.path == pathInLibrary) return {};
+        if (b.title == title && b.author.isEmpty() && b.format == format) return {};
+    }
+    return registerBook(pathInLibrary, format, nullptr);
+}
+
+QString BookImporter::registerBook(const QString &destPath, const QString &format,
+                                   qint64 *importedId) {
     const QString coverDir = m_libraryDir + "/covers/";
-    const QString title = QFileInfo(fileName).completeBaseName();
+    const QString title = QFileInfo(destPath).completeBaseName();
     // 封面由 MD5(标题) 前 6 位命名，同标题书籍共享同一封面文件：
     // 记录生成前是否已存在，回滚时不得删除仍被健康记录引用的封面。
     const QString placeholderPath = coverPathFor(title, coverDir);
@@ -218,7 +237,7 @@ QString BookImporter::importFile(const QString &srcPath, bool moveIntoLibrary, q
     if (format == "EPUB") {
         // EPUB 提取真实封面（OPF cover 声明 → 解析结果首个内嵌图片）；失败回退占位。
         // TXT/MD/FB2/MOBI 无内嵌封面保留占位。
-        const QString realCover = extractEpubCover(dest, coverDir);
+        const QString realCover = extractEpubCover(destPath, coverDir);
         if (!realCover.isEmpty()) {
             cover = realCover;
             rollbackCover = realCover;
@@ -228,7 +247,7 @@ QString BookImporter::importFile(const QString &srcPath, bool moveIntoLibrary, q
         }
     } else if (format == "PDF") {
         // PDF 渲染首页为真实封面（B9）；加载/渲染失败回退占位。
-        const QString realCover = extractPdfCover(dest, coverDir);
+        const QString realCover = extractPdfCover(destPath, coverDir);
         if (!realCover.isEmpty()) {
             cover = realCover;
             rollbackCover = realCover;
@@ -242,11 +261,11 @@ QString BookImporter::importFile(const QString &srcPath, bool moveIntoLibrary, q
     }
     Book b;
     b.title = title;
-    b.format = format; b.path = dest; b.cover = cover;
+    b.format = format; b.path = destPath; b.cover = cover;
     // addBook 返回 -1 表示写入失败（如 path 唯一约束冲突、FTS 索引写入失败），此时回滚文件副作用。
     const qint64 id = m_books->addBook(b);
     if (id < 0) {
-        QFile::remove(dest);
+        QFile::remove(destPath);
         if (!rollbackCover.isEmpty()) QFile::remove(rollbackCover);
         return "写入数据库失败";
     }
@@ -415,7 +434,7 @@ void BookImporter::doImport(const QUrl &url) {
         emit importFailed("无法解析本地文件路径", url.toString());
         return;
     }
-    const QString err = importFile(file, true);
+    const QString err = importFile(file);
     if (!err.isEmpty()) {
         qWarning() << "导入失败:" << err << "(" << file << ")";
         emit importFailed(err, file);
