@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Readdict.Backend
+import Readdict.UI 1.0
 
 // 阅读页主组件：背景四态（浅/深/米白/自定义图片）+ 章节渲染 + 底部控制栏 + 目录 Dialog。
 // typography 由 Settings 的 typography/ 分区组合（QML 侧组合，避免跨单例依赖），
@@ -116,9 +117,11 @@ Page {
         anchors.bottom: page.ttsBarVisible ? ttsBar.top : controlsHost.top
         chapter: page.chapter
         typography: page.typography
-        // B3：正文前景色随背景模式——dark 传浅色 #E0E0E0；
-        // 其余（light/paper/image）视为浅底用深字 #212121（image 模式内容区域透明露出自定义图片，按浅色处理）
-        textColor: page.bgMode === "dark" ? "#E0E0E0" : "#212121"
+        // B3：正文前景色随背景模式——dark 传 Kindle 深色系浅字（darkTextPrimary
+        // #E8E8E3）；其余（light/paper/image）视为浅底用暖白系深字（lightTextPrimary
+        // #1A1A1A，image 模式内容区域透明露出自定义图片，按浅色处理）。
+        // U1：两色均引用 UITheme Token（原 #E0E0E0/#212121）。
+        textColor: page.bgMode === "dark" ? UITheme.darkTextPrimary : UITheme.lightTextPrimary
         // C7：划线上下文——bookId 供 addHighlight，highlights 供逐句渲染查表
         bookId: (page.book && page.book.id) || -1
         highlights: page.highlights

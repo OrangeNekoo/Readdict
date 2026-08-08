@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Readdict.Backend
+import Readdict.UI 1.0
 
 // 章节内容渲染：Flickable + Column + Repeater。
 // chapter:   {title, paragraphs:[{text, html, level, imagePath, sentences}]}（Books.loadChapter 返回）
@@ -32,7 +33,9 @@ Flickable {
     property var typography: ({})
     // B3：正文前景色——浅色/米白背景默认深字；深色背景由 ReaderPage 按 bgMode 传浅色。
     // TextEdit.color 作为 QTextDocument 默认前景色，h1-h6 等无显式色的富文本继承。
-    property color textColor: "#212121"
+    // U1：默认取 Kindle 暖白系主文字 Token（lightTextPrimary #1A1A1A）；ReaderPage
+    // 总是显式传入 bgMode 对应色（dark → darkTextPrimary），本默认仅独立使用兜底。
+    property color textColor: UITheme.lightTextPrimary
     // E4：翻页方式——"scroll"（竖滚连续，默认）/ "paged"（横翻整页，按视口高度切页）。
     // 由 ReaderPage 从 Settings 的 reading/pageMode 读取注入；键盘方向键按此分流：
     // scroll 模式 ↑↓ 滚动一视口页、←→ 翻章；paged 模式四个方向键都整页翻动。

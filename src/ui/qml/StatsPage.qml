@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
 import Readdict.Backend
+import Readdict.UI 1.0
 
 // D4：阅读统计页。数据来自 Books.stats()（BookManager 聚合查询：COUNT/SUM/AVG +
 // 分类 GROUP BY）。卡片网格：总藏书、累计阅读时长（秒 → "X 小时 Y 分"）、平均进度
@@ -153,7 +154,8 @@ Page {
                                         width: parent.width * page.categoryRatio(modelData)
                                         height: parent.height
                                         radius: 4
-                                        color: Material.accent
+                                        // U1：填充色改 Kindle 选中 Token（原 Material.accent 靛蓝）
+                                        color: UITheme.borderActive
                                     }
                                 }
                             }

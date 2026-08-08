@@ -265,7 +265,10 @@ QString BookImporter::coverPathFor(const QString &title, const QString &destDir)
 QString BookImporter::generatePlaceholderCover(const QString &title, const QString &destDir) const {
     QDir(destDir).mkpath(".");
     const QString path = coverPathFor(title, destDir);
-    QPixmap pm(300, 400); pm.fill(QColor("#3D5AFE"));
+    // U1：去 Material 靛蓝——占位底色改 Kindle 选中 Token 近黑 #1A1A1A（UITheme
+    // lightBorderActive 同值；C++ 侧无法引用 QML Token，注释锚定 Theme.qml 值源），
+    // 白字在其上对比度两模式恒保证（与 BookCard 占位同风格）
+    QPixmap pm(300, 400); pm.fill(QColor("#1A1A1A"));
     QPainter p(&pm);
     p.setPen(Qt::white);
     QFont f = p.font(); f.setPointSize(120); f.setBold(true); p.setFont(f);

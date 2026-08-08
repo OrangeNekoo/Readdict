@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import Readdict.Backend
+import Readdict.UI 1.0
 
 ApplicationWindow {
     id: root
@@ -17,26 +18,38 @@ ApplicationWindow {
 
     // 主题三态：auto 跟随系统、light 浅色、dark 深色；持久化于 Settings 的 theme/mode
     property string theme: "auto"
-    function applyTheme(mode) { root.theme = mode }
+    // U1：applyTheme 现同步两处——Material.theme 三态（QtQuick.Controls 控件仍由
+    // Material 样式渲染，保留）与 UITheme.isDark（Kindle Token 深浅解析）。颜色全部
+    // 走 Token，不再覆盖 Material.primary/accent（靛蓝移除，见下方 Material 声明注释）。
+    function applyTheme(mode) {
+        root.theme = mode
+        UITheme.isDark = root.effectiveDark
+    }
 
     Material.theme: root.theme === "dark" ? Material.Dark
                    : root.theme === "light" ? Material.Light
                    : Material.System
 
-    // D7：Material 主题主色——浅色 #3D5AFE（靛蓝 A200）；深色模式调暗为靛蓝 600，
-    // 在深色背景上降低高饱和主色的刺眼度，同时保证按钮/进度条等主色控件的对比度。
-    // accent 同族微调，保证选中态（复选框/滑块/搜索框焦点）与主色协调。
     // effectiveDark 取实际生效的深色：显式 dark，或 auto 且系统为深色
     //（Qt.styleHints.colorScheme 跟随系统实时变化，auto 模式换肤即时生效）。
     property bool effectiveDark: root.theme === "dark"
         || (root.theme === "auto" && Qt.styleHints.colorScheme === Qt.ColorScheme.Dark)
-    Material.primary: root.effectiveDark ? "#3949AB" : "#3D5AFE"
-    Material.accent: root.effectiveDark ? "#5C6BC0" : "#536DFE"
 
-    // 启动时从 settings.json 恢复上次主题选择（SettingsStore 默认值即 auto）
+    // U1：去 Material 靛蓝（原 #3D5AFE/#536DFE 主色/accent 删除，UI 不再引用
+    // Material.primary/accent——BookCard/StatsPage 的 accent 用法已改 Token）。
+    // Material 框架仍需保留（QtQuick.Controls 控件样式），但颜色全走 Kindle Token：
+    // background/foreground 附加属性让默认控件底色/文字随 UITheme 深浅（暖白近黑
+    // ↔ Kindle 深色系），窗口底色由下方 background 显式 Rectangle 兜底。
+    Material.background: UITheme.bgPrimary
+    Material.foreground: UITheme.textPrimary
+    background: Rectangle { anchors.fill: parent; color: UITheme.bgPrimary }
+
+    // 启动时从 settings.json 恢复上次主题选择（SettingsStore 默认值即 auto），
+    // 并同步 UITheme 深浅（Settings 无变更信号，applyTheme 路径由设置页调用）
     Component.onCompleted: {
         const mode = Settings.value("theme/mode")
         root.theme = (mode === "auto" || mode === "light" || mode === "dark") ? mode : "auto"
+        UITheme.isDark = root.effectiveDark
     }
 
     StackView {

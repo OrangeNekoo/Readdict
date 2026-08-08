@@ -1,7 +1,12 @@
 import QtQuick
 import QtQuick.Effects
+import Readdict.UI 1.0
 
-// 阅读背景层：浅色 #FAFAFA / 深色 #121212 / 米白 #F5EFE0 / 自定义图片。
+// 阅读背景层：浅色（Kindle 暖白 Token）/ 深色（Kindle 深色系）/ 米白纸色 / 自定义图片。
+// U1：底色全部引用 UITheme Token——light → lightBgPrimary(#F5F5F0)、dark →
+// darkBgPrimary(#1E1E1E)、paper → lightBgPaper(#F5EFE0 米白，Kindle 主题预设)。
+// 阅读背景模式与全局主题（isDark）独立：模式是用户逐页选择的阅读预设（Kindle 语义），
+// 故直接引用浅/深具体 Token，而非 isDark 解析别名。
 // blur 0..1 与 MultiEffect.blur 同范围；brightness 0.5..1.5 映射 MultiEffect.brightness -0.5..0.5
 // （MultiEffect 亮度范围 -1..1，故换算 brightness - 1.0）。
 // 图片模式：Image（PreserveAspectCrop）作 MultiEffect 源，mode 非 image 时两者隐藏（底色 Rectangle 可见）。
@@ -15,8 +20,8 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: mode === "dark" ? "#121212"
-             : (mode === "paper" ? "#F5EFE0" : "#FAFAFA")
+        color: mode === "dark" ? UITheme.darkBgPrimary
+             : (mode === "paper" ? UITheme.lightBgPaper : UITheme.lightBgPrimary)
     }
 
     Image {

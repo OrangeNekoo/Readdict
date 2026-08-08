@@ -4,6 +4,7 @@ import QtQuick.Controls.Material
 import QtQuick.Effects
 import QtQuick.Layouts
 import Readdict.Backend
+import Readdict.UI 1.0
 
 Item {
     id: card
@@ -70,12 +71,14 @@ Item {
                 fillMode: Image.PreserveAspectCrop
                 visible: !card.showPlaceholder
             }
-            // B2：Kindle 风格占位——品牌色底 + 白色首字；与封面图互斥显示
+            // B2：Kindle 风格占位——近黑底（Kindle 选中/强调 Token）+ 白色首字；
+            // U1：原品牌色靛蓝 #3D5AFE 移除，改固定近黑（lightBorderActive #1A1A1A，
+            // 两模式对比度恒保证：白字在黑底上）；与封面图互斥显示
             Rectangle {
                 id: coverPlaceholder
                 anchors.fill: parent
                 visible: card.showPlaceholder
-                color: "#3D5AFE"
+                color: UITheme.lightBorderActive
                 Text {
                     id: coverLetterText
                     anchors.centerIn: parent
@@ -117,7 +120,10 @@ Item {
             color: Material.theme === Material.Dark ? "#888888" : "#8A8A8A"
         }
 
-        // B5：进度细条（Kindle 主页风格）——细 3px 圆角线替代 ProgressBar
+        // B5：进度细条（Kindle 主页风格）——细 3px 圆角线替代 ProgressBar；
+        // U1：填充色改 Kindle 选中 Token（light #1A1A1A / dark #E8E8E3，
+        // 原 Material.accent 靛蓝移除——不覆盖 accent 后 Material 默认 accent 为
+        // 粉色，必须显式改 Token）
         Rectangle {
             id: progressLine
             anchors.bottom: parent.bottom
@@ -133,7 +139,7 @@ Item {
                 width: Math.max(0, Math.min(1, card.book.progress ?? 0)) * parent.width
                 height: parent.height
                 radius: parent.radius
-                color: Material.accent
+                color: UITheme.borderActive
             }
         }
 

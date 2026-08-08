@@ -3,9 +3,10 @@ import QtTest
 import Readdict.Backend
 import Readdict.Test 1.0
 
-// B3：深色背景阅读文字切换为浅色——ReaderContent.textColor 默认深字 #212121，
-// ReaderPage 按 bgMode 传色（dark → 浅色 #E0E0E0，light/paper/image → 深字；
-// E1：旧 eink 值在 ReaderPage 无分支，按浅底深字 #212121 处理）。
+// B3：深色背景阅读文字切换为浅色——ReaderContent.textColor 默认深字（U1 起随
+// Token lightTextPrimary #1A1A1A），ReaderPage 按 bgMode 传色（dark → Kindle 深色系
+// 浅字 darkTextPrimary #E8E8E3，light/paper/image → 深字 #1A1A1A；E1：旧 eink 值在
+// ReaderPage 无分支，按浅底深字处理）。
 // 富文本标题（<h1>）渲染色无法直接断言（继承 QTextDocument 默认前景色），
 // 此处断言 TextEdit.color 属性（即文档默认前景色源）；h1 渲染行为另在报告中记录。
 // 结构约定（与 tst_background/tst_highlightsui 一致）：根为带尺寸的 Item，
@@ -39,7 +40,7 @@ Item {
         id: testCase
         name: "TextColorSmoke"
 
-        // 默认浅色：ReaderContent.textColor 默认 #212121，段落 TextEdit.color 跟随
+        // 默认浅色：ReaderContent.textColor 默认深字（Token #1A1A1A），段落 TextEdit.color 跟随
         function test_01_defaultLight() {
             var loader = contentComp.createObject(root)
             loader.width = 800; loader.height = 600
@@ -50,16 +51,16 @@ Item {
             c.chapter = root.makeChapter()
             tryVerify(function () { return root.paraEdit(c, 0) !== null }, 2000,
                       "段落委托应渲染完成")
-            compare(String(c.textColor), "#212121", "默认 textColor 应为深字 #212121")
+            compare(String(c.textColor), "#1a1a1a", "默认 textColor 应为深字 #1A1A1A（Token）")
             for (var i = 0; i < 3; i++) {
                 var t = root.paraEdit(c, i)
-                compare(String(t.color), "#212121",
-                        "段落 " + i + " TextEdit.color 应默认 #212121，实际 " + String(t.color))
+                compare(String(t.color), "#1a1a1a",
+                        "段落 " + i + " TextEdit.color 应默认 #1A1A1A，实际 " + String(t.color))
             }
             loader.destroy()
         }
 
-        // 传浅色：textColor 改为 #E0E0E0 后纯文本/富文本段 TextEdit.color 同步更新
+        // 传浅色：textColor 改为 #E8E8E3 后纯文本/富文本段 TextEdit.color 同步更新
         function test_02_darkTextColor() {
             var loader = contentComp.createObject(root)
             loader.width = 800; loader.height = 600
@@ -70,25 +71,25 @@ Item {
             c.chapter = root.makeChapter()
             tryVerify(function () { return root.paraEdit(c, 0) !== null }, 2000,
                       "段落委托应渲染完成")
-            c.textColor = "#E0E0E0"
-            compare(String(c.textColor), "#e0e0e0", "textColor 应更新为浅色")
+            c.textColor = "#E8E8E3"
+            compare(String(c.textColor), "#e8e8e3", "textColor 应更新为浅色")
             tryVerify(function () {
                 for (var i = 0; i < 3; i++) {
                     var t = root.paraEdit(c, i)
-                    if (!t || String(t.color) !== "#e0e0e0") return false
+                    if (!t || String(t.color) !== "#e8e8e3") return false
                 }
                 return true
             }, 2000, "纯文本与富文本（含 <h1>）段落 TextEdit.color 都应随 textColor 更新")
             // 切回深字：绑定是双向响应式的
-            c.textColor = "#212121"
+            c.textColor = "#1A1A1A"
             tryVerify(function () {
-                return String(root.paraEdit(c, 1).color) === "#212121"
+                return String(root.paraEdit(c, 1).color) === "#1a1a1a"
             }, 2000, "textColor 切回深字后富文本段应同步")
             loader.destroy()
         }
 
         // dark 下高亮句对比度（B3 复审）：高亮底恒浅色板（划线黄绿粉 / TTS 黄），
-        // span 必须追加显式深色前景 color:#212121——否则继承 #E0E0E0 浅字浅底。
+        // span 必须追加显式深色前景 color:#212121——否则继承 #E8E8E3 浅字浅底。
         // 覆盖两条路径：划线句（marker）与朗读当前句（TTS 黄底）。
         function test_04_darkHighlightContrast() {
             // 前置用例可能已把 Tts 热切到系统引擎（seekTo 真实发声）：切 openai 无 key
@@ -103,7 +104,7 @@ Item {
             c.chapter = root.makeChapter()
             tryVerify(function () { return root.paraEdit(c, 0) !== null }, 2000,
                       "段落委托应渲染完成")
-            c.textColor = "#E0E0E0"   // dark 模式：文档默认前景浅色
+            c.textColor = "#E8E8E3"   // dark 模式：文档默认前景浅色（Token darkTextPrimary）
             // 路径 A：划线句（段 1 全局句 1）→ 高亮 span 应含显式深色前景
             c.highlights = [
                 { id: 31, bookId: 1, chapter: "章", sentenceIndex: 1, text: "标题", color: "#A5D6A7", note: "" }
@@ -122,7 +123,7 @@ Item {
             loader.destroy()
         }
 
-        // ReaderPage 绑定：bgMode=dark → textColor #E0E0E0；light/paper/image → 深字
+        // ReaderPage 绑定：bgMode=dark → textColor #E8E8E3；light/paper/image → 深字
         function test_03_readerPageBgModeBinding() {
             var loader = readerComp.createObject(root)
             loader.setSource("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: {} })
@@ -133,33 +134,33 @@ Item {
             tryVerify(function () { return root.paraEdit(cv, 0) !== null }, 2000,
                       "ReaderPage 内段落委托应渲染完成")
             // 默认浅色
-            compare(String(cv.textColor), "#212121", "默认（light）textColor 应为深字")
+            compare(String(cv.textColor), "#1a1a1a", "默认（light）textColor 应为深字")
             // dark → 浅色，段落 TextEdit.color 同步
             page.bgMode = "dark"
-            compare(String(cv.textColor), "#e0e0e0", "dark 背景 textColor 应为浅色 #E0E0E0")
+            compare(String(cv.textColor), "#e8e8e3", "dark 背景 textColor 应为浅色 #E8E8E3")
             tryVerify(function () {
-                return String(root.paraEdit(cv, 1).color) === "#e0e0e0"
-            }, 2000, "dark 下富文本段 TextEdit.color 应为 #E0E0E0，实际 "
+                return String(root.paraEdit(cv, 1).color) === "#e8e8e3"
+            }, 2000, "dark 下富文本段 TextEdit.color 应为 #E8E8E3，实际 "
                      + String(root.paraEdit(cv, 1).color))
             // paper（米白浅底）→ 深字
             page.bgMode = "paper"
-            compare(String(cv.textColor), "#212121", "paper 背景 textColor 应为深字")
+            compare(String(cv.textColor), "#1a1a1a", "paper 背景 textColor 应为深字")
             // image（自定义图片背景，内容区透明露出图片，按浅色处理）→ 深字
             page.bgMode = "image"
-            compare(String(cv.textColor), "#212121", "image 背景 textColor 应为深字（浅色处理取舍）")
+            compare(String(cv.textColor), "#1a1a1a", "image 背景 textColor 应为深字（浅色处理取舍）")
             tryVerify(function () {
-                return String(root.paraEdit(cv, 0).color) === "#212121"
-            }, 2000, "image 下纯文本段 TextEdit.color 应为 #212121")
-            // E1：旧 eink 值在 ReaderPage 无分支 → 按浅底深字处理（textColor #212121）
+                return String(root.paraEdit(cv, 0).color) === "#1a1a1a"
+            }, 2000, "image 下纯文本段 TextEdit.color 应为 #1A1A1A")
+            // E1：旧 eink 值在 ReaderPage 无分支 → 按浅底深字处理（textColor #1A1A1A）
             page.bgMode = "eink"
-            compare(String(cv.textColor), "#212121", "旧 eink 值应回退浅底深字 #212121")
+            compare(String(cv.textColor), "#1a1a1a", "旧 eink 值应回退浅底深字 #1A1A1A")
             tryVerify(function () {
-                return String(root.paraEdit(cv, 1).color) === "#212121"
-            }, 2000, "旧 eink 值下富文本段 TextEdit.color 应为 #212121，实际 "
+                return String(root.paraEdit(cv, 1).color) === "#1a1a1a"
+            }, 2000, "旧 eink 值下富文本段 TextEdit.color 应为 #1A1A1A，实际 "
                      + String(root.paraEdit(cv, 1).color))
             // 再回 dark：绑定持续生效
             page.bgMode = "dark"
-            compare(String(cv.textColor), "#e0e0e0", "再切 dark textColor 应回到浅色")
+            compare(String(cv.textColor), "#e8e8e3", "再切 dark textColor 应回到浅色")
             loader.destroy()
         }
 

@@ -55,13 +55,13 @@ Item {
             var b = loader.item
             b.width = 200; b.height = 300
             b.mode = "light"
-            compare(String(b.children[0].color), "#fafafa")
+            compare(String(b.children[0].color), "#f5f5f0", "light 底色随 Token（暖白 #F5F5F0）")
             b.mode = "dark"
-            compare(String(b.children[0].color), "#121212")
+            compare(String(b.children[0].color), "#1e1e1e", "dark 底色随 Token（Kindle 深色 #1E1E1E）")
             b.mode = "paper"
-            compare(String(b.children[0].color), "#f5efe0")
+            compare(String(b.children[0].color), "#f5efe0", "paper 底色随 Token（米白 #F5EFE0）")
             b.mode = "eink"
-            compare(String(b.children[0].color), "#fafafa", "eink 旧值应回退浅色（组件无 eink 分支）")
+            compare(String(b.children[0].color), "#f5f5f0", "eink 旧值应回退浅色（组件无 eink 分支）")
             verify(b.children.length === 3, "ReaderBackground 应只含 Rectangle/Image/MultiEffect（无纸纹层），实际 "
                    + b.children.length)
             b.mode = "image"

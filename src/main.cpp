@@ -10,6 +10,7 @@
 #include <QPair>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QUrl>
 #include <qqml.h>
 #include "core/BookManager.h"
 #include "core/BookImporter.h"
@@ -108,6 +109,12 @@ int main(int argc, char *argv[]) {
     // 加载翻译；语言切换由设置页下拉触发 applyLanguage，languageChanged 驱动 QML 重译。
     auto *lang = new LanguageController(resolveStartupLanguage(*settings));
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Lang", lang);
+    // U1：Kindle 设计 Token 单例（QML 文件单例）。与 C++ 单例同机制注册，但走
+    // qmlRegisterSingletonType(QUrl)——Theme.qml 是纯 QML 文件（无 C++ 对应）。
+    // 注意资源路径带 src/ui/qml：生产模块（qt_add_qml_module）按 QML_FILES 相对
+    // 路径嵌入；测试进程的资源路径不同（见 tst_qmlmain.cpp 注释）。
+    qmlRegisterSingletonType(QUrl("qrc:/qt/qml/Readdict/src/ui/qml/Theme.qml"),
+                             "Readdict.UI", 1, 0, "UITheme");
     auto *books = new BookManager(appData + "/Readdict.db");
     // 阅读器进度（progress/<bookId>）与 Books 单例解耦读写 settings.json（B8）
     books->setSettingsStore(settings);

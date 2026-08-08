@@ -258,6 +258,12 @@ int main(int argc, char *argv[]) {
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "ReaderText", new ReaderTextHelper);
     // D6：语言控制器（同生产 main.cpp；初始 zh_CN，测试资源已编入三份 .qm）
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Lang", new LanguageController("zh_CN"));
+    // U1：Kindle 设计 Token 单例（QML 文件单例）——同生产 main.cpp 注册，测试进程
+    // 的 import Readdict.UI 才能解析 UITheme。测试资源（tests/CMakeLists.txt 的
+    // qml_ui，BASE src/ui/qml）路径无 src 前缀：qrc:/qt/qml/Readdict/ui/qml/Theme.qml；
+    // 生产模块路径带 src/ui/qml（见 main.cpp 注释），两进程 URL 各自匹配其资源布局。
+    qmlRegisterSingletonType(QUrl("qrc:/qt/qml/Readdict/ui/qml/Theme.qml"),
+                             "Readdict.UI", 1, 0, "UITheme");
     // D3：Sync 单例（同生产 main.cpp；指向测试临时库，run() 读同一 settings.json）
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Sync",
                                  new SyncController(appData + "/t.db", appData));
