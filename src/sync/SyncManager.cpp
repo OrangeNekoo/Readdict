@@ -1,4 +1,5 @@
 #include "SyncManager.h"
+#include "../core/SettingsStore.h"
 #include "../core/DatabaseManager.h"
 #include <QDateTime>
 #include <QDir>
@@ -245,11 +246,21 @@ bool SyncManager::applySettingsJson(const QByteArray &data) {
     // 检查，两端内容趋同后即可 Skip，不再因"合并即重写"让 mtime 前移造成交替往返
     if (local == before)
         return true;
-    QFile w(settingsPath());
+    if (m_settings) {
+        // 唯一写者路径：合并结果经单例原子落盘并刷新内存，杜绝旧快照覆盖
+        m_settings->setRoot(local);
+        return true;
+    }
+    // 无单例注入（纯单元测试夹具）：原子直写兜底
+    const QString tmp = settingsPath() + QStringLiteral(".tmp");
+    QFile w(tmp);
     if (!w.open(QIODevice::WriteOnly))
-        return false; // 写盘失败：syncOne log 失败、不推进 adopted
-    // 与 SettingsStore::save 同格式（Indented），应用侧下次启动读取无差异
-    return w.write(QJsonDocument(local).toJson(QJsonDocument::Indented)) >= 0;
+        return false;
+    const QByteArray out = QJsonDocument(local).toJson(QJsonDocument::Indented);
+    if (w.write(out) != out.size()) return false;
+    w.close();
+    QFile::remove(settingsPath());
+    return QFile::rename(tmp, settingsPath());
 }
 
 bool SyncManager::applyProgressJson(const QByteArray &data) {

@@ -12,12 +12,14 @@ SyncController::SyncController(const QString &dbPath, const QString &libraryDir,
     // settings.json 的 webdav/autoSync 恢复上次选择）。
     m_timer.setInterval(30 * 60 * 1000);
     connect(&m_timer, &QTimer::timeout, this, [this] {
-        SettingsStore st(settingsPath());
+        SettingsStore *st = m_store;
+        SettingsStore fallback(settingsPath());   // 仅未注入时（测试旧夹具）
+        if (!st) st = &fallback;
         SyncManager::Options opts;
-        opts.settings = st.value(QStringLiteral("webdav/syncSettings")).toBool(true);
-        opts.progress = st.value(QStringLiteral("webdav/syncProgress")).toBool(true);
-        opts.highlights = st.value(QStringLiteral("webdav/syncHighlights")).toBool(false);
-        opts.books = st.value(QStringLiteral("webdav/syncBooks")).toBool(false);
+        opts.settings = st->value(QStringLiteral("webdav/syncSettings")).toBool(true);
+        opts.progress = st->value(QStringLiteral("webdav/syncProgress")).toBool(true);
+        opts.highlights = st->value(QStringLiteral("webdav/syncHighlights")).toBool(false);
+        opts.books = st->value(QStringLiteral("webdav/syncBooks")).toBool(false);
         doSync(opts);
     });
 }
@@ -37,6 +39,11 @@ void SyncController::run(bool settings, bool progress, bool highlights, bool boo
     doSync(opts);
 }
 
+void SyncController::setSettingsStore(SettingsStore *s) {
+    m_store = s;
+    m_mgr.setSettingsStore(s);
+}
+
 void SyncController::setAutoSync(bool enabled) {
     if (enabled)
         m_timer.start();
@@ -49,10 +56,12 @@ void SyncController::doSync(const SyncManager::Options &opts) {
     m_running = true;
     emit runningChanged();
 
-    SettingsStore st(settingsPath());
-    WebDavClient client(st.value(QStringLiteral("webdav/url")).toString(),
-                        st.value(QStringLiteral("webdav/user")).toString(),
-                        st.value(QStringLiteral("webdav/password")).toString());
+    SettingsStore *st = m_store;
+    SettingsStore fallback(settingsPath());   // 仅未注入时（测试旧夹具）
+    if (!st) st = &fallback;
+    WebDavClient client(st->value(QStringLiteral("webdav/url")).toString(),
+                        st->value(QStringLiteral("webdav/user")).toString(),
+                        st->value(QStringLiteral("webdav/password")).toString());
     // 同步阻塞（QEventLoop 网络）；完成与否由日志判定（SyncManager 无返回值）
     m_mgr.sync(client, opts);
     m_log = m_mgr.log();

@@ -311,6 +311,7 @@ qt_add_executable(tst_syncmanager
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/sync/SyncManager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/DatabaseManager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/HighlightManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/SettingsStore.cpp
 )
 target_include_directories(tst_syncmanager PRIVATE ../src ../src/sync)
 target_link_libraries(tst_syncmanager PRIVATE Qt6::Test Qt6::Sql Qt6::Network)

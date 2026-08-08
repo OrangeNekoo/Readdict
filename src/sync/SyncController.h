@@ -5,6 +5,8 @@
 #include <QStringList>
 #include <QTimer>
 
+class SettingsStore;
+
 // D3：SyncController——QObject 薄封装，把 SyncManager 的同步流程接到 QML
 // （qmlRegisterSingletonInstance 注册为 Readdict.Backend.Sync 单例）。
 // 职责：读 SettingsStore 的 webdav 分区（url/user/password）构造 WebDavClient →
@@ -26,6 +28,9 @@ public:
     Q_INVOKABLE void run(bool settings, bool progress, bool highlights, bool books);
     Q_INVOKABLE void setAutoSync(bool enabled);   // 每 30 分钟一次，默认关
     bool running() const { return m_running; }
+    // L2（P0#2）：注入应用级 SettingsStore 单例——转发给 SyncManager（合并写盘经单例），
+    // 并供 doSync/定时器读取 webdav 配置；未注入时各处临时构造兜底（测试旧夹具）。
+    void setSettingsStore(SettingsStore *s);
     QStringList log() const { return m_log; }
 private:
     QString settingsPath() const;   // db 同目录 settings.json（与 SyncManager::settingsPath 同源）
@@ -35,6 +40,7 @@ private:
     QTimer m_timer;
     bool m_running = false;
     QStringList m_log;
+    SettingsStore *m_store = nullptr; // L2：注入的设置单例（非拥有，main.cpp 持有）
 signals:
     void runningChanged();
     void logChanged();

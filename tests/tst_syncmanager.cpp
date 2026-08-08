@@ -17,6 +17,7 @@
 #include <QFile>
 #include <QTimeZone>
 #include <QRegularExpression>
+#include "core/SettingsStore.h"
 #include "SyncManager.h"
 #include "core/DatabaseManager.h"
 #include "core/HighlightManager.h"
@@ -312,13 +313,15 @@ private slots:
         QVERIFY(f.write("{\"theme\":{\"mode\":\"light\"},\"tts\":{\"engine\":\"system\",\"key\":\"local-key\",\"voice\":\"alloy\"},"
                         "\"webdav\":{\"url\":\"http://x\",\"user\":\"u\",\"password\":\"p\"}}") > 0);
         f.close();
+        // L2（P0#2）：注入 SettingsStore 后断言单例值（生产路径：合并经 setRoot 落盘）
+        SettingsStore store(dir.filePath("settings.json"));
         SyncManager m(dir.filePath("Readdict.db"), dir.path());
+        m.setSettingsStore(&store);
         // 远端载荷携带 tts 密钥（旧版本远端可能残留）：合并时必须忽略，本地密钥不被覆盖
         m.applySettingsJson("{\"theme\":{\"mode\":\"dark\"},\"typography\":{\"fontSize\":20},"
                             "\"tts\":{\"engine\":\"openai\",\"key\":\"remote-hacked-key\",\"rate\":1.5},"
                             "\"webdav\":{\"password\":\"hacked\"},\"progress\":{\"9\":9}}");
-        const QJsonObject root =
-            QJsonDocument::fromJson(readFileBytes(dir.filePath("settings.json"))).object();
+        const QJsonObject root = store.root();
         QCOMPARE(root["theme"].toObject()["mode"].toString(), QString("dark")); // 远端覆盖
         QCOMPARE(root["typography"].toObject()["fontSize"].toInt(), 20);        // 新增分区
         // 本地 webdav 保留、远端 webdav/progress 被忽略（永不写入）
@@ -330,14 +333,14 @@ private slots:
         QCOMPARE(tts["rate"].toDouble(), 1.5);
         QCOMPARE(tts["key"].toString(), QString("local-key"));
         QCOMPARE(tts["voice"].toString(), QString("alloy"));
-        // 本地无 settings.json → 由远端生成
+        // 本地无 settings.json → 单例兜底默认 + 远端合并生成
         QTemporaryDir dir2;
+        SettingsStore store2(dir2.filePath("settings.json"));
         SyncManager m2(dir2.filePath("Readdict.db"), dir2.path(), "readdict_sync_2");
+        m2.setSettingsStore(&store2);
         m2.applySettingsJson("{\"theme\":{\"mode\":\"dark\"}}");
         QVERIFY(QFile::exists(dir2.filePath("settings.json")));
-        const QJsonObject root2 =
-            QJsonDocument::fromJson(readFileBytes(dir2.filePath("settings.json"))).object();
-        QCOMPARE(root2["theme"].toObject()["mode"].toString(), QString("dark"));
+        QCOMPARE(store2.value("theme/mode").toString(), QString("dark"));
     }
 
     // ---- 补充：sync 流程——远端缺文件 → 上传 ----
@@ -1041,6 +1044,27 @@ private slots:
             QCOMPARE(q.value(1).toString(), QString("甲"));
         }
         QVERIFY(mA.log().join('\n').contains("待书籍同步后注册")); // 未命中跳过已 log
+    }
+
+    // ---- L2（P0#2）：applySettingsJson 合并结果经注入的 SettingsStore 单例落盘 ----
+    void applySettingsGoesThroughStore() {
+        // 夹具：临时目录 settings.json + 单例 SettingsStore
+        QTemporaryDir dir;
+        auto *store = new SettingsStore(dir.path() + "/settings.json");
+        store->setValue("theme/mode", "light");
+        SyncManager mgr(dir.path() + "/Readdict.db", dir.path(), "readdict_sync_t1");
+        mgr.setSettingsStore(store);
+        const QByteArray remote = QByteArrayLiteral(
+            "{\"theme\":{\"mode\":\"dark\"},\"typography\":{\"fontSize\":22}}");
+        QVERIFY(mgr.applySettingsJson(remote));
+        // 单例内存即时可见（不再被旧快照覆盖）
+        QCOMPARE(store->value("theme/mode").toString(), QString("dark"));
+        QCOMPARE(store->value("typography/fontSize").toInt(), 22);
+        // 未提及分区保留
+        QCOMPARE(store->value("webdav/syncProgress").toBool(), true);
+        // 单例后续 setValue 不冲掉同步结果
+        store->setValue("tts/rate", 1.5);
+        QCOMPARE(store->value("theme/mode").toString(), QString("dark"));
     }
 };
 QTEST_MAIN(TestSync)

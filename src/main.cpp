@@ -157,6 +157,9 @@ int main(int argc, char *argv[]) {
     // （独立连接名 readdict_sync），与各单例连接隔离；dbPath=AppDataLocation/Readdict.db，
     // libraryDir=AppDataLocation（同 Books 单例）。启动时恢复上次的自动同步开关。
     auto *syncController = new SyncController(appData + "/Readdict.db", appData);
+    // L2（P0#2）：注入设置单例——同步合并结果经 SettingsStore::setRoot 原子落盘并刷新
+    // 内存，杜绝 SyncManager 直写文件后单例旧快照再保存覆盖合并结果。
+    syncController->setSettingsStore(settings);
     syncController->setAutoSync(settings->value("webdav/autoSync").toBool());
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Sync", syncController);
     // B10：应用退出时结算阅读计时（页面 onDestruction 只在正常退出 QML 引擎销毁时触发，

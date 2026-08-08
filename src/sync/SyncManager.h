@@ -10,6 +10,8 @@
 #include <QVector>
 #include <functional>
 
+class SettingsStore;
+
 // D2：同步数据打包、合并与冲突解决。
 // 职责：把本地数据（设置/进度/划线/书籍元数据）打包为 JSON 上传 WebDAV，下载远端
 // JSON 合并回本地；按 mtime 冲突解决（KeepLocal/TakeRemote/Skip）。日志存内存供
@@ -40,6 +42,9 @@ public:
     bool applyProgressJson(const QByteArray &data);
     bool applyHighlightsJson(const QByteArray &data);
     bool applyBooksJson(const QByteArray &data);
+    // L2（P0#2）：注入应用级 SettingsStore 单例——applySettingsJson 合并结果经单例
+    // setRoot 原子落盘并刷新内存；未注入（纯单元测试夹具）时原子直写文件兜底。
+    void setSettingsStore(SettingsStore *s) { m_settings = s; }
     Conflict resolveConflict(const QDateTime &local, const QDateTime &remote) const;
     struct Options { bool settings = false, progress = true, highlights = false, books = false; };
     void sync(WebDavClient &client, const Options &opts);
@@ -75,4 +80,5 @@ private:
     QString m_dbPath, m_libraryDir;
     QSqlDatabase m_db;
     QStringList m_log;
+    SettingsStore *m_settings = nullptr; // L2：注入的设置单例（非拥有，main.cpp 持有）
 };
