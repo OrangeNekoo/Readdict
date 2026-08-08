@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
-import QtQuick.Effects
 import QtQuick.Layouts
 import Readdict.Backend
 import Readdict.UI 1.0
@@ -17,17 +16,23 @@ Item {
     property alias coverImage: coverImage
     property alias coverPlaceholder: coverPlaceholder
     property alias coverLetterText: coverLetterText
+    // U3：Kindle 化样式测试句柄——封面剪裁块（无圆角断言）、轻投影（shadowBook）、
+    // 卡片底（无边框断言）、标题（fsListItem 字号断言）
+    property alias coverClip: coverImg
+    property alias coverShadow: coverShadow
+    property alias cardChrome: cardChrome
+    property alias cardTitle: titleText
     // B2：空封面或加载失败时显示品牌色占位。Image 无 source 时 status 是 Null
     // 而非 Error，故条件由「cover 非空」与「status 非 Error」双重构成：空 cover
     // 走第一支短路为 true；有 source 但文件缺失/解码失败（Error）走第二支。
     // Loading/Ready 期间占位隐藏，真实封面淡入。
     readonly property bool showPlaceholder: !card.book.cover || coverImage.status === Image.Error
     signal clicked()
-    // B5：Kindle 主页风格——封面主导（近满宽）、标题下置（小号非加粗）、进度细条
-    // C5：封面墙强化——封面占比更大（宽 -12、高 176、顶距 8）、新增作者行（小字灰，
-    // 有作者才显示），卡片 180×280（网格 cell 190×294，见 ShelfPage）。
+    // U3：Kindle 封面网格——封面 3:4（宽 -12 = 168，高 224）、无圆角、轻投影
+    //（UITheme.shadowBook rgba(0,0,0,0.08)）、无卡片边框；标题下置 15px（fsListItem）、
+    // 作者小字灰（textSecondary）、进度细条。卡片 180×296（网格 cell 190×306，见 ShelfPage）。
     width: 180
-    height: 280
+    height: 296
     // C5：作者行句柄（冒烟断言有作者显示/无作者隐藏）
     property alias authorLabel: authorLabel
 
@@ -41,28 +46,34 @@ Item {
     function requestDelete() { deleteDialog.open() }
 
     Rectangle {
+        id: cardChrome
         anchors.fill: parent
-        radius: 8
+        // U3：Kindle 化——无圆角、无边框（原 D7 radius 8 + border dividerColor +
+        // layer/MultiEffect 重阴影 #3D000000 移除；轻投影改走 coverShadow 纯 Rectangle，
+        // 网格多卡片场景免每卡一层 GPU layer，悬停缩放也不再触发整卡重渲染）
+        radius: 0
         color: Material.background
-        border.color: Material.dividerColor
-        // D7：轻阴影（Material elevation）——layer 化后按圆角形状投影，随悬停缩放联动
-        layer.enabled: true
-        layer.effect: MultiEffect {
-            shadowEnabled: true
-            shadowBlur: 0.4
-            shadowColor: "#3D000000"
-            shadowVerticalOffset: 2
+        border.color: "transparent"
+
+        // U3：轻投影——封面下方 2px 偏移的 shadowBook（rgba(0,0,0,0.08)）矩形；
+        // 声明在封面之前故渲染于其下。Kindle 封面为直角矩形，硬边 8% 黑阴影
+        // 视觉即足，无需 blur。
+        Rectangle {
+            id: coverShadow
+            anchors.fill: coverImg
+            anchors.topMargin: 2
+            color: UITheme.shadowBook
         }
 
-        // D7：封面圆角——Rectangle 圆角 + clip 裁剪（Image 无 radius 属性）
+        // U3：封面无圆角（Kindle 封面直角，radius 0；clip 保留供图裁剪）
         Rectangle {
             id: coverImg
             anchors.top: parent.top
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.topMargin: 8
             width: parent.width - 12
-            height: 176
-            radius: 6
+            height: 224 // 3:4（168 × 224）
+            radius: 0
             clip: true
             Image {
                 id: coverImage
@@ -100,11 +111,13 @@ Item {
             anchors.topMargin: 8
             text: card.book.title ?? ""
             elide: Text.ElideRight
-            font.pixelSize: 13
-            color: Material.theme === Material.Dark ? "#CCCCCC" : "#333333"
+            // U3：Kindle 列表项字号（fsListItem 15px），颜色走 textPrimary Token
+            font.pixelSize: UITheme.fsListItem
+            color: UITheme.textPrimary
         }
 
-        // C5：作者行（Kindle 主页封面下 标题 + 作者 双行）——小字灰色，仅书有作者时显示
+        // C5：作者行（Kindle 主页封面下 标题 + 作者 双行）——小字灰色，仅书有作者时显示；
+        // U3：字号 12px（fsCaption 区间）、颜色走 textSecondary Token
         Text {
             id: authorLabel
             anchors.top: titleText.bottom
@@ -116,14 +129,13 @@ Item {
             text: card.book.author ?? ""
             visible: (card.book.author ?? "").length > 0
             elide: Text.ElideRight
-            font.pixelSize: 11
-            color: Material.theme === Material.Dark ? "#888888" : "#8A8A8A"
+            font.pixelSize: 12
+            color: UITheme.textSecondary
         }
 
         // B5：进度细条（Kindle 主页风格）——细 3px 圆角线替代 ProgressBar；
-        // U1：填充色改 Kindle 选中 Token（light #1A1A1A / dark #E8E8E3，
-        // 原 Material.accent 靛蓝移除——不覆盖 accent 后 Material 默认 accent 为
-        // 粉色，必须显式改 Token）
+        // U1：填充色改 Kindle 选中 Token（light #1A1A1A / dark #E8E8E3）；
+        // U3：轨道色改 divider Token（原硬编码 #33FFFFFF/#22000000 移除）
         Rectangle {
             id: progressLine
             anchors.bottom: parent.bottom
@@ -134,7 +146,7 @@ Item {
             anchors.bottomMargin: 10
             height: 3
             radius: 1.5
-            color: Material.theme === Material.Dark ? "#33FFFFFF" : "#22000000"
+            color: UITheme.divider
             Rectangle {
                 width: Math.max(0, Math.min(1, card.book.progress ?? 0)) * parent.width
                 height: parent.height
@@ -205,7 +217,7 @@ Item {
             }
             Button {
                 text: qsTr("清除分类")
-                // 仅当该书已设分类时可清除；清除后侧栏 categoriesModel（按书籍分类派生）自动移除该分类
+                // 仅当该书已设分类时可清除；清除后 categoriesModel（按书籍分类派生）自动移除该分类
                 enabled: (card.book.category ?? "").length > 0
                 onClicked: {
                     Books.setCategory(card.book.id, "")

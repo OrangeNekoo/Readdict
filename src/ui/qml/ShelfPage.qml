@@ -4,6 +4,7 @@ import QtQuick.Controls.Material
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import Readdict.Backend
+import Readdict.UI 1.0
 
 Page {
     id: shelf
@@ -17,6 +18,11 @@ Page {
     property alias searchModeBox: searchMode
     property alias searchField: searchEdit
     property alias fulltextList: ftList
+    // U3：Kindle 化样式/入口测试句柄——搜索胶囊（bgSearch+全圆角）、搜索图标、
+    // 分类下拉（替代原 160px 左侧栏）
+    property alias searchBox: searchBox
+    property alias searchIcon: searchIcon
+    property alias catFilter: catFilter
 
     Connections {
         target: Importer
@@ -55,17 +61,40 @@ Page {
             Layout.margins: 12
             spacing: 8
 
-            TextField {
-                id: searchEdit
+            // U3：Kindle 搜索胶囊——全圆角（~20px）浅灰底（bgSearch #E8E8E3）+
+            // 内嵌放大镜图标 + 占位文字。TextField 自身去边框透明，套在胶囊内。
+            Rectangle {
+                id: searchBox
                 Layout.fillWidth: true
-                placeholderText: qsTr("搜索书名/作者…")
-                // C8：元数据模式过滤书架网格（Books.doSearch）；全文模式查 FTS5
-                //（防抖：输入停止 250ms 后才搜，避免逐键触发 FTS 查询）
-                onTextChanged: {
-                    if (searchMode.currentIndex === 1)
-                        ftSearchTimer.restart()
-                    else
-                        Books.doSearch(text)
+                Layout.preferredHeight: 36
+                radius: 18
+                color: UITheme.bgSearch
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 6
+                    spacing: 6
+                    Label {
+                        id: searchIcon
+                        text: "⌕"
+                        color: UITheme.textSecondary
+                        font.pixelSize: 15
+                    }
+                    TextField {
+                        id: searchEdit
+                        Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignVCenter
+                        placeholderText: qsTr("搜索书名/作者…")
+                        background: Rectangle { color: "transparent" }
+                        // C8：元数据模式过滤书架网格（Books.doSearch）；全文模式查 FTS5
+                        //（防抖：输入停止 250ms 后才搜，避免逐键触发 FTS 查询）
+                        onTextChanged: {
+                            if (searchMode.currentIndex === 1)
+                                ftSearchTimer.restart()
+                            else
+                                Books.doSearch(text)
+                        }
+                    }
                 }
             }
 
@@ -95,6 +124,17 @@ Page {
                 onTriggered: {
                     shelf.searchResults = Search.searchAllModel(searchEdit.text)
                 }
+            }
+
+            // U3：分类入口（Kindle 下拉形式，替代原 160px 左侧分类侧栏）——
+            // 首项"全部"（清筛选，Books.setFilter("")），其后为 categoriesModel
+            // 实时派生（booksChanged 触发绑定重算，新建/清除分类即时反映）。
+            ComboBox {
+                id: catFilter
+                Layout.preferredWidth: 110
+                model: [qsTr("全部")].concat(Books.categoriesModel)
+                onActivated: Books.setFilter(catFilter.currentIndex === 0
+                                             ? "" : catFilter.model[catFilter.currentIndex])
             }
 
             ComboBox {
@@ -145,7 +185,7 @@ Page {
                               + (modelData.chapterTitle ? " · " : "")
                               + (modelData.snippet || "")
                         font.pixelSize: 12
-                        color: "#666666"
+                        color: UITheme.textSecondary
                         elide: Text.ElideRight
                     }
                 }
@@ -153,63 +193,31 @@ Page {
             ScrollBar.vertical: ScrollBar {}
         }
 
-        RowLayout {
+        // U3：分类侧栏（160px ListView）移除——分类筛选迁至工具栏 catFilter 下拉；
+        // 网格占满整行宽度（Books.setFilter 接口不变，功能行为一致）。
+        GridView {
+            id: grid
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 0
-
-            ListView {
-                id: catList
-                Layout.preferredWidth: 160
-                Layout.fillHeight: true
-                clip: true
-                model: Books.categoriesModel
-                // C4：分类侧栏小窗滚动——分类多时列表超高，滚动条 AsNeeded
-                //（与网格 ScrollBar 同策略；GridView 已有 ScrollBar.vertical）
-                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-                delegate: ItemDelegate {
-                    width: ListView.view.width
-                    text: modelData
-                    highlighted: ListView.isCurrentItem
-                    onClicked: {
-                        Books.setFilter(modelData)
-                        catList.currentIndex = index
-                    }
-                }
-                header: ItemDelegate {
-                    text: qsTr("全部")
-                    highlighted: catList.currentIndex < 0
-                    onClicked: {
-                        Books.setFilter("")
-                        catList.currentIndex = -1
+            clip: true
+            // U3：Kindle 封面网格——封面主导，单元格贴合卡片尺寸（180×296，
+            // 卡 180×296 + 边距 → 190×306，横向间距 10px 接近 Kindle 主页封面墙）
+            cellWidth: 190
+            cellHeight: 306
+            model: Books.booksModel
+            delegate: BookCard {
+                book: modelData
+                // 文本格式进入阅读页；PDF 进入 PDF 阅读页（B9，按 format 分流）
+                onClicked: {
+                    const fmt = (modelData.format ?? "").toUpperCase()
+                    if (fmt === "PDF") {
+                        shelf.StackView.view.push("PdfReaderPage.qml", { book: modelData })
+                    } else {
+                        shelf.StackView.view.push("ReaderPage.qml", { book: modelData })
                     }
                 }
             }
-
-            GridView {
-                id: grid
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                clip: true
-                // B5：Kindle 封面网格——封面主导，单元格贴合卡片尺寸（180×280，
-                // 卡 180×280 + 边距 → 190×294，横向间距 10px 接近 Kindle 主页封面墙）
-                cellWidth: 190
-                cellHeight: 294
-                model: Books.booksModel
-                delegate: BookCard {
-                    book: modelData
-                    // 文本格式进入阅读页；PDF 进入 PDF 阅读页（B9，按 format 分流）
-                    onClicked: {
-                        const fmt = (modelData.format ?? "").toUpperCase()
-                        if (fmt === "PDF") {
-                            shelf.StackView.view.push("PdfReaderPage.qml", { book: modelData })
-                        } else {
-                            shelf.StackView.view.push("ReaderPage.qml", { book: modelData })
-                        }
-                    }
-                }
-                ScrollBar.vertical: ScrollBar {}
-            }
+            ScrollBar.vertical: ScrollBar {}
         }
     }
 
@@ -220,10 +228,10 @@ Page {
         anchors.centerIn: parent
         text: qsTr("导入你的第一本书")
         font.pixelSize: 22
-        color: "#999999"
+        color: UITheme.textDisabled
         visible: Books.booksModel.length === 0
                  && shelf.searchEdit.text.length === 0
-                 && catList.currentIndex < 0
+                 && catFilter.currentIndex === 0
     }
 
     // ---- C8：全文搜索结果辅助 ----
