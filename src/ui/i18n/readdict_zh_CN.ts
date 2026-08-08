@@ -568,22 +568,10 @@
         <translation>米白</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="326"/>
-        <location filename="../qml/SettingsPage.qml" line="326"/>
-        <source>彩色墨水屏</source>
-        <translation>彩色墨水屏</translation>
-    </message>
-    <message>
         <location filename="../qml/SettingsPage.qml" line="332"/>
         <location filename="../qml/SettingsPage.qml" line="332"/>
         <source>自定义图片</source>
         <translation>自定义图片</translation>
-    </message>
-    <message>
-        <location filename="../qml/SettingsPage.qml" line="340"/>
-        <location filename="../qml/SettingsPage.qml" line="340"/>
-        <source>彩色墨水屏：类纸纹理 + 墨色文字，图片自动降饱和</source>
-        <translation>彩色墨水屏：类纸纹理 + 墨色文字，图片自动降饱和</translation>
     </message>
     <message>
         <location filename="../qml/SettingsPage.qml" line="348"/>

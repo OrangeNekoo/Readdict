@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// 阅读页底部浮动控制栏：章节导航 / 目录 / 字号 / 背景五态（含 eink）/ 对齐 / 页宽。
+// 阅读页底部浮动控制栏：章节导航 / 目录 / 字号 / 背景四态 / 对齐 / 页宽。
 // B5：Kindle 式图标工具栏——unicode 符号 + 短文字（非 emoji），悬停 ToolTip 显全名。
 // 全部以信号上报 ReaderPage 处理（状态读写集中在页面，本组件无状态）。
 // 注意：按钮 children 顺序不可变（ControlsSmoke 依赖 children[3]=A−、children[5]=A+），

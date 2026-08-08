@@ -4,9 +4,8 @@ import Readdict.Backend
 import Readdict.Test 1.0
 
 // B3：深色背景阅读文字切换为浅色——ReaderContent.textColor 默认深字 #212121，
-// ReaderPage 按 bgMode 传色（dark → 浅色 #E0E0E0，light/paper/image → 深字，
-// B5：eink → 墨色 #3A3A3A）。
-// B5：eink 图片类纸化——纯图段叠加 MultiEffect 降饱和/对比度（见 test_05）。
+// ReaderPage 按 bgMode 传色（dark → 浅色 #E0E0E0，light/paper/image → 深字；
+// E1：旧 eink 值在 ReaderPage 无分支，按浅底深字 #212121 处理）。
 // 富文本标题（<h1>）渲染色无法直接断言（继承 QTextDocument 默认前景色），
 // 此处断言 TextEdit.color 属性（即文档默认前景色源）；h1 渲染行为另在报告中记录。
 // 结构约定（与 tst_background/tst_highlightsui 一致）：根为带尺寸的 Item，
@@ -151,57 +150,16 @@ Item {
             tryVerify(function () {
                 return String(root.paraEdit(cv, 0).color) === "#212121"
             }, 2000, "image 下纯文本段 TextEdit.color 应为 #212121")
-            // B5：eink（彩色墨水屏）→ 墨色 #3A3A3A（类纸文字），段落 TextEdit.color 同步
+            // E1：旧 eink 值在 ReaderPage 无分支 → 按浅底深字处理（textColor #212121）
             page.bgMode = "eink"
-            compare(String(cv.textColor), "#3a3a3a", "eink 背景 textColor 应为墨色 #3A3A3A")
+            compare(String(cv.textColor), "#212121", "旧 eink 值应回退浅底深字 #212121")
             tryVerify(function () {
-                return String(root.paraEdit(cv, 1).color) === "#3a3a3a"
-            }, 2000, "eink 下富文本段 TextEdit.color 应为 #3A3A3A，实际 "
+                return String(root.paraEdit(cv, 1).color) === "#212121"
+            }, 2000, "旧 eink 值下富文本段 TextEdit.color 应为 #212121，实际 "
                      + String(root.paraEdit(cv, 1).color))
             // 再回 dark：绑定持续生效
             page.bgMode = "dark"
             compare(String(cv.textColor), "#e0e0e0", "再切 dark textColor 应回到浅色")
-            loader.destroy()
-        }
-
-        // B5：eink 图片类纸化——纯图段（imagePath 非空）在 eink 态下叠加 MultiEffect
-        // 降饱和 + 对比度（委托 children[2]=imgFx）；非 eink 态效果层隐藏，源图原样显示。
-        function test_05_einkImagePaperization() {
-            var loader = contentComp.createObject(root)
-            loader.width = 800; loader.height = 600
-            var c = loader.item
-            verify(c !== null, "ReaderContent 应能加载")
-            c.typography = { fontFamily: "Source Han Sans VF", fontSize: 18, lineHeight: 1.6,
-                             align: "left", pageWidth: "normal" }
-            // 纯图段 + 混合段（真实图片文件，TestEnv.backgroundImage 保证可解码；
-            // 该值为 file:// URL，ReaderContent 的 Image 会补 file:// 前缀，故取无 scheme 本地路径）
-            var img = TestEnv.backgroundImage
-            img = img.indexOf("file://") === 0 ? img.slice(7) : img
-            c.chapter = { title: "图章", paragraphs: [
-                { text: "纯图", html: "", level: 0, imagePath: img, sentences: [] },
-                { text: "前文 <img src=\"file://" + img + "\"> 后文。", html: "前文 <img src=\"file://" + img + "\"> 后文。",
-                  level: 0, imagePath: img, sentences: ["前文 后文。"] }
-            ]}
-            tryVerify(function () {
-                var d0 = c.paragraphRepeater.itemAt(0)
-                return d0 && d0.children[1] !== undefined && d0.children[2] !== undefined
-            }, 2000, "纯图段委托应含 Image 与效果层")
-            var d0 = c.paragraphRepeater.itemAt(0)
-            var d1 = c.paragraphRepeater.itemAt(1)
-            verify(d0.pureImage === true, "纯图段 pureImage 应为 true")
-            verify(d1.pureImage === false, "混合段 pureImage 应为 false（RichText 渲染）")
-            // 默认 light：效果层隐藏（源图原样）
-            compare(c.bgMode, "light")
-            verify(d0.children[2].visible === false, "非 eink 态效果层应隐藏")
-            // eink：效果层可见 + 降饱和/对比度参数
-            c.bgMode = "eink"
-            verify(d0.children[2].visible === true, "eink 态纯图段效果层应可见")
-            compare(String(d0.children[2].saturation), "-0.55", "eink 应降饱和 -0.55")
-            compare(String(d0.children[2].contrast), "0.12", "eink 应加对比度 0.12")
-            wait(80)   // 渲染若干帧（MultiEffect 在帧上执行），不崩即通过
-            // 切回 light：效果层隐藏
-            c.bgMode = "light"
-            verify(d0.children[2].visible === false, "切回 light 后效果层应隐藏")
             loader.destroy()
         }
 

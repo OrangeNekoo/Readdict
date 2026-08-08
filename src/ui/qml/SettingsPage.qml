@@ -17,8 +17,6 @@ Page {
     property alias bgLightRadio: bgLightRadio
     property alias bgDarkRadio: bgDarkRadio
     property alias bgPaperRadio: bgPaperRadio
-    // B5：彩色墨水屏（eink）单选句柄——五态单选含 eink
-    property alias bgEinkRadio: bgEinkRadio
     property alias bgImageRadio: bgImageRadio
     property alias bgBlurSlider: bgBlurSlider
     property alias bgBrightnessSlider: bgBrightnessSlider
@@ -293,12 +291,10 @@ Page {
             }
         }
 
-        // D5：阅读背景——五模式单选（浅/深/米白/彩色墨水屏 eink/自定义图片）持久化
+        // D5：阅读背景——四模式单选（浅/深/米白/自定义图片）持久化
         // background/mode；自定义图片经 FileDialog 选图 → Settings.copyToBackgrounds 复制到
         // AppData/backgrounds/ → background/imagePath + mode=image；
         // 模糊/亮度滑条即改即存 background/blur、background/brightness（阅读页打开时恢复）。
-        // B5：新增 eink——浅彩纸色 + 纸纹层 + 墨色文字 + 图片降饱和（见 ReaderBackground/
-        // ReaderContent/ReaderPage 三处联动），单选/循环/持久化与既有模式同构。
         SectionCard {
             title: qsTr("阅读背景")
             RowLayout {
@@ -322,27 +318,12 @@ Page {
                     onToggled: if (checked) page.setBgMode("paper")
                 }
                 RadioButton {
-                    id: bgEinkRadio
-                    text: qsTr("彩色墨水屏")
-                    ButtonGroup.group: bgGroup
-                    onToggled: if (checked) page.setBgMode("eink")
-                }
-                RadioButton {
                     id: bgImageRadio
                     text: qsTr("自定义图片")
                     ButtonGroup.group: bgGroup
                     onToggled: if (checked) page.setBgMode("image")
                 }
                 ButtonGroup { id: bgGroup }
-            }
-            // B5：eink 模式说明（选中时显示）
-            Label {
-                text: qsTr("彩色墨水屏：类纸纹理 + 墨色文字，图片自动降饱和")
-                color: Material.secondaryTextColor
-                font.pixelSize: 12
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
-                visible: bgEinkRadio.checked
             }
             RowLayout {
                 Label { text: qsTr("背景图片") }
@@ -491,13 +472,15 @@ Page {
     // 启动恢复：从 Settings 读 background/ 分区应用到单选/滑条/路径（含钳制）
     function restoreBackground() {
         let mode = Settings.value("background/mode")
-        // B5：五态含 eink
-        if (mode !== "light" && mode !== "paper" && mode !== "dark" && mode !== "eink" && mode !== "image")
+        // E1：四态白名单；旧版 eink（B5 彩色墨水屏）值在此归一为 light（默认回退，
+        // 与其余非法值同路径），并回写 settings.json 使存储值同步归一
+        if (mode !== "light" && mode !== "paper" && mode !== "dark" && mode !== "image") {
             mode = "light"
+            Settings.setValue("background/mode", mode)
+        }
         bgLightRadio.checked = true
         if (mode === "dark") bgDarkRadio.checked = true
         else if (mode === "paper") bgPaperRadio.checked = true
-        else if (mode === "eink") bgEinkRadio.checked = true
         else if (mode === "image") bgImageRadio.checked = true
         page.bgImagePath = Settings.value("background/imagePath") || ""
         bgImageHint.text = page.bgImagePath || qsTr("未选择")

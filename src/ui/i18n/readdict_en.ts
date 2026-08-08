@@ -568,22 +568,10 @@
         <translation>Off-white</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="326"/>
-        <location filename="../qml/SettingsPage.qml" line="326"/>
-        <source>彩色墨水屏</source>
-        <translation>Color E-ink</translation>
-    </message>
-    <message>
         <location filename="../qml/SettingsPage.qml" line="332"/>
         <location filename="../qml/SettingsPage.qml" line="332"/>
         <source>自定义图片</source>
         <translation>Custom image</translation>
-    </message>
-    <message>
-        <location filename="../qml/SettingsPage.qml" line="340"/>
-        <location filename="../qml/SettingsPage.qml" line="340"/>
-        <source>彩色墨水屏：类纸纹理 + 墨色文字，图片自动降饱和</source>
-        <translation>Color E-ink: paper texture with ink text; images are desaturated</translation>
     </message>
     <message>
         <location filename="../qml/SettingsPage.qml" line="348"/>
