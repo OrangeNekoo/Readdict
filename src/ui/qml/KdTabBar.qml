@@ -31,7 +31,9 @@ Item {
 
     Rectangle {
         id: underlineRect
-        // 无匹配选中项（如底部导航直达统计页，顶部两标签都不对应）时下划线留在原位
+        // 无匹配选中项（如底部导航直达统计页，顶部两标签都不对应，currentIndex=-1）
+        // 时隐藏指示器——避免误导为书库选中；有匹配时 x = 选中索引 × 单元宽
+        visible: tabBar.currentIndex >= 0
         x: Math.max(0, tabBar.currentIndex) * tabBar.unitWidth
         width: tabBar.unitWidth
         height: 3

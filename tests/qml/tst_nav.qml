@@ -115,6 +115,9 @@ Item {
             tryVerify(function () { return win.navStack.currentItem !== null }, 3000,
                       "初始页应加载")
             compare(win.navStack.currentItem.navId, "shelf", "初始应显示书库页")
+            // 记录根 ShelfPage 实例：从子页回书库时必须保留同一实例（状态不重置）
+            var rootShelf = win.navStack.currentItem
+            verify(rootShelf !== null && rootShelf.navId === "shelf", "根页应为书库")
             compare(win.currentNavId, "shelf", "当前导航 id 应为 shelf")
             verify(win.navVisible, "书库页应显示导航")
             verify(win.tabBar.visible && win.bottomNav.visible, "标签与底部导航应可见")
@@ -127,6 +130,9 @@ Item {
                       "导航应切到统计页")
             compare(win.currentNavId, "stats", "当前导航 id 应为 stats")
             compare(win.bottomNav.currentId, "stats", "底部导航高亮应跟随")
+            // 统计页不在顶部标签语义内：下划线应隐藏（不误导为书库选中）
+            tryVerify(function () { return !win.tabBar.underline.visible }, 3000,
+                      "无匹配顶部标签时下划线应隐藏")
 
             // 顶部标签点击（信号调用——点击→tabClicked 的发射路径已由 TabBarSmoke
             // 用真实鼠标事件锁定；此处锁定 Main 的 onTabClicked → navigateTo 接线）
@@ -142,8 +148,10 @@ Item {
             // 底部导航点击（信号调用——点击→itemClicked 发射路径已由 BottomNavSmoke
             // 用真实鼠标事件锁定；此处锁定 Main 的 onItemClicked → navigateTo 接线）
             win.bottomNav.itemClicked("shelf")
-            tryVerify(function () { return win.navStack.currentItem.navId === "shelf" }, 3000,
-                      "底部导航应切回书库页")
+            tryVerify(function () {
+                return win.navStack.depth === 1 && win.navStack.currentItem === rootShelf
+            }, 3000, "回书库不应重复 push（根 ShelfPage 实例保留、depth=1），实际 depth="
+                      + win.navStack.depth)
             compare(win.currentNavId, "shelf")
 
             // 阅读页 push → 导航隐藏（沉浸），正文占满（标签栏高度归零）；返回后恢复

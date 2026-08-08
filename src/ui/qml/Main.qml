@@ -84,13 +84,16 @@ ApplicationWindow {
     }
 
     // 导航切换：已在目标页（含经设置页入口推入的统计/同步）则不动；否则先清掉
-    // 推入页（阅读页/设置子页，Immediate 同步）回到单根书库，再推入目标页——
-    // 根始终是 ShelfPage，任意导航页的返回链都回到书库。
+    // 推入页（阅读页/设置子页，Immediate 同步）回到单根书库。根本就是目标页
+    //（如从子页回书库）→ 不再 push——保留根 ShelfPage 实例（搜索/筛选/滚动状态），
+    // 避免 [Shelf, Shelf] 重复页；否则推入目标页。根始终是 ShelfPage，任意导航页
+    // 的返回链都回到书库。
     function navigateTo(navId) {
         const top = stack.currentItem
         if (top && top.navId === navId) return
         for (let i = stack.depth; i > 1; --i)
             stack.pop(null, StackView.Immediate)
+        if (stack.currentItem && stack.currentItem.navId === navId) return
         stack.push(navPages[navId])
     }
 
