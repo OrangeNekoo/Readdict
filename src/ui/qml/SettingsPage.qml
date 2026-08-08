@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Dialogs
+import QtQuick.Effects
 import QtQuick.Layouts
 import QtQuick.Window
 import Readdict.Backend
@@ -20,6 +21,10 @@ Page {
     property alias bgImageRadio: bgImageRadio
     property alias bgBlurSlider: bgBlurSlider
     property alias bgBrightnessSlider: bgBrightnessSlider
+    // E2：背景缩略图预览测试句柄（QML 冒烟经此断言可见性/图片就绪/效果参数联动）
+    property alias bgThumb: bgThumb
+    property alias bgThumbImg: bgThumbImg
+    property alias bgThumbFx: bgThumbFx
     // D6：语言下拉测试句柄（QML 冒烟经此驱动三语切换）
     property alias languageBox: languageBox
     // B2：封面刷新按钮/提示测试句柄（QML 冒烟经此触发 refreshCovers 数据流）
@@ -295,6 +300,7 @@ Page {
         // background/mode；自定义图片经 FileDialog 选图 → Settings.copyToBackgrounds 复制到
         // AppData/backgrounds/ → background/imagePath + mode=image；
         // 模糊/亮度滑条即改即存 background/blur、background/brightness（阅读页打开时恢复）。
+        // E2：选图后卡片内缩略图实时预览模糊/亮度（bgThumb 行，MultiEffect 同阅读页参数）。
         SectionCard {
             title: qsTr("阅读背景")
             RowLayout {
@@ -345,6 +351,39 @@ Page {
                 fileMode: FileDialog.OpenFile
                 nameFilters: ["图片 (*.png *.jpg *.jpeg *.webp *.bmp *.gif)"]
                 onAccepted: page.importBackgroundImage(bgFileDialog.selectedFiles[0])
+            }
+            // E2：缩略图预览——选图后卡片内实时预览模糊/亮度效果，与 ReaderBackground 同
+            // MultiEffect 参数（blur 直通、brightness 换算 -1..1）。滑条移动经
+            // setBgBlur/setBgBrightness 同步 page.bgBlur/bgBrightness 作绑定源（实时联动）。
+            // 未选图整行隐藏；图片加载失败时效果层隐藏露出底色（不显示黑块，同阅读页兜底）。
+            Rectangle {
+                id: bgThumb
+                visible: page.bgImagePath !== ""
+                Layout.fillWidth: true
+                Layout.preferredHeight: 135
+                radius: 6
+                color: Material.theme === Material.Dark ? "#262626" : "#EDEBE4"
+                clip: true
+                Image {
+                    id: bgThumbImg
+                    anchors.fill: parent
+                    // 与 ReaderBackground 同源构造：本地绝对路径补 file://，防御重复前缀
+                    source: page.bgImagePath
+                            ? (page.bgImagePath.indexOf("file://") === 0
+                               ? page.bgImagePath : "file://" + page.bgImagePath)
+                            : ""
+                    fillMode: Image.PreserveAspectCrop
+                    smooth: true
+                }
+                MultiEffect {
+                    id: bgThumbFx
+                    anchors.fill: parent
+                    visible: page.bgImagePath !== "" && bgThumbImg.status === Image.Ready
+                    source: bgThumbImg
+                    blurEnabled: true
+                    blur: page.bgBlur
+                    brightness: page.bgBrightness - 1.0   // MultiEffect 亮度范围 -1..1
+                }
             }
             RowLayout {
                 Label { text: qsTr("模糊度") }
@@ -448,10 +487,14 @@ Page {
         Settings.setValue("background/mode", mode)
     }
     function setBgBlur(v) {
-        Settings.setValue("background/blur", Math.max(0, Math.min(1, v)))
+        // E2：页面属性作响应层（ReaderPage 同模式）——滑条移动即同步，缩略图 MultiEffect
+        // 绑定 page.bgBlur 实时预览；同时持久化 background/blur（含钳制）
+        page.bgBlur = Math.max(0, Math.min(1, v))
+        Settings.setValue("background/blur", page.bgBlur)
     }
     function setBgBrightness(v) {
-        Settings.setValue("background/brightness", Math.max(0.5, Math.min(1.5, v)))
+        page.bgBrightness = Math.max(0.5, Math.min(1.5, v))
+        Settings.setValue("background/brightness", page.bgBrightness)
     }
     // 选图导入：复制到 AppData/backgrounds/ 成功后写 imagePath + mode=image，并同步单选/提示。
     // 注：程序化 checked=true 不触发 onToggled（Qt 6.11 实测），mode 必须显式写。

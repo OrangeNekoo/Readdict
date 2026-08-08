@@ -7,6 +7,7 @@ import Readdict.Test 1.0
 // ReaderBackground 四态（浅/深/米白/自定义图片 + MultiEffect 模糊/亮度）、
 // ReaderPage 从 Settings background/ 分区恢复、控制栏四态循环（E1：不含 eink；
 // 旧值 eink 归一 light 并回写）、设置页单选/滑条持久化。
+// E2：设置页缩略图预览（未选图隐藏；选图后可见、MultiEffect 模糊/亮度随滑条实时联动）。
 // 不打开原生 FileDialog（测试环境无窗口系统交互），导入路径直接调 Settings.copyToBackgrounds。
 // 结构约定（与 tst_main/tst_ttsbar 一致）：根为带尺寸的 Item，TestCase 是其子项，
 // 组件经 createObject(root) 挂到该 Item 下——挂在 TestCase 下时其 visible=false，
@@ -236,6 +237,47 @@ Item {
             verify(dest.indexOf("backgrounds") >= 0, "imagePath 应位于 backgrounds/：" + dest)
             compare(Settings.value("background/mode"), "image", "导入成功应写 mode=image")
             verify(page.bgImageRadio.checked, "导入成功应选中自定义图片")
+            loader.destroy()
+        }
+
+        function test_07_settingsThumbnail() {
+            // E2：缩略图预览——未选图隐藏；选图后可见、图片就绪后效果层显示，
+            // MultiEffect 模糊/亮度随滑条与页面属性实时联动（与 ReaderBackground 同换算）
+            Settings.setValue("background/mode", "light")
+            Settings.setValue("background/imagePath", "")
+            var loader = settingsComp.createObject(root)
+            loader.width = 1100; loader.height = 720
+            var page = loader.item
+            verify(page !== null, "SettingsPage 应能加载")
+            verify(page.bgThumb !== undefined, "缩略图容器句柄应存在")
+            verify(!page.bgThumb.visible, "未选图时缩略图应隐藏")
+            // 选图（真实图片）→ 缩略图可见、图片就绪后效果层显示
+            page.importBackgroundImage(TestEnv.backgroundImage)
+            verify(Settings.value("background/imagePath").length > 0, "导入成功应写 imagePath")
+            tryVerify(function () { return page.bgThumb.visible }, 5000, "选图后缩略图应可见")
+            tryVerify(function () { return page.bgThumbImg.status === Image.Ready }, 5000,
+                      "缩略图应加载为 Ready，实际 " + page.bgThumbImg.status)
+            verify(page.bgThumbFx.visible, "图片就绪后效果层应显示")
+            // 滑条移动 → page 属性（响应层）+ MultiEffect 实时联动（blur 直通、亮度换算 -1..1）
+            page.bgBlurSlider.value = 0.5
+            compare(page.bgBlur, 0.5, "滑条应同步 page.bgBlur（缩略图绑定源）")
+            compare(page.bgThumbFx.blur, 0.5, "缩略图 blur 应随滑条实时更新")
+            page.bgBrightnessSlider.value = 1.4
+            compare(page.bgBrightness, 1.4, "滑条应同步 page.bgBrightness")
+            compare(page.bgThumbFx.brightness, 0.4, "brightness 1.4 应换算为 MultiEffect 0.4")
+            // 页面属性直改（导入/恢复路径同源）同样实时反映到效果层
+            page.bgBlur = 0.8
+            compare(page.bgThumbFx.blur, 0.8, "属性直改应实时反映到缩略图")
+            page.bgBrightness = 0.5
+            compare(page.bgThumbFx.brightness, -0.5, "brightness 0.5 应换算为 -0.5")
+            wait(50)   // 渲染若干帧（模糊效果在帧上执行），不崩即通过
+            // 清空路径后重启（启动恢复路径）→ 缩略图隐藏
+            Settings.setValue("background/imagePath", "")
+            loader.destroy()
+            loader = settingsComp.createObject(root)
+            loader.width = 1100; loader.height = 720
+            page = loader.item
+            verify(!page.bgThumb.visible, "无图路径恢复后缩略图应隐藏")
             loader.destroy()
         }
     }
