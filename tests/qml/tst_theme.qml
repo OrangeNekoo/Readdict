@@ -51,9 +51,15 @@ Item {
             compare(String(UITheme.borderDefault), "#3a3a3a", "深默认边框 #3A3A3A")
             compare(String(UITheme.borderActive), "#e8e8e3", "深选中边框 #E8E8E3")
             compare(String(UITheme.divider), "#333333", "深分隔线 #333333")
-            // U1 复审：dark 派生别名（任务映射未给出，Theme.qml 取同族派生值）
-            compare(String(UITheme.bgSearch), "#333333", "深搜索框背景（派生 #333333）")
-            compare(String(UITheme.bgPaper), "#2a2a26", "深米白纸色（派生 #2A2A26）")
+            // U6 审计：dark 派生别名标准值（任务映射未给出，U6 定案——bgSearch
+            // 取 bgSec 与 border 之间、与 divider 区分；textDisabled 弱于 textSec）
+            compare(String(UITheme.bgSearch), "#2a2a2a", "深搜索框背景（U6 标准 #2A2A2A）")
+            compare(String(UITheme.textDisabled), "#5a5a5a", "深不可用文字（U6 标准 #5A5A5A）")
+            compare(String(UITheme.bgPaper), "#2a2a26", "深米白纸色（#1E1E1E 系暖调近黑 #2A2A26）")
+            // U6 审计：两模式共用品牌/状态色 Token（收编散落硬编码）
+            compare(String(UITheme.accentAmber), "#e8993d", "Kindle 琥珀橙强调色 #E8993D")
+            compare(String(UITheme.danger), "#c62828", "错误/失败红 #C62828")
+            compare(String(UITheme.success), "#2e7d32", "成功绿 #2E7D32")
             // 深浅切换后解析别名跟随
             UITheme.isDark = false
             compare(String(UITheme.textPrimary), "#1a1a1a", "切回浅色后 textPrimary 应解析浅值")

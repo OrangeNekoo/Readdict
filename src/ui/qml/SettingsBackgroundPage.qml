@@ -125,7 +125,7 @@ Page {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 135
                 radius: 6
-                color: UITheme.isDark ? "#262626" : "#EDEBE4"
+                color: UITheme.bgSecondary
                 clip: true
                 Image {
                     id: bgThumbImg
@@ -205,7 +205,7 @@ Page {
             Label {
                 id: bgErrorText
                 text: ""
-                color: "#C62828"
+                color: UITheme.danger
                 visible: false
             }
             Timer {

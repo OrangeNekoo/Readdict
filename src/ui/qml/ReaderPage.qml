@@ -397,13 +397,13 @@ Page {
                             width: 10
                             height: 10
                             radius: 5
-                            color: modelData.color || "#CCCCCC"
+                            color: modelData.color || UITheme.borderDefault
                             anchors.verticalCenter: parent.verticalCenter
                         }
                         Label {
                             text: modelData.chapter || ""
                             font.pixelSize: 12
-                            color: "#888888"
+                            color: UITheme.textSecondary
                         }
                     }
                     Label {
@@ -414,7 +414,8 @@ Page {
                     Label {
                         text: modelData.note ? qsTr("笔记：") + modelData.note : qsTr("（无笔记）")
                         font.pixelSize: 12
-                        color: modelData.note ? "#555555" : "#AAAAAA"
+                        // U6：正文→textSecondary、占位→textDisabled（原硬编码 #555555/#AAAAAA）
+                        color: modelData.note ? UITheme.textSecondary : UITheme.textDisabled
                         wrapMode: Text.Wrap
                     }
                     Row {
@@ -459,7 +460,7 @@ Page {
             spacing: 12
             Label {
                 text: qsTr("修改这条划线的笔记：")
-                color: "#555555"
+                color: UITheme.textSecondary
             }
             TextArea {
                 id: editNoteArea
@@ -520,7 +521,7 @@ Page {
                             text: (modelData.chapterTitle || qsTr("无标题"))
                                   + " · " + qsTr("第%1段").arg((modelData.paragraphIndex ?? 0) + 1)
                             font.pixelSize: 12
-                            color: "#888888"
+                            color: UITheme.textSecondary
                         }
                         Label {
                             text: modelData.snippet || ""

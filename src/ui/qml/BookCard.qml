@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Controls.Material
 import QtQuick.Layouts
 import Readdict.Backend
 import Readdict.UI 1.0
@@ -52,7 +51,9 @@ Item {
         // layer/MultiEffect 重阴影 #3D000000 移除；轻投影改走 coverShadow 纯 Rectangle，
         // 网格多卡片场景免每卡一层 GPU layer，悬停缩放也不再触发整卡重渲染）
         radius: 0
-        color: Material.background
+        // U6：底色改 Token（原 Material.background——Main 已把它绑到 bgPrimary，
+        // 直引 Token 去除框架依赖；卡片与书架同底，视觉由封面主导）
+        color: UITheme.bgPrimary
         border.color: "transparent"
 
         // U3：轻投影——封面下方 2px 偏移的 shadowBook（rgba(0,0,0,0.08)）矩形；

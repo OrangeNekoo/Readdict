@@ -37,21 +37,29 @@ QtObject {
     // ================= 深色 Token（Kindle 深色系，任务映射）=================
     readonly property color darkBgPrimary: "#1E1E1E"
     readonly property color darkBgSecondary: "#262626"
-    // 深色搜索框背景：任务映射未给出，取 bgSecondary 与 border 之间的中性灰（派生值）
-    readonly property color darkBgSearch: "#333333"
+    // 深色搜索框背景：U6 审计标准值——bgSecondary(#262626) 与 border(#3A3A3A) 之间
+    // 的中性灰，且与 divider(#333333) 区分（U1 原派生 #333333 与 divider 撞色）
+    readonly property color darkBgSearch: "#2A2A2A"
     readonly property color darkTextPrimary: "#E8E8E3"
     readonly property color darkTextSecondary: "#9A9A9A"
-    // 深色不可用文字：弱于 textSec 的灰（派生值）
-    readonly property color darkTextDisabled: "#666666"
+    // 深色不可用文字：U6 审计标准值——明显弱于 textSec(#9A9A9A) 仍可辨识的灰
+    readonly property color darkTextDisabled: "#5A5A5A"
     readonly property color darkBorderDefault: "#3A3A3A"
     readonly property color darkBorderActive: "#E8E8E3"
     readonly property color darkDivider: "#333333"
-    // 深色米白纸：暖调近黑，与 bgPrimary 区分（paper 模式深色兜底，派生值）
+    // 深色米白纸：U6 审计——#1E1E1E 系暖调近黑（R=G=42 > B=38），保留 paper 与
+    // bgPrimary 的区分（镜像浅色侧 lightBgPaper #F5EFE0 vs lightBgPrimary #F5F5F0
+    // 的 U1 决策）；取值 #2A2A26 在 bgSecondary 与 bgSearch 之间，随深色梯度协调
     readonly property color darkBgPaper: "#2A2A26"
 
     // ================= 遮罩/投影（两模式共用，§7）=================
     readonly property color overlay: "#4D000000"     // rgba(0,0,0,0.3) → #4D000000
     readonly property color shadowBook: "#14000000"  // rgba(0,0,0,0.08) → #14000000
+
+    // ================= 品牌/状态色（两模式共用；U6 审计收编散落硬编码）=================
+    readonly property color accentAmber: "#E8993D"  // Kindle 琥珀橙：阅读进度线/上拉框当前值 ✓
+    readonly property color danger: "#C62828"       // 错误/失败文字（同步失败、TTS 错误、引擎不可用）
+    readonly property color success: "#2E7D32"      // 成功文字（同步完成、引擎可用、试音成功）
 
     // ================= 解析到当前深浅的 Token（页面引用这些）=================
     readonly property color bgPrimary: isDark ? darkBgPrimary : lightBgPrimary

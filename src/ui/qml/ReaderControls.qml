@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import Readdict.UI 1.0
 
 // 阅读页底部浮动控制栏：章节导航 / 目录 / 字号 / 背景四态 / 对齐 / 页宽。
 // B5：Kindle 式图标工具栏——unicode 符号 + 短文字（非 emoji），悬停 ToolTip 显全名。
@@ -219,7 +220,7 @@ Rectangle {
                         Label {
                             visible: modelData.value === sheet.current
                             text: "✓"
-                            color: "#E8993D"
+                            color: UITheme.accentAmber
                             font.pixelSize: 14
                         }
                     }
@@ -322,7 +323,7 @@ Rectangle {
         Rectangle {
             width: Math.max(0, Math.min(1, controls.chapterProgress)) * parent.width
             height: parent.height
-            color: "#E8993D"   // Kindle 琥珀橙进度色（深浅背景均可见）
+            color: UITheme.accentAmber   // Kindle 琥珀橙进度色（深浅背景均可见）
         }
     }
 }

@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Controls.Material
 import QtQuick.Layouts
 import Readdict.Backend
 import Readdict.UI 1.0
@@ -19,14 +18,14 @@ Page {
     // 最近一次 Books.stats() 结果（QVariantMap；QML 冒烟经此断言数字正确性）
     property var statsData: ({})
 
-    // 卡片样式：Material 表面色 + 数值大号展示，children 落入 ColumnLayout 排版
+    // 卡片样式：Kindle 次级背景 Token + 默认边框，children 落入 ColumnLayout 排版
     //（内联组件须声明在对象作用域内——qmllint/qmlcachegen 对文件顶层内联组件报语法错）
     component StatCard: Rectangle {
         Layout.fillWidth: true
         Layout.preferredHeight: 116
         radius: 8
-        color: Material.theme === Material.Dark ? "#263238" : "#F5F5F5"
-        border.color: Material.theme === Material.Dark ? "#37474F" : "#E0E0E0"
+        color: UITheme.bgSecondary
+        border.color: UITheme.borderDefault
         border.width: 1
         default property alias content: cardContent.data
         ColumnLayout {
@@ -77,7 +76,7 @@ Page {
             rowSpacing: 16
 
             StatCard {
-                Label { text: qsTr("总藏书"); color: Material.secondaryTextColor }
+                Label { text: qsTr("总藏书"); color: UITheme.textSecondary }
                 Label {
                     text: page.totalBookCount()
                     font.pixelSize: 30
@@ -85,7 +84,7 @@ Page {
                 }
             }
             StatCard {
-                Label { text: qsTr("累计阅读时长"); color: Material.secondaryTextColor }
+                Label { text: qsTr("累计阅读时长"); color: UITheme.textSecondary }
                 Label {
                     text: page.formatDuration(page.statsData.totalReadSeconds)
                     font.pixelSize: 24
@@ -93,7 +92,7 @@ Page {
                 }
             }
             StatCard {
-                Label { text: qsTr("平均进度"); color: Material.secondaryTextColor }
+                Label { text: qsTr("平均进度"); color: UITheme.textSecondary }
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 6
@@ -116,8 +115,8 @@ Page {
                 Layout.fillHeight: true
                 Layout.minimumHeight: 116
                 radius: 8
-                color: Material.theme === Material.Dark ? "#263238" : "#F5F5F5"
-                border.color: Material.theme === Material.Dark ? "#37474F" : "#E0E0E0"
+                color: UITheme.bgSecondary
+                border.color: UITheme.borderDefault
                 border.width: 1
                 ColumnLayout {
                     anchors.fill: parent
@@ -140,18 +139,18 @@ Page {
                                         text: modelData.name.length > 0 ? modelData.name : qsTr("未分类")
                                         Layout.fillWidth: true
                                         elide: Text.ElideRight
-                                        color: Material.primaryTextColor
+                                        color: UITheme.textPrimary
                                     }
                                     Label {
                                         text: modelData.count
-                                        color: Material.secondaryTextColor
+                                        color: UITheme.textSecondary
                                     }
                                 }
                                 Rectangle {
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 8
                                     radius: 4
-                                    color: Material.theme === Material.Dark ? "#37474F" : "#E0E0E0"
+                                    color: UITheme.borderDefault
                                     Rectangle {
                                         width: parent.width * page.categoryRatio(modelData)
                                         height: parent.height
@@ -165,7 +164,7 @@ Page {
                         Label {
                             visible: (page.statsData.byCategory || []).length === 0
                             text: qsTr("暂无分类数据")
-                            color: Material.secondaryTextColor
+                            color: UITheme.textSecondary
                         }
                         Item { Layout.fillHeight: true } // 分类少时撑满卡片高度，与左侧卡片等高
                     }

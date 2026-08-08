@@ -1,8 +1,8 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Controls.Material
 import QtQuick.Layouts
 import Readdict.Backend
+import Readdict.UI 1.0
 
 // D3：WebDAV 同步设置页。配置（url/user/password/勾选项）落 SettingsStore 的
 // webdav 分区（password 明文存本机 settings.json，设计文档已定，永不上传——
@@ -99,7 +99,7 @@ Page {
             Label {
                 id: statusLabel
                 text: ""
-                color: "#2E7D32"
+                color: UITheme.success
             }
         }
         Label { text: qsTr("同步日志"); font.bold: true }
@@ -115,7 +115,7 @@ Page {
                 wrapMode: Text.Wrap
                 font.pixelSize: 12
                 // 失败行 = 时间戳后紧跟"失败"的消息（books 信息行可能含书名里的"失败"字）
-                color: page.isFailureLine(modelData) ? "#C62828" : Material.secondaryTextColor
+                color: page.isFailureLine(modelData) ? UITheme.danger : UITheme.textSecondary
             }
             ScrollBar.vertical: ScrollBar {}
         }
@@ -145,7 +145,7 @@ Page {
     Connections {
         target: Sync
         function onFinished(ok, error) {
-            statusLabel.color = ok ? "#2E7D32" : "#C62828"
+            statusLabel.color = ok ? UITheme.success : UITheme.danger
             statusLabel.text = ok ? qsTr("同步完成") : qsTr("同步失败：") + error
             logView.positionViewAtEnd()
         }

@@ -83,7 +83,7 @@ Page {
                 }
                 Label {
                     text: Tts.engineAvailable ? qsTr("引擎可用") : qsTr("引擎不可用：请检查下方配置")
-                    color: Tts.engineAvailable ? "#2E7D32" : "#C62828"
+                    color: Tts.engineAvailable ? UITheme.success : UITheme.danger
                 }
             }
             // OpenAI 引擎参数（引擎为 system 时折叠）
@@ -178,7 +178,7 @@ Page {
                 Label {
                     id: ttsSavedHint
                     text: ""
-                    color: "#2E7D32"
+                    color: UITheme.success
                 }
             }
             Timer {

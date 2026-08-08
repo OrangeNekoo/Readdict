@@ -1,8 +1,8 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Controls.Material
 import QtQuick.Layouts
 import Readdict.Backend
+import Readdict.UI 1.0
 
 // 朗读控制条：播放/暂停/停止/上一句/下一句 + 语速滑块 + 音色下拉 + 状态提示。
 // 无内部状态：信号上报 ReaderPage 处理（play/pause/stop/prev/next/rate/voice），
@@ -44,7 +44,7 @@ Rectangle {
             font.pixelSize: 14
             contentItem: Text {
                 text: parent.text
-                color: parent.enabled ? bar.fgColor : Material.hintTextColor
+                color: parent.enabled ? bar.fgColor : UITheme.textDisabled
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
             }
@@ -99,7 +99,7 @@ Rectangle {
             text: Tts.engineAvailable
                   ? (bar.errorText.length > 0 ? bar.errorText : "")
                   : qsTr("TTS 引擎不可用，请到设置配置")
-            color: bar.errorText.length > 0 ? "#C62828" : Material.secondaryTextColor
+            color: bar.errorText.length > 0 ? UITheme.danger : UITheme.textSecondary
             elide: Text.ElideRight
             Layout.preferredWidth: 150
             Layout.maximumWidth: 190
