@@ -15,8 +15,10 @@
 class EpubParser {
 public:
     DocumentModel parse(const QString &epubPath);
+    QString lastError() const { return m_error; }
 private:
-    QByteArray readZipEntry(const QString &zipPath, const QString &entry) const;
+    QByteArray readZipEntry(const QString &zipPath, const QString &entry,
+                            QString *error = nullptr) const;
     QString normalizeXhtml(const QByteArray &xhtml, QString *title) const;
     // 从 zip 解出图片条目并缓存到 dir，按条目路径去重；命名与磁盘状态无关
     // （同名冲突加条目 md5 前缀），已存在的目标文件直接复用；返回本地文件路径
@@ -29,4 +31,5 @@ private:
                          QHash<QString, QString> *imgCache,
                          QSet<QString> *imgNames,
                          QVector<Paragraph> *out) const;
+    QString m_error;
 };

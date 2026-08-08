@@ -131,6 +131,23 @@ private slots:
         QVERIFY(ParserFactory::parse("/nonexistent/a.mobi", "MOBI").empty());
         QVERIFY(ParserFactory::parse("/nonexistent/a.azw3", "AZW3").empty());
     }
+    void errorOutParamReportsDrmAndMissing() {
+        QString err;
+        ParserFactory::parse(QStringLiteral("/nonexistent/x.mobi"), "MOBI", &err);
+        QVERIFY(!err.isEmpty()); // 文件不存在错误上抛
+        // DRM fixture（若 fixtures 含 drm.mobi 则断言含 "DRM"，否则跳过该断言）
+        const QString drm = QStringLiteral(PARSER_FIXTURES_DIR) + "/drm.mobi";
+        if (QFile::exists(drm)) {
+            QString drmErr;
+            ParserFactory::parse(drm, "MOBI", &drmErr);
+            QVERIFY2(drmErr.contains(QStringLiteral("DRM")), qPrintable(drmErr));
+        }
+    }
+    void successLeavesErrorEmpty() {
+        QString err;
+        ParserFactory::parse(QStringLiteral(PARSER_FIXTURES_DIR) + "/sample.epub", "EPUB", &err);
+        QVERIFY(err.isEmpty());
+    }
 };
 QTEST_MAIN(TestParserFactory)
 #include "tst_parserfactory.moc"

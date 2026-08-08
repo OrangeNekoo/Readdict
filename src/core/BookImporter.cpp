@@ -21,12 +21,38 @@
 #include <QRegularExpression>
 #include <QUrl>
 #include <QXmlStreamReader>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <utility>
 
 namespace {
 
 // 单条 zip 条目大小上限（与 EpubParser 一致，防恶意/损坏压缩包撑爆内存）
 constexpr qint64 kMaxZipEntrySize = 64LL * 1024 * 1024;
+
+// L4（P2#31）：backfill 失败标记文件（书库目录下隐藏 JSON）——
+// QJsonObject{书 id 字符串: 解析失败次数}；indexBook 解析失败 +1 写回，
+// 次数 ≥2 的书 backfill 跳过（避免每次启动反复解析注定失败的坏书）
+QString indexFailMarkerPath(const QString &libraryDir) {
+    return libraryDir + "/.readdict_index_fail.json";
+}
+
+QJsonObject readIndexFailCounts(const QString &libraryDir) {
+    QFile f(indexFailMarkerPath(libraryDir));
+    if (!f.open(QIODevice::ReadOnly)) return {};
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+    return doc.isObject() ? doc.object() : QJsonObject{};
+}
+
+void writeIndexFailCounts(const QString &libraryDir, const QJsonObject &counts) {
+    QFile f(indexFailMarkerPath(libraryDir));
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning("BookImporter: 失败标记写入失败 %s",
+                 qUtf8Printable(indexFailMarkerPath(libraryDir)));
+        return;
+    }
+    f.write(QJsonDocument(counts).toJson(QJsonDocument::Compact));
+}
 
 QByteArray readZipEntry(const QString &zipPath, const QString &entry) {
     unzFile zip = unzOpen64(zipPath.toUtf8().constData());
@@ -385,7 +411,17 @@ void BookImporter::indexBook(qint64 bookId) {
     const Book b = m_books->bookById(bookId);
     if (b.path.isEmpty()) return;
     const DocumentModel doc = ParserFactory::parse(b.path, b.format);
-    if (doc.empty()) return;  // PDF 等无章节模型的书不建全文索引
+    if (doc.empty()) {  // PDF 等无章节模型的书不建全文索引
+        // L4（P2#31）：解析失败计数 +1 写回失败标记——≥2 次后 backfill 不再重试，
+        // 避免每次启动反复解析注定失败的坏书。PDF 走 doc.empty() 但已被 backfill
+        // 按格式跳过；导入路径的 registerBook 对零章书（合法空 TXT）会计入一次，
+        // 阈值 2 保留一次重试余量。
+        QJsonObject counts = readIndexFailCounts(m_libraryDir);
+        const QString key = QString::number(bookId);
+        counts.insert(key, counts.value(key).toInt() + 1);
+        writeIndexFailCounts(m_libraryDir, counts);
+        return;
+    }
     SearchEngine se(m_dbPath);  // 独立连接名，析构自动清理
     // 原子整书重建：removeBook + 全部章节在单个事务内提交——中途失败（进程退出/
     // 某章写入失败）整体回滚，不留部分索引；isBookIndexed 仍可作完整性判据，
@@ -412,9 +448,12 @@ void BookImporter::backfillMissingIndexes() {
 // 连续出队）；遇到缺索引的书则建索引（可能耗时），完成后 singleShot(0) 调度下一
 // 本，让出事件循环——UI 在书与书之间可响应。
 void BookImporter::backfillNext() {
+    // L4（P2#31）：失败标记计数 ≥2 的书跳过（坏书不再每次启动反复解析）
+    const QJsonObject failCounts = readIndexFailCounts(m_libraryDir);
     while (!m_backfillQueue.isEmpty()) {
         const Book b = m_backfillQueue.takeFirst();
         if (b.format == QLatin1String("PDF")) continue;
+        if (failCounts.value(QString::number(b.id)).toInt() >= 2) continue;
         SearchEngine se(m_dbPath);
         if (se.isBookIndexed(b.id)) continue;
         indexBook(b.id);

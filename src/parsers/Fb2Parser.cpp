@@ -46,11 +46,15 @@ QString extensionForType(const QString &contentType) {
 
 DocumentModel Fb2Parser::parse(const QString &fb2Path) {
     DocumentModel m;
+    m_error.clear();
     m_binaries.clear();
     m_binaryTypes.clear();
     m_imgNames.clear();
     QFile f(fb2Path);
-    if (!f.open(QIODevice::ReadOnly)) return m;
+    if (!f.open(QIODevice::ReadOnly)) {
+        m_error = QStringLiteral("文件无法打开: %1").arg(fb2Path);
+        return m;
+    }
     const QByteArray data = f.readAll();
     if (data.isEmpty()) return m;
 
@@ -83,6 +87,7 @@ DocumentModel Fb2Parser::parse(const QString &fb2Path) {
     if (meta.hasError()) {
         qWarning("Fb2Parser: %s 的 XML 解析失败：%s",
                  qUtf8Printable(fb2Path), qUtf8Printable(meta.errorString()));
+        m_error = QStringLiteral("FB2 XML 解析失败：%1").arg(meta.errorString());
         // 出错必须返回完全空的模型：DocumentModel::empty() 只查 chapters，
         // 若此时 title/author 已填充会与"出错返回空模型"语义矛盾
         return DocumentModel{};

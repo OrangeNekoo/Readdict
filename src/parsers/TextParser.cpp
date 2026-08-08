@@ -73,9 +73,16 @@ QString decodeGb18030(const QByteArray &data) {
 
 } // namespace
 
-QString TextParser::detectAndRead(const QString &filePath) {
+QString TextParser::detectAndRead(const QString &filePath, QString *error) {
+    if (!QFileInfo::exists(filePath)) {
+        if (error) *error = QStringLiteral("文件不存在: %1").arg(filePath);
+        return {};
+    }
     QFile f(filePath);
-    if (!f.open(QIODevice::ReadOnly)) return {};
+    if (!f.open(QIODevice::ReadOnly)) {
+        if (error) *error = QStringLiteral("文件无法打开: %1").arg(filePath);
+        return {};
+    }
     const QByteArray data = f.readAll();
     QString text;
     // BOM 检测
@@ -107,7 +114,8 @@ QString TextParser::mdToHtml(const QString &line) {
 
 DocumentModel TextParser::parse(const QString &filePath) {
     DocumentModel m;
-    const QString text = detectAndRead(filePath);
+    m_error.clear();
+    const QString text = detectAndRead(filePath, &m_error);
     if (text.isEmpty()) return m;
     const QStringList lines = text.split('\n');
     Chapter ch; ch.title = m.title = QFileInfo(filePath).completeBaseName();

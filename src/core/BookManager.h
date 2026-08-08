@@ -86,6 +86,10 @@ private:
     QString m_searchQuery;
     SettingsStore *m_settings = nullptr;
     QHash<qint64, DocumentModel> m_docCache;
+    // L4（P0#5）：解析失败原因缓存（documentFor 空文档且解析器报错时记录），
+    // loadChapter 对空文档+错误的书上抛 {error} 供 QML 错误页显示；
+    // 空文档无错误（零章 TXT 等）维持旧行为返回空 map
+    QHash<qint64, QString> m_docError;
     qint64 m_activeBookId = 0;   // 最近打开的阅读书（currentChapter 持久化目标）
     int m_currentChapter = 0;
     QElapsedTimer m_trackTimer;  // 阅读计时：startTracking 启动，stopTracking 结算

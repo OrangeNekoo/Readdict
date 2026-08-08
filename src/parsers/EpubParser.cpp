@@ -277,9 +277,14 @@ private:
 
 // ---- EpubParser ----
 
-QByteArray EpubParser::readZipEntry(const QString &zipPath, const QString &entry) const {
+QByteArray EpubParser::readZipEntry(const QString &zipPath, const QString &entry,
+                                    QString *error) const {
     unzFile zip = unzOpen64(zipPath.toUtf8().constData());
-    if (!zip) return {};
+    if (!zip) {
+        if (error) *error = QStringLiteral("无法打开 EPUB 压缩包（非有效 zip 或已损坏）: %1").arg(zipPath);
+        return {};
+    }
+    if (error) error->clear();
     QByteArray out;
     // 先精确匹配，再大小写不敏感兜底（真实书条目名大小写偶有出入）
     int rc = unzLocateFile(zip, entry.toUtf8().constData(), 1);
@@ -473,20 +478,37 @@ void EpubParser::splitParagraphs(const QString &html, const QString &zipPath,
 
 DocumentModel EpubParser::parse(const QString &epubPath) {
     DocumentModel m;
-    if (!QFileInfo::exists(epubPath)) return m;
+    m_error.clear();
+    if (!QFileInfo::exists(epubPath)) {
+        m_error = QStringLiteral("文件不存在: %1").arg(epubPath);
+        return m;
+    }
     // 1) container.xml → rootfile 路径
-    const QByteArray container = readZipEntry(epubPath, "META-INF/container.xml");
+    QString zipErr;
+    const QByteArray container = readZipEntry(epubPath, "META-INF/container.xml", &zipErr);
     if (container.isEmpty()) {
+        m_error = zipErr.isEmpty()
+            ? QStringLiteral("EPUB 中缺少 META-INF/container.xml: %1").arg(epubPath)
+            : zipErr;
         qWarning("EpubParser: %s 中缺少 META-INF/container.xml", qUtf8Printable(epubPath));
         return m;
     }
     const QString opfEntry = containerRootfile(container);
-    if (opfEntry.isEmpty()) return m;
+    if (opfEntry.isEmpty()) {
+        m_error = QStringLiteral("EPUB container.xml 未声明 rootfile: %1").arg(epubPath);
+        return m;
+    }
     // 2) content.opf → 元数据 / manifest / spine
-    const QByteArray opf = readZipEntry(epubPath, opfEntry);
-    if (opf.isEmpty()) return m;
+    const QByteArray opf = readZipEntry(epubPath, opfEntry, &zipErr);
+    if (opf.isEmpty()) {
+        m_error = zipErr.isEmpty()
+            ? QStringLiteral("EPUB 中缺少 %1").arg(opfEntry)
+            : zipErr;
+        return m;
+    }
     OpfInfo info;
     if (!parseOpf(opf, &info)) {
+        m_error = QStringLiteral("EPUB OPF 解析失败（缺少 spine）: %1").arg(opfEntry);
         qWarning("EpubParser: %s 的 OPF 缺少 spine", qUtf8Printable(opfEntry));
         return m;
     }

@@ -224,6 +224,24 @@ private slots:
             QCOMPARE(m_mgr->loadChapter(id, i).toMap().value("title").toString(),
                      titles.at(i).toString());
     }
+    void loadChapterReportsParseError() {
+        // L4（P0#5）：解析失败（书文件不存在）→ loadChapter 上抛 {error} 供
+        // QML 错误页显示（路径指向不存在的文件，确保解析器报错）
+        const qint64 id = m_mgr->addBook(Book{-1, "坏书", "作者", "社", "", "TXT",
+            m_tmp->path() + "/definitely_missing.txt", QString(), 0.0});
+        const QVariantMap out = m_mgr->loadChapter(id, 0).toMap();
+        QVERIFY2(out.value("error").toString().contains("文件不存在"),
+                 qPrintable(out.value("error").toString()));
+    }
+    void loadChapterEmptyTxtKeepsLegacyEmpty() {
+        // L4：空文档且无错误（零章 TXT）维持旧行为——返回空 map，不误报 error
+        const QString emptyTxt = m_tmp->path() + "/zero.txt";
+        QFile f(emptyTxt);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.close();
+        const qint64 id = m_mgr->addBook(Book{-1, "空书", "作者", "社", "", "TXT", emptyTxt, QString(), 0.0});
+        QVERIFY(m_mgr->loadChapter(id, 0).toMap().isEmpty());
+    }
     void resolvesAllBundledFonts() {
         // D4：加载 bundled 字体后，resolveFontFamily 应把 4 个存储 token 映射到实际字族：
         // 宋体/黑体走英文族名回退链、HW 变体命中独立字族、得意黑映射 Smiley Sans。

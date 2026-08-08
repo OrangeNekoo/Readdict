@@ -17,6 +17,7 @@
 class Fb2Parser {
 public:
     DocumentModel parse(const QString &fb2Path);
+    QString lastError() const { return m_error; }
 private:
     // 递归遍历 section（含嵌套小节）：标题/段落/子 section 填进同一章
     void parseSection(QXmlStreamReader &r, Chapter &ch);
@@ -35,4 +36,5 @@ private:
     QHash<QString, QString> m_binaryTypes; // binary id → content-type（补扩展名用）
     QDir m_imgDir;                         // 图片缓存目录（按书唯一）
     QSet<QString> m_imgNames;              // 已用图片文件名（去重）
+    QString m_error;                         // 最近一次解析失败原因（成功清空）
 };

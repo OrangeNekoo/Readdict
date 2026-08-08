@@ -28,6 +28,10 @@ Page {
     // 由 Settings 的 reading/pageMode 读取（onCompleted），注入 ReaderContent
     // 驱动方向键分流与页边界吸附；设置页"阅读背景"卡可切换（写 reading/pageMode）。
     property string pageMode: "scroll"
+    // L4（P0#5）：解析失败错误占位——loadChapter 返回 {error} 时置本属性，
+    // 内容区显示居中错误 Label + 重试按钮；正常加载清空（样式 U 阶段再对齐）
+    property string loadError: ""
+    property int loadErrorIndex: 0   // 重试目标章索引（失败章，重试重调 loadChapter）
     property var tocTitles: []
     // C7：本书全部划线（Highlights.highlightsForBook 结果，供渲染注入与笔记列表）
     property var highlights: []
@@ -170,6 +174,30 @@ Page {
         // E4：方向键 ← 翻上一章（autoPrevChapter：首章兜底不换，同 autoNextChapter 对称；
         // paged 模式 pagePrev 在章首 contentY=0 时发本信号，见 E4 复审）
         onRequestPrevChapter: page.autoPrevChapter()
+    }
+
+    // L4（P0#5）：解析失败错误占位——loadError 非空时盖住内容区：居中错误文案
+    //（UITheme.danger）+ 重试按钮（重调 loadChapter）。最小实现，样式 U 阶段对齐。
+    Item {
+        id: loadErrorHost
+        anchors.fill: content
+        visible: page.loadError.length > 0
+        ColumnLayout {
+            anchors.centerIn: parent
+            spacing: 12
+            Label {
+                Layout.maximumWidth: loadErrorHost.width - 48
+                text: page.loadError
+                color: UITheme.danger
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
+            }
+            Button {
+                Layout.alignment: Qt.AlignHCenter
+                text: qsTr("重试")
+                onClicked: page.loadChapter(page.loadErrorIndex)
+            }
+        }
     }
 
     // C2：朗读条门控——朗读会话激活（Tts.state != 0 播放/暂停）才显示，否则隐藏且正文
@@ -573,12 +601,32 @@ Page {
     function loadChapter(i) {
         if (!page.book || !page.book.id) return
         const titles = Books.chapterTitles(page.book.id)
-        if (!titles || titles.length === 0) return
+        if (!titles || titles.length === 0) {
+            // L4（P0#5）：无章节——探测解析错误（全书解析失败的书 titles 为空，
+            // 若不探测则错误占位永无显示机会）；空文档无错误维持旧行为直接返回
+            const probe = Books.loadChapter(page.book.id, 0)
+            if (probe && probe.error) {
+                page.loadError = probe.error
+                page.loadErrorIndex = 0
+                page.chapter = ({})
+            }
+            return
+        }
         i = Math.max(0, Math.min(i, titles.length - 1))
         // C5：换章先停朗读——否则旧章在途 finished 会在 setSentences 复位游标后
         // 触发 next() 把游标推到 1，导致新章从第 2 句开始（首句被跳过）
         Tts.stop()
-        page.chapter = Books.loadChapter(page.book.id, i)
+        const loaded = Books.loadChapter(page.book.id, i)
+        // L4（P0#5）：解析失败上抛 {error} → 置 loadError 显示错误占位（重试经
+        // loadErrorIndex 重调本函数）；空文档无错误维持旧行为空 map 渲染
+        if (loaded && loaded.error) {
+            page.loadError = loaded.error
+            page.loadErrorIndex = i
+            page.chapter = ({})
+            return
+        }
+        page.loadError = ""
+        page.chapter = loaded
         Books.currentChapter = i   // 写时持久化 progress/<bookId>
         // C5：拍平本段全部段落句子喂给 Tts（顺序与 ReaderContent 的 sentenceStarts 一致），
         // 换章复位游标 → 高亮回到首句；Tts.currentIndex 驱动逐句高亮与滚动跟随。

@@ -67,6 +67,7 @@ void BookManager::removeBook(qint64 id) {
             qWarning() << "removeBook: 全文索引清理失败:" << fts.lastError().text();
     }
     m_docCache.remove(id); // 阅读器文档缓存一并失效
+    m_docError.remove(id); // 解析错误缓存同步失效
     emit booksChanged();
 }
 
@@ -353,8 +354,12 @@ DocumentModel BookManager::documentFor(qint64 bookId) {
     if (it != m_docCache.constEnd()) return it.value();
     DocumentModel doc;
     const Book b = bookById(bookId);
+    QString err;
     if (!b.path.isEmpty())
-        doc = ParserFactory::parse(b.path, b.format);
+        doc = ParserFactory::parse(b.path, b.format, &err);
+    // L4（P0#5）：解析失败（空文档+错误）记录原因，loadChapter 上抛 QML
+    if (doc.empty() && !err.isEmpty())
+        m_docError.insert(bookId, err);
     m_docCache.insert(bookId, doc);
     return doc;
 }
@@ -404,6 +409,13 @@ QVariantList BookManager::chapterTitles(qint64 bookId) {
 QVariant BookManager::loadChapter(qint64 bookId, int index) {
     m_activeBookId = bookId;
     const DocumentModel doc = documentFor(bookId);
+    // L4（P0#5）：空文档且解析报错 → 上抛错误信息（QML 错误页）；
+    // 空文档且无错误（如零章 TXT）维持旧行为返回空 map
+    if (doc.empty() && m_docError.value(bookId).isEmpty() == false) {
+        QVariantMap out;
+        out.insert("error", m_docError.value(bookId));
+        return out;
+    }
     QVariantMap out;
     if (index < 0 || index >= doc.chapters.size()) return out;
     const QStringList titles = uniqueChapterTitles(doc);
