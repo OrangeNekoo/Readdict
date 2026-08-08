@@ -63,7 +63,10 @@ void OpenAITTSEngine::speak(const QString &text) {
     QNetworkRequest req(endpointUrl);
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     req.setRawHeader("Authorization", "Bearer " + m_apiKey.toUtf8());
-    // 新一轮 speak：使在途请求作废并中止，避免旧响应乱序到达覆盖新音频
+    // 新一轮 speak：立即中断旧播放（等响应到达再停，旧音频会在网络窗口内继续播完，
+    // 其 EndOfMedia 触发 finished → 控制器误 next() → 串音/跳句——用户反馈
+    // "朗读一直重复测试语音"的根因之一）；同时使在途请求作废，避免旧响应乱序覆盖
+    m_player.stop();
     const quint64 seq = ++m_reqSeq;
     if (m_activeReply) m_activeReply->abort();
     QNetworkReply *reply = m_net.post(req, buildPayload(text, m_model, m_voice, m_speed));
@@ -86,10 +89,15 @@ void OpenAITTSEngine::speak(const QString &text) {
             emit error(QStringLiteral("TTS 服务返回空音频"));
             return;
         }
-        // 播放内存音频：先停掉旧播放（后端停止读取）再改写成员 QBuffer，避免读改写竞态
+        // 播放内存音频：先让播放器完全脱离旧源再改写成员 QBuffer——
+        // 若播放器仍在读旧缓冲时 setData，可能读到新旧混合数据或重播旧音频
+        // （"重复测试语音"的另一根因），故先 setSourceDevice(nullptr) + close 再换数据。
         m_player.stop();
+        m_player.setSourceDevice(nullptr);
+        m_audioBuffer.close();
         m_audioBuffer.setData(audio);
         m_audioBuffer.open(QIODevice::ReadOnly);
+        m_audioBuffer.seek(0);
         m_player.setSourceDevice(&m_audioBuffer, QUrl(QStringLiteral("speech.mp3")));
         m_hasSource = true;
         m_player.play();
@@ -114,4 +122,9 @@ void OpenAITTSEngine::stop() {
         m_activeReply = nullptr;
     }
     m_player.stop();
+    // 与 SystemTTSEngine 对齐（QTextToSpeech::stop → 异步 Ready → finished）：
+    // stop 也会产生一个 finished，由控制器 m_suppressFinished 抑制。
+    // 此前不发 → 试音自然结束的 finished 误消费抑制标志 → m_testing 残留
+    // （设置页"测试发音"后状态机被污染，朗读串音/跳句的根因）。
+    emit finished();
 }

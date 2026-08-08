@@ -12,11 +12,17 @@ public:
     void speak(const QString &text) override { spoken.append(text); }
     void pause() override {}
     void resume() override { resumed = true; }
-    void stop() override { stopped = true; }
+    // D1：stopEmitsFinished=true 模拟修复后的 OpenAITTSEngine 契约（stop() 发一个
+    // finished，与 SystemTTSEngine 的异步 Ready→finished 对齐）；false 为旧行为。
+    void stop() override {
+        stopped = true;
+        if (stopEmitsFinished) emit finished();
+    }
     void setRate(double rate) override { lastRate = rate; }
     void setVoice(const QString &name) override { lastVoice = name; }
 
     bool m_available = true;
+    bool stopEmitsFinished = false;
     QStringList spoken;
     bool stopped = false;
     bool resumed = false;
@@ -336,6 +342,53 @@ private slots:
         c.seekTo(2);
         QCOMPARE(c.currentIndex(), 2);
         QVERIFY(spy.count() >= 1);
+    }
+    // D1（用户反馈 BUG）：设置 OpenAI → 测试发音 → 进入书 → 朗读
+    // 一直重复"测试语音"。锁定修复后契约（引擎 stop() 发一个 finished 供抑制标志消费，
+    // 试音自然结束由 m_testing 消费）下完整用户序列：
+    // 试音文本只出现一次，朗读流逐句推进书中句子，末尾 chapterCompleted，无串音。
+    void userFlowTestVoiceThenReadingSpeaksBookSentencesOnly() {
+        TtsController c;
+        FakeEngine e;
+        e.stopEmitsFinished = true;   // 修复后的 OpenAITTSEngine 契约
+        c.setEngine(&e);
+        c.setSentences({"一。", "二。", "三。"});
+        // 1. 设置页点"测试发音"：stop 的 finished 被抑制消费，试音开始
+        c.testVoice("这是一段测试语音");
+        QCOMPARE(e.spoken, QStringList{"这是一段测试语音"});
+        // 2. 试音自然播完：m_testing 消费 → 两标志清零，不推进游标
+        e.emitFinished();
+        QCOMPARE(c.currentIndex(), 0);
+        // 3. 进入书：loadChapter → stop + 喂新章句子
+        c.stop();
+        c.setSentences({"第一句。", "第二句！", "第三句？"});
+        // 4. 点朗读：从首句逐句推进，测试文本绝不串入
+        c.play();
+        QCOMPARE(e.spoken.last(), QString("第一句。"));
+        e.emitFinished();
+        QCOMPARE(e.spoken.last(), QString("第二句！"));
+        e.emitFinished();
+        QCOMPARE(e.spoken.last(), QString("第三句？"));
+        e.emitFinished();
+        QVERIFY(c.atEnd());
+        QCOMPARE(e.spoken, (QStringList{
+            "这是一段测试语音", "第一句。", "第二句！", "第三句？"}));
+    }
+    // D1：试音结束（自然 finished 已消费）后，任何顺序下两标志都不残留——
+    // 后续 play + 正常 finished 必须照常推进（不被 m_testing 吞掉、不误跳）。
+    void testVoiceEndLeavesNoStateResidue() {
+        TtsController c;
+        FakeEngine e;
+        e.stopEmitsFinished = true;
+        c.setEngine(&e);
+        c.setSentences({"一。", "二。"});
+        c.testVoice("测试");
+        e.emitFinished();                       // 试音自然结束
+        c.play();                               // 朗读开始
+        QCOMPARE(e.spoken.last(), QString("一。"));
+        e.emitFinished();                       // 第一句结束 → 必须推进
+        QCOMPARE(c.currentIndex(), 1);
+        QCOMPARE(e.spoken.last(), QString("二。"));
     }
 };
 QTEST_MAIN(TestTtsController)

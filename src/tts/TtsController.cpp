@@ -42,8 +42,11 @@ void TtsController::reconfigure(const QString &engine, const QString &url,
     } else {
         fresh = new SystemTTSEngine(this);
     }
-    // 先换指针再销毁旧引擎：setEngine 内部会断开旧引擎信号
+    // 先换指针再销毁旧引擎：setEngine 内部会断开旧引擎信号；
+    // D1：两标志一并清理——旧引擎 stop 的异步 finished 已随断连丢弃，
+    // 残留的抑制标志会吞掉新引擎首个合法 finished（跳句）
     m_testing = false;
+    m_suppressFinished = false;
     setEngine(fresh);
     if (old) old->deleteLater();
     // 新引擎恢复当前语速/音色（OpenAI 的 setRate 映射到请求 speed）

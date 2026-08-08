@@ -43,6 +43,16 @@ private slots:
         QCOMPARE(spy.count(), 1);
         QVERIFY(spy.takeFirst().at(0).toString().contains("地址无效"));
     }
+    // D1：stop() 必须发出一个 finished，与 SystemTTSEngine 对齐
+    // （QTextToSpeech::stop → 异步 Ready → finished）。
+    // 控制器用 m_suppressFinished 抑制这个事件；若引擎不发，试音自然结束的 finished
+    // 会误消费抑制标志 → m_testing 残留 → 正式朗读状态机被污染（用户反馈根因）。
+    void stopEmitsFinished() {
+        OpenAITTSEngine e;
+        QSignalSpy spy(&e, &TTSEngine::finished);
+        e.stop();
+        QCOMPARE(spy.count(), 1);   // RED：当前实现 stop 不发 finished（count==0）
+    }
 };
 QTEST_MAIN(TestTtsEngine)
 #include "tst_ttsengine.moc"
