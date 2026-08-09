@@ -213,7 +213,7 @@ void BookManager::setProgress(qint64 id, double progress) {
 
 void BookManager::reportProgress(qint64 id, int ch1, int total) {
     // L6（P1#13）：进度取 max 不 regress——回翻章节只刷 last_read_at，不动 progress，
-    // 且不 emit booksChanged（避免书架模型无意义重建）
+    // 书架模型仍不重建；readingActivityChanged 让主页更新最近阅读排序和统计。
     if (total <= 0) return;
     const double p = double(ch1) / total;
     QSqlQuery q(m_db);
@@ -230,7 +230,8 @@ void BookManager::reportProgress(qint64 id, int ch1, int total) {
         up.addBindValue(QDateTime::currentDateTime().toString(Qt::ISODate));
         up.addBindValue(id);
         if (!up.exec()) return;
-        return; // 进度未变：不 emit（避免书架模型重建，P1#13）
+        emit readingActivityChanged();
+        return; // 进度未变：不 emit booksChanged（避免书架模型重建，P1#13）
     }
     up.addBindValue(QDateTime::currentDateTime().toString(Qt::ISODate));
     up.addBindValue(id);

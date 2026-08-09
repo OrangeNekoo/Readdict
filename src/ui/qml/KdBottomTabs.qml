@@ -58,7 +58,12 @@ Rectangle {
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: 6
                 visible: tabs.currentBook !== null
-                source: tabs.currentBook ? tabs.currentBook.cover : ""
+                source: {
+                    const cover = tabs.currentBook ? String(tabs.currentBook.cover || "") : ""
+                    if (!cover) return ""
+                    // 书库封面是绝对本地路径；已有 URL（file:/、qrc:/、http(s):）原样保留。
+                    return /^[A-Za-z][A-Za-z0-9+.-]*:/.test(cover) ? cover : "file://" + cover
+                }
                 fillMode: Image.PreserveAspectCrop
                 // U1 修正：Image 无 border 属性（报错致组件加载失败）；描边改由
                 // 下方轻投影 Rectangle 承载（borderDefault 1px + shadowBook 外描边）

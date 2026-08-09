@@ -75,6 +75,7 @@ public:
     void setCurrentChapter(int index);
 signals:
     void booksChanged();
+    void readingActivityChanged();
     void currentChapterChanged();
 private:
     QVector<Book> selectBooks(const QString &where, const QString &order) const;

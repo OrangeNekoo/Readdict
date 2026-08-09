@@ -304,14 +304,20 @@ private slots:
         QCOMPARE(m_mgr->resolveFontFamily(QStringLiteral("得意黑")), smiley);
     }
     void progressNeverRegresses() {
-        // L6（P1#13）：读到 50% 后跳回第 1 章 → progress 保持 0.5（只进不退）。
-        // 简报行内注释写 0.6/0.1，但其公式 p=ch1/total 下 5/10=0.5、0/10=0.0，
-        // 简报首行注释"保持 0.5"亦同——按公式取值
+        // L6/U2：回翻章节保持 progress，但 last_read_at 变化需通知最近阅读视图，
+        // 且不得触发 booksChanged 重建书架模型。
         BookManager m(dbPath, "readdict_bm_t1");
         const qint64 id = addSampleBook(m);
+        QSignalSpy booksSpy(&m, &BookManager::booksChanged);
+        QSignalSpy activitySpy(&m, &BookManager::readingActivityChanged);
         m.reportProgress(id, 5, 10);   // 0.5
-        m.reportProgress(id, 0, 10);   // 0.0 → 不 regress
         QCOMPARE(m.bookById(id).progress, 0.5);
+        QCOMPARE(booksSpy.count(), 1);
+        QCOMPARE(activitySpy.count(), 0);
+        m.reportProgress(id, 0, 10);   // 0.0 → 不 regress，但刷新最近阅读时间
+        QCOMPARE(m.bookById(id).progress, 0.5);
+        QCOMPARE(booksSpy.count(), 1);
+        QCOMPARE(activitySpy.count(), 1);
     }
     void bookByIdModelIgnoresFilter() {
         // L6（P0#7）：bookByIdModel 全库查——setFilter 后过滤外的书仍可查（全文搜索跳转用）

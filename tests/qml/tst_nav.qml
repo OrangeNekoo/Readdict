@@ -96,24 +96,37 @@ Item {
 
             var book = null
             for (let b of Books.booksModel) {
-                book = b
-                break
+                const fmt = (b.format || "").toUpperCase()
+                if (fmt !== "PDF" && String(b.cover || "").length > 0) {
+                    book = b
+                    break
+                }
             }
             if (!book) {
                 Importer.doImport(TestEnv.sourceFiles[0])
                 tryVerify(function () {
                     for (let b of Books.booksModel) {
-                        book = b
-                        return true
+                        const fmt = (b.format || "").toUpperCase()
+                        if (fmt !== "PDF" && String(b.cover || "").length > 0) {
+                            book = b
+                            return true
+                        }
                     }
                     return false
-                }, 3000, "应导入测试书以验证悬浮封面")
+                }, 3000, "应导入带封面的非 PDF 测试书")
             }
-            if (book)
-                Books.reportProgress(book.id, 1, 1)
+            verify(book !== null, "应存在确定的非 PDF 测试书")
+            Books.reportProgress(book.id, 1, 1)
             tryVerify(function () { return win.currentReading !== null }, 3000,
                       "最近阅读书籍应驱动悬浮封面")
             verify(win.bottomNav.miniCover.visible, "最近阅读封面应可见")
+            verify(String(win.bottomNav.miniCover.source).indexOf("file:") === 0,
+                   "绝对封面路径应转换为 file URL，实际 " + win.bottomNav.miniCover.source)
+            var homePage = win.navStack.currentItem
+            tryVerify(function () { return homePage.recentBooksModel.length > 0 }, 3000,
+                      "阅读活动后主页最近阅读模型应刷新")
+            homePage.refreshData()
+            verify(homePage.recentBooksModel.length > 0, "refreshData 应重算最近阅读模型")
             mouseClick(win.bottomNav.miniCover, win.bottomNav.miniCover.width / 2,
                        win.bottomNav.miniCover.height / 2)
             tryVerify(function () { return win.navStack.currentItem.navId === "reader" }, 3000,

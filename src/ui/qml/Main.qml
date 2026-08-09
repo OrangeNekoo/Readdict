@@ -56,6 +56,7 @@ ApplicationWindow {
     Connections {
         target: Books
         function onBooksChanged() { root.currentReading = root.recentReading() }
+        function onReadingActivityChanged() { root.currentReading = root.recentReading() }
     }
 
     function syncNav() {

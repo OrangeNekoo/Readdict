@@ -3,7 +3,7 @@ import Readdict.UI 1.0
 
 // U4：Kindle 线性描边图标集（分析报告 §2/§4/§5：stroke-only、24-28px、无填充）。
 // Canvas 绘制（矢量路径），不依赖系统字体字形（U2 占位字符 ⌂▤⇄⚙ 的平台 tofu 疑虑
-// 由此消除——KdBottomNav 与阅读页 Sheet/菜单统一走本组件）。
+// 由此消除——底部标签与阅读页 Sheet/菜单统一走本组件）。
 // 可用图标名（24x24 网格，线宽 1.8 round cap）：
 //   shelf 书库(首页) / stats 统计 / sync 同步 / settings 设置 / toc 目录 /
 //   theme 主题 / font 字体 / layout 布局 / more 更多 / back 返回 /

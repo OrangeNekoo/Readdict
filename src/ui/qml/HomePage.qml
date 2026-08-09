@@ -8,8 +8,17 @@ import Readdict.UI 1.0
 Page {
     id: home
     property string navId: "home"
+    property var recentBooksModel: []
+    property int statsRevision: 0
     background: Rectangle { color: UITheme.bgPrimary }
 
+    Component.onCompleted: home.refreshData()
+
+    Connections {
+        target: Books
+        function onBooksChanged() { home.refreshData() }
+        function onReadingActivityChanged() { home.refreshData() }
+    }
     ScrollView {
         anchors.fill: parent
         contentWidth: parent.width
@@ -29,7 +38,7 @@ Page {
                 spacing: 12
                 leftPadding: UITheme.pageMargin
                 Repeater {
-                    model: Books.recentBooks(6)
+                    model: home.recentBooksModel
                     delegate: Column {
                         spacing: 4
                         width: 96
@@ -77,7 +86,13 @@ Page {
         }
     }
 
+    function refreshData() {
+        home.recentBooksModel = Books.recentBooks(6) || []
+        ++home.statsRevision
+    }
+
     function statsText() {
+        const revision = home.statsRevision
         const s = Books.stats() || {}
         const secs = s.totalReadSeconds || 0
         const hours = Math.floor(secs / 3600)
