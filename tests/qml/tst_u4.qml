@@ -592,8 +592,8 @@ Item {
 
             page.menuOpen = true
             tryVerify(function () { return page.readerMenu.visible }, 3000, "菜单应再次打开")
-            page.menuOpen = false
-            verify(!page.menuOpen, "遮罩关闭菜单")
+            mouseClick(page.readerMenu, 30, 10)
+            tryVerify(function () { return !page.menuOpen }, 3000, "点击遮罩应关闭菜单")
             h.stack.destroy()
         }
     }

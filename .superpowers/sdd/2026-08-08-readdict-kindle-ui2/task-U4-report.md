@@ -13,3 +13,9 @@
 - `cmake --build build --parallel`：通过。
 - 聚焦 U4 回归（背景/布局 Sheet、顶栏、书签、阅读导航、图书菜单、工具栏）：17 passed, 0 failed。
 - `ctest --test-dir build -R tst_qml --output-on-failure`：本次最终运行 219 passed, 3 failed, 4 skipped；失败均为仓库已知的跨用例导入/时序 flake（分页自动重复边界 1 项、既有删除/导航测试的测试书导入顺序 2 项），本次 U4 相关用例全部通过。
+
+## 复审修复
+
+- 隐藏态底部热区现在同时设置 `controlsVisible` 与 `sheetOpen`，并显式停止隐藏计时器；顶栏与 Sheet 会稳定唤出，计时器触发时也不会吞掉已打开的 Sheet。
+- 恢复与 U4 无关的分页测试 tolerance 变更，并恢复菜单遮罩的真实点击断言。
+- 复审后聚焦 Reader/Toolbar/Sheet 测试：15 passed, 0 failed。

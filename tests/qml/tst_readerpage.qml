@@ -159,14 +159,14 @@ Item {
             wait(50)
             // 正文底 1/4 内（页面坐标 y=600，正文区 36..668，1/4 线=510）→ 唤出
             page.handleContentTap(600)
-            tryVerify(function () { return page.controlsVisible }, 3000,
-                      "点击正文底部应唤出控制栏")
-            tryVerify(function () { return !page.controlsVisible }, 3000,
-                      "无操作后控制栏应自动隐藏")
-            // 隐藏态：点正文上部（y=50，未到 1/4 线）→ 保持隐藏
+            tryVerify(function () { return page.sheetOpen && page.topToolbar.visible }, 3000,
+                      "点击正文底部应唤出 Sheet 与顶栏")
+            verify(!page.hideTimer.running, "Sheet 唤出后隐藏计时器应暂停")
+            wait(400)
+            verify(page.sheetOpen && page.topToolbar.visible, "Sheet 唤出后应保持可见")
             page.handleContentTap(50)
-            wait(150)
-            verify(!page.controlsVisible, "点正文上部不应唤出控制栏")
+            tryVerify(function () { return !page.sheetOpen && !page.topToolbar.visible }, 3000,
+                      "再次点击正文应关闭 Sheet 与顶栏")
             h.stack.destroy()
         }
 
@@ -179,15 +179,12 @@ Item {
             page.controlsVisible = false
             wait(50)
             page.handleContentTap(700)
-            tryVerify(function () { return page.controlsVisible }, 3000,
-                      "点击隐藏控制栏位置应唤出")
+            tryVerify(function () { return page.sheetOpen && page.topToolbar.visible }, 3000,
+                      "点击隐藏底部热区应唤出 Sheet 与顶栏")
             h.stack.destroy()
         }
 
-        // 交互重置计时：唤出后轻点正文 / hover 移动均重置 5s 计时（跨过原到期点仍可见），
-        // 之后无操作才隐藏。delay=500：t0 唤出（到期 t0+500）→ t0+300 轻点（到期 t0+800）
-        // → t0+650 断言仍可见（无重置则已隐藏）→ hover 移动（到期 t0+1150）→ t0+1000
-        // 断言仍可见 → 无操作至 t0+1400 隐藏。
+        // Sheet 唤出后隐藏计时器暂停；关闭后恢复计时。
         function test_interactionResetsHideTimer() {
             var h = openPage()
             var page = h.page
@@ -195,12 +192,16 @@ Item {
             page.controlsVisible = false
             wait(50)
             page.handleContentTap(600)
-            tryVerify(function () { return page.controlsVisible }, 3000, "点击底部应唤出")
-            wait(300)
-            verify(page.controlsVisible, "到期前应仍可见")
-            page.handleContentTap(50)   // 上部轻点：只重置计时（<1/4 线不唤出）
-            wait(350)
-            verify(page.controlsVisible, "轻点应重置 5s 计时（跨过原到期点仍可见）")
+            tryVerify(function () { return page.sheetOpen && page.topToolbar.visible }, 3000,
+                      "点击底部应唤出 Sheet 与顶栏")
+            verify(!page.hideTimer.running, "Sheet 打开期间隐藏计时器应暂停")
+            wait(700)
+            verify(page.sheetOpen && page.topToolbar.visible, "Sheet 打开期间应保持可见")
+            page.handleContentTap(50)
+            tryVerify(function () { return !page.sheetOpen && !page.topToolbar.visible }, 3000,
+                      "点击正文应关闭 Sheet 与顶栏")
+            tryVerify(function () { return page.hideTimer.running }, 3000,
+                      "Sheet 关闭后应恢复隐藏计时器")
             h.stack.destroy()
         }
 
@@ -236,9 +237,9 @@ Item {
             tryVerify(function () { return !page.ttsBar.visible }, 3000,
                       "停止后 TtsBar 应隐藏")
             page.handleContentTap(600)
-            tryVerify(function () { return page.controlsVisible }, 3000,
-                      "点击底部应唤出控制栏")
-            verify(!page.ttsBar.visible, "唤出控制栏不应带出 TtsBar（C2 门控独立）")
+            tryVerify(function () { return page.sheetOpen && page.topToolbar.visible }, 3000,
+                      "点击底部应唤出 Sheet 与顶栏")
+            verify(!page.ttsBar.visible, "唤出 Sheet 不应带出 TtsBar（C2 门控独立）")
             h.stack.destroy()
         }
     }

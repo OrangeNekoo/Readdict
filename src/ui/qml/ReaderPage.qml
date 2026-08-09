@@ -199,6 +199,7 @@ Page {
         repeat: false
         running: false
         onTriggered: {
+            if (page.sheetOpen) return
             page.controlsVisible = false
             page.sheetOpen = false
         }
@@ -809,6 +810,8 @@ Page {
         const summonBottom = content.y + content.height * 0.75
         if (!page.controlsVisible && y >= summonBottom) {
             page.controlsVisible = true
+            page.sheetOpen = true
+            hideControlsTimer.stop()
             return
         }
         page.sheetOpen = true
