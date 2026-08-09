@@ -57,6 +57,20 @@ Item {
         Settings.setValue("shelf/scope", index)
         sheet.scopeChanged(index)
     }
+    Connections {
+        target: Books
+        function onBooksChanged() {
+            if (!sheet.ready) return
+            const categories = Books.categoriesModel
+            if (sheet.currentCategory !== "" && categories.indexOf(sheet.currentCategory) < 0) {
+                sheet.currentCategory = ""
+                Settings.setValue("shelf/category", "")
+                Books.setFilter("")
+            }
+            sheet.syncIndexes()
+        }
+    }
+
 
 
     Rectangle {
@@ -105,8 +119,9 @@ Item {
                         onClicked: sheet.chooseCategory(index)
                     }
                     onCurrentIndexChanged: {
-                        if (sheet.ready && currentIndex >= 0
-                                && currentIndex !== (sheet.currentCategory === "" ? 0 : model.indexOf(sheet.currentCategory)))
+                        const selected = sheet.currentCategory === "" ? 0
+                            : Books.categoriesModel.indexOf(sheet.currentCategory) + 1
+                        if (sheet.ready && currentIndex >= 0 && currentIndex !== selected)
                             sheet.chooseCategory(currentIndex)
                     }
                 }

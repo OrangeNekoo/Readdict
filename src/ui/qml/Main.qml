@@ -92,9 +92,18 @@ ApplicationWindow {
         visible: root.navVisible && (root.currentNavId === "home" || root.currentNavId === "shelf")
         height: visible ? 44 : 0
         onTextChanged: {
-            if (root.currentNavId !== "shelf" && text.length > 0)
+            if (root.currentNavId !== "shelf" && text.length > 0) {
                 root.navigateTo("shelf")
-            Books.doSearch(text)
+                Books.doSearch(text)
+                return
+            }
+            const page = stack.currentItem
+            if (root.currentNavId === "shelf" && page && page.filterSheet
+                    && page.filterSheet.currentScope === 1) {
+                page.refreshFulltextSearch(text)
+            } else {
+                Books.doSearch(text)
+            }
         }
         onMenuClicked: shelfMenu.open()
     }

@@ -57,6 +57,7 @@ Item {
     }
 
     TestCase {
+        name: "FilterSheetSmoke"
         function cleanup() {
             Settings.setValue("shelf/category", "")
             Settings.setValue("shelf/sort", 0)
@@ -97,7 +98,11 @@ Item {
             loader2.destroy()
         }
 
-        function test_categoryPersistenceByValue() {
+        function test_categoryPersistenceAndInvalidation() {
+            if (Books.booksModel.length === 0)
+                skip("书库为空，跳过分类按值回归")
+            const id = Books.booksModel[0].id
+            Books.setCategory(id, "U3持久分类")
             Settings.setValue("shelf/category", "U3持久分类")
             var loader = shelfComp.createObject(root)
             loader.width = root.width
@@ -105,7 +110,12 @@ Item {
             var shelf = loader.item
             tryVerify(function () { return shelf.currentCategory === "U3持久分类" }, 2000,
                       "重开页面应按值恢复分类")
-            compare(shelf.filterSheet.currentCategory, "U3持久分类")
+            Books.setCategory(id, "")
+            tryVerify(function () { return shelf.currentCategory === "" }, 2000,
+                      "分类删除后应清空无效筛选")
+            compare(String(Settings.value("shelf/category")), "")
+            compare(shelf.filterSheet.catList.currentIndex, 0,
+                    "分类删除后应选中全部")
             loader.destroy()
         }
     }

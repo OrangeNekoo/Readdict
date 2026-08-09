@@ -37,12 +37,13 @@ Page {
         return !!addedAt && (Date.now() - new Date(addedAt).getTime()) < 7 * 86400000
     }
 
-    function refreshFulltextSearch() {
-        if (filterSheet.currentScope !== 1 || shelf.searchText.length === 0) {
+    function refreshFulltextSearch(query) {
+        const value = query === undefined ? shelf.searchText : String(query)
+        if (filterSheet.currentScope !== 1 || value.length === 0) {
             shelf.searchResults = []
             return
         }
-        shelf.searchResults = Search.searchAllModel(shelf.searchText)
+        shelf.searchResults = Search.searchAllModel(value)
     }
 
     onSearchTextChanged: shelf.refreshFulltextSearch()

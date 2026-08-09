@@ -15,6 +15,10 @@ Item {
         Loader { source: "qrc:/qt/qml/Readdict/ui/qml/ShelfPage.qml" }
     }
     Component {
+        id: mainComp
+        Loader { source: "qrc:/qt/qml/Readdict/ui/qml/Main.qml" }
+    }
+    Component {
         id: cardComp
         Loader { source: "qrc:/qt/qml/Readdict/ui/qml/BookCard.qml" }
     }
@@ -197,24 +201,29 @@ Item {
     }
     TestCase {
         name: "FulltextSmoke"
-        // C8：书架全文搜索——e2e 已导入含"第二行内容"的 TXT 书（本文件在其后执行），
-        // 切到"全文"模式输入词，应命中并带 snippet。
         function test_shelfFulltextHits() {
-            var loader = shelfComp.createObject(root)
+            var loader = mainComp.createObject(root)
             loader.width = root.width
             loader.height = root.height
-            var shelf = loader.item
-            verify(shelf !== null, "ShelfPage 应能加载")
+            var win = loader.item
+            verify(win !== null, "Main.qml 应能加载")
+            tryVerify(function () { return win.navStack.currentItem !== null }, 3000,
+                      "Main 初始页应加载")
+            win.navigateTo("shelf")
+            tryVerify(function () {
+                return win.navStack.currentItem && win.navStack.currentItem.navId === "shelf"
+            }, 3000, "Main 应能导航到书架")
+            var shelf = win.navStack.currentItem
             shelf.filterSheet.scopeList.currentIndex = 1 // 全文范围
-            shelf.searchText = "第二行内容"
+            win.topSearchBar.text = "第二行内容"
             tryVerify(function () { return shelf.fulltextList.model.length > 0 }, 5000,
-                      "全文搜索应命中已导入 TXT 书，实际 " + shelf.fulltextList.model.length)
+                      "Main 顶部搜索应驱动全文命中，实际 " + shelf.fulltextList.model.length)
             var hit = shelf.fulltextList.model[0]
             verify(Number(hit.bookId) > 0, "命中应带 bookId")
             verify((hit.snippet || "").length > 0, "命中应带 snippet，实际 " + hit.snippet)
-            // 切回元数据范围：结果列表隐藏、网格恢复过滤语义
             shelf.filterSheet.scopeList.currentIndex = 0
             verify(shelf.fulltextList.visible === false, "切回元数据后全文结果列表应隐藏")
+            win.visible = false
             loader.destroy()
         }
     }

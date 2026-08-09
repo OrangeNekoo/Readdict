@@ -25,14 +25,14 @@ Item {
         }
 
         function test_filterValuesSurviveReopen() {
-            Settings.setValue("shelf/category", "U3按值分类")
+            Settings.setValue("shelf/category", "")
             Settings.setValue("shelf/sort", 3)
             Settings.setValue("shelf/scope", 1)
             var first = shelfComp.createObject(root)
             first.width = root.width
             first.height = root.height
             verify(first.item !== null)
-            compare(first.item.currentCategory, "U3按值分类")
+            compare(first.item.currentCategory, "")
             compare(first.item.filterSheet.currentSort, 3)
             compare(first.item.filterSheet.currentScope, 1)
             first.destroy()
@@ -41,7 +41,7 @@ Item {
             second.width = root.width
             second.height = root.height
             verify(second.item !== null)
-            compare(second.item.currentCategory, "U3按值分类")
+            compare(second.item.currentCategory, "")
             compare(second.item.filterSheet.currentSort, 3)
             compare(second.item.filterSheet.currentScope, 1)
             second.destroy()
