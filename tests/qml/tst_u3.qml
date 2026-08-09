@@ -110,6 +110,10 @@ Item {
             var shelf = loader.item
             tryVerify(function () { return shelf.currentCategory === "U3持久分类" }, 2000,
                       "重开页面应按值恢复分类")
+            tryVerify(function () {
+                return shelf.filterSheet.catList.currentIndex
+                       === Books.categoriesModel.indexOf("U3持久分类") + 1
+            }, 2000, "分类模型变化后索引应按值定位")
             Books.setCategory(id, "")
             tryVerify(function () { return shelf.currentCategory === "" }, 2000,
                       "分类删除后应清空无效筛选")

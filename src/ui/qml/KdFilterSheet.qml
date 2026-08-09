@@ -34,7 +34,13 @@ Item {
         return String(value)
     }
     function syncIndexes() {
-        catList.currentIndex = sheet.currentCategory === "" ? 0 : Math.max(0, catList.model.indexOf(sheet.currentCategory))
+        const categories = Books.categoriesModel || []
+        let categoryIndex = 0
+        if (sheet.currentCategory !== "") {
+            const found = categories.indexOf(sheet.currentCategory)
+            categoryIndex = found >= 0 ? found + 1 : 0
+        }
+        catList.currentIndex = categoryIndex
         sortList.currentIndex = sheet.currentSort
         scopeList.currentIndex = sheet.currentScope
     }
@@ -61,7 +67,7 @@ Item {
         target: Books
         function onBooksChanged() {
             if (!sheet.ready) return
-            const categories = Books.categoriesModel
+            const categories = Books.categoriesModel || []
             if (sheet.currentCategory !== "" && categories.indexOf(sheet.currentCategory) < 0) {
                 sheet.currentCategory = ""
                 Settings.setValue("shelf/category", "")
