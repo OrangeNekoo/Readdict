@@ -245,6 +245,7 @@ qt_add_resources(tst_qml "qml_ui"
         ../src/ui/qml/LayoutSheet.qml
         ../src/ui/qml/MoreSheet.qml
         ../src/ui/qml/ShelfPage.qml
+        ../src/ui/qml/KdFilterSheet.qml
         ../src/ui/qml/BookCard.qml
         ../src/ui/qml/SettingsPage.qml
         ../src/ui/qml/SettingsLanguagePage.qml

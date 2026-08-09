@@ -86,6 +86,7 @@ qt_add_qml_module(Readdict
         src/ui/qml/FontSheet.qml
         src/ui/qml/LayoutSheet.qml
         src/ui/qml/MoreSheet.qml
+        src/ui/qml/KdFilterSheet.qml
         src/ui/qml/ShelfPage.qml
         src/ui/qml/BookCard.qml
         src/ui/qml/SettingsPage.qml

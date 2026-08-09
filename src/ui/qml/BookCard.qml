@@ -14,6 +14,13 @@ Item {
     property alias deleteWarning: deleteWarning
     // B2：封面兜底测试句柄——封面图/占位块/首字文本供冒烟断言互斥显示
     property alias coverImage: coverImage
+    property alias progressBadge: progressBadge
+    property alias newBadge: newBadge
+    property alias progressBadgeLabel: pctLabel
+    function isNew(addedAt) {
+        return !!addedAt && (Date.now() - new Date(addedAt).getTime()) < 7 * 86400000
+    }
+
     property alias coverPlaceholder: coverPlaceholder
     property alias coverLetterText: coverLetterText
     // U3：Kindle 化样式测试句柄——封面剪裁块（无圆角断言）、轻投影（shadowBook）、
@@ -99,6 +106,38 @@ Item {
                     color: "white"
                     font.pixelSize: 56
                     font.bold: true
+                }
+            }
+            // 进度百分比角标（0<progress<1 时显示）
+            Rectangle {
+                id: progressBadge
+                anchors.top: parent.top
+                anchors.right: parent.right
+                visible: card.book.progress > 0 && card.book.progress < 1
+                color: UITheme.textPrimary
+                width: pctLabel.width + 8
+                height: 18
+                Label {
+                    id: pctLabel
+                    anchors.centerIn: parent
+                    text: Math.round(card.book.progress * 100) + "%"
+                    font.pixelSize: 11
+                    color: UITheme.bgPrimary
+                }
+            }
+            // 新书角标：添加时间在七天内且尚未阅读
+            Rectangle {
+                id: newBadge
+                anchors.top: parent.top
+                visible: card.book.progress === 0 && !!card.isNew(card.book.addedAt)
+                color: UITheme.textPrimary
+                width: 22
+                height: 18
+                Label {
+                    anchors.centerIn: parent
+                    text: qsTr("新")
+                    font.pixelSize: 11
+                    color: UITheme.bgPrimary
                 }
             }
         }

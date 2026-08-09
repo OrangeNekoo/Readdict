@@ -201,17 +201,19 @@ Item {
         // 切到"全文"模式输入词，应命中并带 snippet。
         function test_shelfFulltextHits() {
             var loader = shelfComp.createObject(root)
+            loader.width = root.width
+            loader.height = root.height
             var shelf = loader.item
             verify(shelf !== null, "ShelfPage 应能加载")
-            shelf.searchModeBox.currentIndex = 1 // 全文
-            shelf.searchField.text = "第二行内容"
+            shelf.filterSheet.scopeList.currentIndex = 1 // 全文范围
+            shelf.searchText = "第二行内容"
             tryVerify(function () { return shelf.fulltextList.model.length > 0 }, 5000,
                       "全文搜索应命中已导入 TXT 书，实际 " + shelf.fulltextList.model.length)
             var hit = shelf.fulltextList.model[0]
             verify(Number(hit.bookId) > 0, "命中应带 bookId")
             verify((hit.snippet || "").length > 0, "命中应带 snippet，实际 " + hit.snippet)
-            // 切回元数据模式：结果列表隐藏、网格恢复过滤语义
-            shelf.searchModeBox.currentIndex = 0
+            // 切回元数据范围：结果列表隐藏、网格恢复过滤语义
+            shelf.filterSheet.scopeList.currentIndex = 0
             verify(shelf.fulltextList.visible === false, "切回元数据后全文结果列表应隐藏")
             loader.destroy()
         }
