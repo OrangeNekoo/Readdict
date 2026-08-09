@@ -4,14 +4,10 @@ import QtTest
 import Readdict.Backend
 import Readdict.Test 1.0
 
-// C1：阅读页回归冒烟（P0 用户反馈：进入书后内容空白 + 无法返回）。
-// 回归源（D7 引入）：ReaderControls 被包进 controlsHost 后，ttsBar.anchors.bottom
-// 仍锚 `controls.top`——controls 变为 ttsBar 的"非父非兄弟"项，QML 丢弃该锚并告警
-// "Cannot anchor to an item that isn't a parent or sibling"。后果：
-//   · ttsBar 失去纵向定位 → y=0 骑在顶栏上（半透明白底盖住"返回"按钮、抢走点击）→ 无法返回
-//   · content.anchors.bottom: ttsBar.top 解析为 0 → 内容区高度 = 0 → 内容空白
-// 本用例锁定三条契约：真实书打开后内容区可见高度 > 0、段落真实渲染出内容高度、
-// TtsBar 贴底不压顶栏、返回按钮点击 pop 回书架。
+// U4：阅读页回归冒烟——Kindle 顶栏、TtsBar 贴底、内容区可见与返回导航。
+// 顶栏仅在 Sheet 唤出态显示，返回按钮与朗读入口分别走新顶栏/⋮菜单。
+// 本用例锁定真实书打开后内容区可见高度 > 0、段落真实渲染出内容高度、
+// TtsBar 贴底不压顶栏、朗读会话门控与返回按钮 pop 回书架。
 // 结构约定（与 tst_background 一致）：根为带尺寸的 Item，TestCase 是其子项；
 // ReaderPage 经 StackView push（生产路径，供返回导航断言）。
 // C3：ControlsSummonSmoke 覆盖唤出交互（点击底部唤出 + 无操作 5s 自动隐藏 +
@@ -25,7 +21,13 @@ Item {
         name: "ReaderNavSmoke"
 
         function initTestCase() {
-            if (Books.booksModel.length === 0)
+            Books.doSearch("")
+            Books.setFilter("")
+            Books.setSort(0)
+            var hasTxt = false
+            for (let b of Books.booksModel)
+                if ((b.format || "").toUpperCase() === "TXT") { hasTxt = true; break }
+            if (!hasTxt)
                 for (let f of TestEnv.sourceFiles) Importer.doImport(f)
         }
 
@@ -87,20 +89,20 @@ Item {
             tryVerify(function () { return !page.ttsBar.visible }, 3000, "停止后 TtsBar 应隐藏")
             tryVerify(function () { return page.contentView.height === hiddenH }, 3000,
                       "TtsBar 隐藏时正文应恢复占满，实际 " + page.contentView.height)
-            // C2 冒烟：控制栏"朗读"按钮是门控后的唯一启动入口——点击应启动会话（state 0→1）
-            // 且 TtsBar 随之显示。测试桩默认无引擎（play 直接 return 不置 state），先注入
-            // openai 无 key 引擎（引擎存在但不可用：speak 报错不发声，play 仍置 state=1）。
-            verify(page.readAloudButton !== undefined, "ReaderPage 应暴露朗读按钮句柄")
+            // U4：朗读入口迁移至右上角 ⋮ 菜单；菜单点击应启动会话。
+            verify(page.readerMenu !== undefined, "ReaderPage 应暴露功能菜单句柄")
             Tts.reconfigure("openai", "https://api.openai.com/v1", "", "tts-1", "nova", 1.0)
             Tts.setSentences(["测试朗读句子。"])
-            page.readAloudButton.clicked()
+            page.sheetOpen = true
+            page.menuOpen = true
+            page.menuAction("read")
             tryVerify(function () { return page.ttsBar.visible && Tts.state === 1 }, 3000,
-                      "点击控制栏朗读按钮应启动会话（TtsBar 显示、state=1）")
+                      "菜单朗读应启动会话（TtsBar 显示、state=1）")
             Tts.stop()
-            // 返回链路：顶栏返回按钮可见可点 → pop 回书架
+            // 返回链路：Sheet 唤出态顶栏返回按钮可见可点 → pop 回书架。
             verify(page.backButton !== undefined, "ReaderPage 应暴露返回按钮句柄")
             verify(page.backButton.visible && page.backButton.enabled,
-                   "返回按钮应可见可用（被 TtsBar 遮挡即回归）")
+                   "返回按钮应可见可用")
             page.backButton.clicked()
             tryVerify(function () { return stack.currentItem === shelfMarker }, 3000,
                       "点击返回后应 pop 回书架")
@@ -117,7 +119,13 @@ Item {
         // 手势注入：经 page.handleContentTap(y)（TapHandler 桥接共用同一状态机——
         // quicktest harness 无法可靠合成真实鼠标事件，与 C7 选择注入同取舍，见报告）。
         function initTestCase() {
-            if (Books.booksModel.length === 0)
+            Books.doSearch("")
+            Books.setFilter("")
+            Books.setSort(0)
+            var hasTxt = false
+            for (let b of Books.booksModel)
+                if ((b.format || "").toUpperCase() === "TXT") { hasTxt = true; break }
+            if (!hasTxt)
                 for (let f of TestEnv.sourceFiles) Importer.doImport(f)
         }
         function findTxtBook() {
@@ -234,4 +242,56 @@ Item {
             h.stack.destroy()
         }
     }
+    TestCase {
+        name: "ReaderToolbarSmoke"
+        function initTestCase() {
+            Books.doSearch("")
+            Books.setFilter("")
+            Books.setSort(0)
+            var hasTxt = false
+            for (let b of Books.booksModel)
+                if ((b.format || "").toUpperCase() === "TXT") { hasTxt = true; break }
+            if (!hasTxt)
+                for (let f of TestEnv.sourceFiles) Importer.doImport(f)
+        }
+
+        function openPage() {
+            var book = null
+            for (let b of Books.booksModel)
+                if ((b.format || "").toUpperCase() === "TXT") { book = b; break }
+            verify(book !== null, "测试书应已导入")
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: book })
+            var page = stack.currentItem
+            tryVerify(function () { return page.chapter && page.chapter.paragraphs
+                                      && page.chapter.paragraphs.length > 0 }, 3000,
+                      "打开书后应加载章节段落")
+            return { stack: stack, page: page }
+        }
+
+        function test_toolbarSignalsAndBookmarkTwoStates() {
+            var h = openPage()
+            var page = h.page
+            verify(page.topToolbar !== undefined, "ReaderPage 应暴露 Kindle 顶栏")
+            page.sheetOpen = true
+            tryVerify(function () { return page.topToolbar.visible }, 2000, "Sheet 打开时顶栏应显示")
+            compare(page.topToolbar.height, 40, "顶栏高度应为 40px")
+            verify(page.topToolbar.backBtn !== undefined && page.topToolbar.menuBtn !== undefined,
+                   "顶栏应暴露返回/菜单按钮句柄")
+            page.bookmarks = []
+            page.toggleBookmark()
+            verify(page.topToolbar.bookmarked, "点击书签后应进入已收藏态")
+            var saved = Settings.value("bookmarks/" + page.book.id)
+            verify(saved && saved.indexOf(Books.currentChapter) >= 0, "书签应持久化当前章节")
+            page.toggleBookmark()
+            verify(!page.topToolbar.bookmarked, "再次点击同一章节应取消书签")
+            saved = Settings.value("bookmarks/" + page.book.id)
+            verify(!saved || saved.indexOf(Books.currentChapter) < 0, "取消书签应更新持久化列表")
+            page.sheetOpen = false
+            tryVerify(function () { return !page.topToolbar.visible }, 2000, "Sheet 关闭时顶栏应隐藏")
+            h.stack.destroy()
+        }
+    }
+
 }

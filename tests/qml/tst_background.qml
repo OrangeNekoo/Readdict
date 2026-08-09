@@ -135,9 +135,6 @@ Item {
         }
 
         function test_05_sheetSelectsBackground() {
-            // E3：控制栏背景按钮改为上拉框直接选择——点按钮 → 弹层出现四态（无 eink）→
-            // 当前值高亮 → 选中即应用（bgMode/Settings）+ 关闭；无图时 image 项禁用
-            // 并显示设置页选图提示。E1：四态不含 eink；旧设置 mode=eink 归一 light 回写
             var dest = Settings.copyToBackgrounds(TestEnv.backgroundImage)
             Settings.setValue("background/imagePath", dest)
             Settings.setValue("background/mode", "light")
@@ -145,114 +142,69 @@ Item {
             loader.setSource("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: {} })
             var page = loader.item
             verify(page !== null, "ReaderPage 应能加载")
-            // 按钮接线：点控制栏背景按钮（children[1]=RowLayout，[6]=背景）→ 弹层打开
-            var layout = page.controlsBar.children[1]
-            layout.children[6].clicked()
-            tryVerify(function () { return page.bgPopup.visible }, 2000,
-                      "点背景按钮应打开上拉框")
-            // 四态数据：light/dark/paper/image，无 eink（E1 回归）
-            var bgModel = page.bgList.model
-            compare(bgModel.length, 4, "背景上拉框应为四态")
-            verify(bgModel[0].value === "light" && bgModel[1].value === "dark"
-                   && bgModel[2].value === "paper" && bgModel[3].value === "image",
-                   "四态应为 light/dark/paper/image，实际 " + bgModel.map(function (m) { return m.value }).join(","))
-            // 当前值高亮（light → 第 0 项）
-            tryVerify(function () {
-                const it = page.bgList.itemAtIndex(0)
-                return it !== null && it.highlighted
-            }, 2000, "当前 light 项应高亮")
-            // 选中米白 → bgMode 变化 + Settings 写 + 弹层关闭
-            tryVerify(function () { return page.bgList.itemAtIndex(2) !== null }, 2000,
-                      "背景弹层委托应就绪")
-            page.bgList.itemAtIndex(2).clicked()
-            compare(page.bgMode, "paper")
-            compare(Settings.value("background/mode"), "paper", "选中应写 background/mode")
-            tryVerify(function () { return !page.bgPopup.visible }, 2000, "选择后弹层应关闭")
-            // 再开选自定义图片（有图 → 启用）→ bgMode=image
-            layout.children[6].clicked()
-            tryVerify(function () { return page.bgPopup.visible }, 2000, "背景弹层应能再次打开")
-            tryVerify(function () { return page.bgList.itemAtIndex(3) !== null }, 2000,
-                      "自定义图片委托应就绪")
-            verify(page.bgList.itemAtIndex(3).enabled, "有图时自定义图片项应启用")
-            page.bgList.itemAtIndex(3).clicked()
-            compare(page.bgMode, "image", "选自定义图片应切到 image")
+            page.sheetTab = "theme"
+            page.sheetOpen = true
+            var panel = page.bottomSheet.contentLoader.item
+            tryVerify(function () { return panel && panel.objectName === "themeSheetPanel" }, 3000,
+                      "主题面板应加载")
+            compare(panel.builtinModel.length, 4, "主题背景应为四态")
+            panel.setBackgroundMode("paper")
+            compare(page.bgMode, "paper", "选中米白应同步页面模式")
+            compare(String(Settings.value("background/mode")), "paper", "选中应写 background/mode")
+            panel.setBackgroundMode("image")
+            compare(page.bgMode, "image", "有图时选择自定义图片应生效")
             loader.destroy()
-            // 无图：image 项禁用 + 显示设置页选图提示
+
             Settings.setValue("background/imagePath", "")
             Settings.setValue("background/mode", "light")
             loader = readerComp.createObject(root)
             loader.setSource("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: {} })
             page = loader.item
-            layout = page.controlsBar.children[1]
-            layout.children[6].clicked()
-            tryVerify(function () { return page.bgPopup.visible }, 2000, "背景弹层应打开")
-            tryVerify(function () { return page.bgList.itemAtIndex(3) !== null }, 2000,
-                      "自定义图片委托应就绪")
-            verify(!page.bgList.itemAtIndex(3).enabled, "无图时自定义图片项应禁用")
-            verify(page.bgPopup.showHint, "无图时应显示设置页选图提示")
-            loader.destroy()
-            // E1：旧值 eink → 归一 light 且回写 settings.json
+            page.sheetTab = "theme"
+            page.sheetOpen = true
+            panel = page.bottomSheet.contentLoader.item
+            tryVerify(function () { return panel && panel.themeItems.itemAt(3) !== null }, 3000,
+                      "自定义图片主题项应就绪")
+            panel.setBackgroundMode("image")
+            compare(page.bgMode, "light", "无图时选择 image 应保持浅色")
             Settings.setValue("background/mode", "eink")
+            loader.destroy()
             loader = readerComp.createObject(root)
             loader.setSource("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: {} })
             page = loader.item
             compare(page.bgMode, "light", "旧 eink 值应归一为 light")
-            compare(Settings.value("background/mode"), "light", "归一应回写 background/mode")
+            compare(String(Settings.value("background/mode")), "light", "归一应回写 background/mode")
             loader.destroy()
         }
 
         // E3：对齐/页宽上拉框——三态选择 + 当前值高亮 + 应用即关闭
         function test_06_alignAndWidthSheets() {
-            Settings.setValue("typography/align", "left")
             Settings.setValue("typography/pageWidth", "normal")
+            Settings.setValue("reading/pageMode", "scroll")
             var loader = readerComp.createObject(root)
             loader.setSource("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: {} })
             var page = loader.item
             verify(page !== null, "ReaderPage 应能加载")
-            var layout = page.controlsBar.children[1]
-            // 对齐：点按钮（children[7]）→ 三态 → 当前 left 高亮 → 选居中生效 + 关闭
-            layout.children[7].clicked()
-            tryVerify(function () { return page.alignPopup.visible }, 2000, "点对齐按钮应打开上拉框")
-            compare(page.alignList.model.length, 3, "对齐上拉框应为三态")
-            tryVerify(function () {
-                const it = page.alignList.itemAtIndex(0)
-                return it !== null && it.highlighted
-            }, 2000, "当前 left 项应高亮")
-            tryVerify(function () { return page.alignList.itemAtIndex(1) !== null }, 2000,
-                      "对齐弹层委托应就绪")
-            page.alignList.itemAtIndex(1).clicked()
-            compare(String(Settings.value("typography/align")), "center", "选居中应写 typography/align")
-            compare(page.typography.align, "center", "阅读页 typography.align 应更新")
-            tryVerify(function () { return !page.alignPopup.visible }, 2000, "选择后弹层应关闭")
-            // 再开：当前项高亮应随 typography 更新（center → 第 1 项）
-            layout.children[7].clicked()
-            tryVerify(function () { return page.alignPopup.visible }, 2000, "对齐弹层应能再次打开")
-            tryVerify(function () {
-                const it = page.alignList.itemAtIndex(1)
-                return it !== null && it.highlighted
-            }, 2000, "再次打开应高亮 center 项")
-            page.alignPopup.close()
-            // 页宽：点按钮（children[8]）→ 三态 → 选宽生效 + 关闭
-            layout.children[8].clicked()
-            tryVerify(function () { return page.widthPopup.visible }, 2000, "点页宽按钮应打开上拉框")
-            compare(page.widthList.model.length, 3, "页宽上拉框应为三态")
-            tryVerify(function () {
-                const it = page.widthList.itemAtIndex(1)
-                return it !== null && it.highlighted
-            }, 2000, "当前 normal 项应高亮")
-            tryVerify(function () { return page.widthList.itemAtIndex(2) !== null }, 2000,
-                      "页宽弹层委托应就绪")
-            page.widthList.itemAtIndex(2).clicked()
+            page.sheetTab = "layout"
+            page.sheetOpen = true
+            var panel = page.bottomSheet.contentLoader.item
+            tryVerify(function () { return panel && panel.objectName === "layoutSheetPanel" }, 3000,
+                      "布局面板应加载")
+            compare(panel.marginModel.length, 3, "页宽应为三态")
+            panel.setPageWidth("wide")
             compare(String(Settings.value("typography/pageWidth")), "wide", "选宽应写 typography/pageWidth")
-            compare(page.typography.pageWidth, "wide", "阅读页 typography.pageWidth 应更新")
-            tryVerify(function () { return !page.widthPopup.visible }, 2000, "选择后弹层应关闭")
+            compare(page.typography.pageWidth, "wide", "阅读页 pageWidth 应更新")
+            panel.setPageWidth("normal")
+            compare(page.typography.pageWidth, "normal", "切回正常页宽")
+            panel.setPageMode("paged")
+            compare(String(Settings.value("reading/pageMode")), "paged", "整页翻动应持久化")
+            compare(page.pageMode, "paged", "整页翻动应即时生效")
             loader.destroy()
-            // 恢复默认排版，避免影响后续用例（共享 Settings 单例）
-            Settings.setValue("typography/align", "left")
             Settings.setValue("typography/pageWidth", "normal")
+            Settings.setValue("reading/pageMode", "scroll")
         }
 
-        // E3：上拉框与 5s 自动隐藏计时器交互——打开暂停、关闭恢复
+        // E3：Sheet 打开暂停 hideControlsTimer，关闭后恢复。
         function test_07_sheetPausesAutoHide() {
             var loader = readerComp.createObject(root)
             loader.setSource("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: {} })
@@ -260,22 +212,20 @@ Item {
             verify(page !== null, "ReaderPage 应能加载")
             page.controlsHideDelay = 300
             page.controlsVisible = true
-            var layout = page.controlsBar.children[1]
-            layout.children[7].clicked()   // 打开对齐上拉框
-            tryVerify(function () { return page.alignPopup.visible }, 2000, "上拉框应打开")
+            page.sheetOpen = true
+            tryVerify(function () { return !page.hideTimer.running }, 2000,
+                      "Sheet 打开应暂停自动隐藏")
             wait(400)
-            verify(page.controlsVisible, "弹层打开期间控制栏不应自动隐藏")
-            page.alignPopup.close()
+            verify(page.controlsVisible, "Sheet 打开期间状态不应自动隐藏")
+            page.sheetOpen = false
+            tryVerify(function () { return page.hideTimer.running }, 2000,
+                      "Sheet 关闭后应恢复自动隐藏")
             tryVerify(function () { return !page.controlsVisible }, 3000,
-                      "弹层关闭后计时恢复，控制栏应自动隐藏")
+                      "关闭后计时到期应隐藏")
             loader.destroy()
         }
 
         function test_06_settingsPage() {
-            // 设置页背景配置（U5 迁入 SettingsBackgroundPage 子页）：KdRadioGrid
-            // 单选恢复 + 交互写 Settings + 越界钳制（不打开原生 FileDialog）。
-            // selectValue() 与单元格点击同路径（MouseArea.onClicked → selectValue）——
-            // 程序化 currentValue 赋值才不触发 selected（恢复路径，不写 Settings）。
             Settings.setValue("background/mode", "image")
             Settings.setValue("background/imagePath", "")
             Settings.setValue("background/blur", 0.6)
@@ -286,38 +236,32 @@ Item {
             verify(page !== null, "SettingsBackgroundPage 应能加载")
             verify(page.bgGrid !== undefined, "应暴露背景四态 KdRadioGrid 句柄")
             compare(page.bgGrid.currentValue, "image", "恢复后应选中 image")
-            // E1：无 eink 句柄（四态单选）
             verify(page.bgEinkRadio === undefined, "背景子页不应再有 bgEinkRadio 句柄")
             compare(page.bgBlurSlider.value, 0.6, "模糊滑条应恢复 0.6")
             compare(page.bgBrightnessSlider.value, 0.9, "亮度滑条应恢复 0.9")
-            // 选浅色（selectValue 与点击同路径）→ background/mode
             page.bgGrid.selectValue("light")
             compare(Settings.value("background/mode"), "light", "选浅色应写 background/mode")
-            // E1：旧值 eink → 归一 light（单选恰好选浅色）且回写 settings.json
             Settings.setValue("background/mode", "eink")
             loader.destroy()
             loader = bgSettingsComp.createObject(root)
             loader.width = 1100; loader.height = 720
             page = loader.item
-            compare(page.bgGrid.currentValue, "light", "旧 eink 值应归一为 light（恰好选中浅色）")
+            compare(page.bgGrid.currentValue, "light", "旧 eink 值应归一为 light")
             compare(Settings.value("background/mode"), "light", "归一应回写 background/mode")
             page.bgGrid.selectValue("image")
             compare(Settings.value("background/mode"), "image")
-            // 滑条值变更（onValueChanged 经 setBgBlur/setBgBrightness）→ 持久化 + 钳制
             page.bgBlurSlider.value = 0.8
             compare(Settings.value("background/blur"), 0.8, "模糊滑条应写 background/blur")
             page.bgBrightnessSlider.value = 1.4
             compare(Settings.value("background/brightness"), 1.4, "亮度滑条应写 background/brightness")
-            page.bgBlurSlider.value = 5.0   // 滑条自身钳到 to=1.0
+            page.bgBlurSlider.value = 5.0
             compare(page.bgBlurSlider.value, 1.0, "滑条应在 0..1 内钳制")
             page.setBgBlur(5)
             compare(Settings.value("background/blur"), 1.0, "setBgBlur 越界应钳到 1.0")
             page.setBgBrightness(0.1)
             compare(Settings.value("background/brightness"), 0.5, "setBgBrightness 越界应钳到 0.5")
-            // 无效源导入：失败提示且不改当前模式
             page.importBackgroundImage("file:///nonexistent/x.png")
             compare(Settings.value("background/mode"), "image", "导入失败不应改当前模式")
-            // 成功导入（真实图片）：复制 + 写 mode=image + imagePath，单选同步
             page.importBackgroundImage(TestEnv.backgroundImage)
             var dest = Settings.value("background/imagePath")
             verify(dest.length > 0, "导入成功应写 imagePath")

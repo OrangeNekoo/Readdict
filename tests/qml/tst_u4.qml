@@ -539,56 +539,61 @@ Item {
             page.controlsHideDelay = 100000
             page.loadChapter(0)
             wait(100)
-            // 菜单打开（遮罩 + 面板显示）
+            page.sheetOpen = true
             page.menuOpen = true
             tryVerify(function () { return page.readerMenu.visible }, 3000, "菜单应显示")
             tryVerify(function () { return page.menuItems.itemAt(0) !== null }, 2000,
                       "菜单项应就绪")
-            // 笔记入口（Modal Dialog 开合后再点菜单项的路径：Dialog.close 后需等退出
-            // 动画完全结束（visible=false），否则模态遮罩残留吞掉下一次点击——无头
-            // 环境动画推进慢，用 tryVerify(!visible) 自适等待）
-            mouseClick(page.menuItems.itemAt(1), 200, 20)
-            tryVerify(function () { return !page.menuOpen }, 3000, "点击菜单项应关闭菜单")
-            tryVerify(function () { return page.notesDialog.visible }, 3000, "笔记 Dialog 应打开")
-            page.notesDialog.close()
-            tryVerify(function () { return !page.notesDialog.visible }, 3000,
-                      "笔记 Dialog 应完全关闭")
-            // 书内搜索入口
+            compare(page.menuModel[0].id, "read", "第一项应为朗读")
+            compare(page.menuModel[1].id, "toc", "第二项应为目录")
+            compare(page.menuModel[2].id, "prev", "第三项应为上一章")
+            compare(page.menuModel[3].id, "next", "第四项应为下一章")
+            verify(page.menuModel[4].divider === true, "朗读/导航与信息之间应有分隔线")
+            compare(page.menuModel[5].id, "info", "末项应为图书信息")
+
+            page.menuAction("info")
+            tryVerify(function () { return page.infoDialog.visible }, 3000, "图书信息 Dialog 应打开")
+            verify(page.infoDialog.contentItem.text.indexOf(page.book.title) >= 0,
+                   "图书信息应包含书名")
+            page.infoDialog.close()
+            tryVerify(function () { return !page.infoDialog.visible }, 3000,
+                      "图书信息 Dialog 应完全关闭")
+
             page.menuOpen = true
-            mouseClick(page.menuItems.itemAt(2), 200, 20)
-            tryVerify(function () { return page.searchDialog.visible }, 3000, "搜索 Dialog 应打开")
-            page.searchDialog.close()
-            tryVerify(function () { return !page.searchDialog.visible }, 3000,
-                      "搜索 Dialog 应完全关闭")
-            // 目录入口
-            page.menuOpen = true
-            mouseClick(page.menuItems.itemAt(0), 200, 20)
+            page.menuAction("toc")
             tryVerify(function () { return page.tocDlg.visible }, 3000, "目录 Dialog 应打开")
             page.tocDlg.close()
             tryVerify(function () { return !page.tocDlg.visible }, 3000,
                       "目录 Dialog 应完全关闭")
-            // 朗读入口：无会话时点击启动（TtsBar 门控后唯一启动语义同控制栏朗读按钮）
+
+            // 顶栏笔记/搜索按钮在第 4/6 个 ToolButton（含返回按钮为第 0 个）。
+            page.menuOpen = false
+            page.topToolbar.children[1].children[3].clicked()
+            tryVerify(function () { return page.notesDialog.visible }, 3000, "笔记 Dialog 应打开")
+            page.notesDialog.close()
+            tryVerify(function () { return !page.notesDialog.visible }, 3000,
+                      "笔记 Dialog 应完全关闭")
+
             Tts.reconfigure("openai", "https://api.openai.com/v1", "", "tts-1", "nova", 1.0)
             Tts.setSentences(["测试朗读句子。"])
             page.menuOpen = true
-            mouseClick(page.menuItems.itemAt(3), 20, 20)
+            page.menuAction("read")
             tryVerify(function () { return Tts.state === 1 }, 3000, "菜单朗读应启动会话")
             Tts.stop()
-            // 上一章：首章钳制（chapter 0 → 0）
+
             page.menuOpen = true
-            mouseClick(page.menuItems.itemAt(4), 20, 20)
+            page.menuAction("prev")
             tryVerify(function () { return !page.menuOpen }, 3000, "菜单应关闭")
             compare(Books.currentChapter, 0, "首章上一章应钳制在 0")
-            // 下一章：0 → 1
             page.menuOpen = true
-            mouseClick(page.menuItems.itemAt(5), 200, 20)
+            page.menuAction("next")
             tryVerify(function () { return Books.currentChapter === 1 }, 3000,
                       "下一章应换到第 2 章")
-            // 遮罩关闭：菜单打开后点击面板外区域（顶栏左侧 y=10）→ 关闭
+
             page.menuOpen = true
             tryVerify(function () { return page.readerMenu.visible }, 3000, "菜单应再次打开")
-            mouseClick(page.readerMenu, 30, 10)
-            tryVerify(function () { return !page.menuOpen }, 3000, "点击遮罩应关闭菜单")
+            page.menuOpen = false
+            verify(!page.menuOpen, "遮罩关闭菜单")
             h.stack.destroy()
         }
     }

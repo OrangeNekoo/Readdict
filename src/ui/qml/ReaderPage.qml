@@ -35,13 +35,19 @@ Page {
     property var tocTitles: []
     // C7：本书全部划线（Highlights.highlightsForBook 结果，供渲染注入与笔记列表）
     property var highlights: []
+    // U4：当前书签章节列表（Settings bookmarks/<bookId>），只保存章节索引。
+    property var bookmarks: []
+    property bool currentBookmarked: false
     // B10：暴露内容视图（滚动恢复冒烟测试经此读写 contentY/contentHeight）
     property alias contentView: content
     // C7：笔记列表 Dialog（冒烟测试经此打开/关闭）
     property alias notesDialog: notesDlg
-    // U4：Kindle 底部 Sheet 工具栏——点屏幕中部/边缘弹出（Kindle 语义：Sheet 本身
-    // 含操作，无需 5s 隐藏；Sheet 打开时暂停控制栏计时）；C3 控制栏保留为快捷条
-    //（上/下章、A±、朗读），唤出整合见 handleContentTap 注释与 task-U4-report。
+    // U4：Kindle 顶栏仅在 Sheet 打开时显示。
+    property alias topToolbar: topToolbar
+    property alias backButton: topToolbar.backBtn
+    property alias menuButton: topToolbar.menuBtn
+    property alias infoDialog: infoDialog
+    // U4：Kindle 底部 Sheet 工具栏。
     property bool sheetOpen: false
     property string sheetTab: "theme"
     property bool menuOpen: false
@@ -50,45 +56,25 @@ Page {
     // 跟随应用主题深浅，覆盖显式背景选择；关闭后还原显式选择——page.bgMode 未被覆盖）
     property bool autoContinue: true
     property bool darkFollow: false
-    // U4：当前字族存储 token（FontSheet 高亮/选择；setFontFamily 同步更新，
-    // 与 controls.fontFamily 同源——Settings typography/fontFamily）
+    // U4：当前字族存储 token（FontSheet 高亮/选择）。
     property string fontFamily: ""
     // U4：有效背景模式——darkFollow 开时跟随应用主题（UITheme.isDark 实时绑定），
-    // 否则显式选择（bgMode）；驱动背景渲染/顶栏/控制栏/朗读条的文字与底色
+    // 否则显式选择（bgMode）。
     property string effectiveBg: page.darkFollow
         ? (UITheme.isDark ? "dark" : "light") : page.bgMode
     // U4：测试句柄（冒烟经此驱动 Sheet 开合/标签/面板与右上角菜单）
     property alias bottomSheet: bottomSheet
     property alias readerMenu: menuOverlay
     property alias menuItems: menuRepeater
-    // U4：控制栏自动隐藏计时器（冒烟断言 Sheet 开合对计时的暂停/恢复）
+    // U4：控制栏自动隐藏计时器（现在仅控制 Sheet/顶栏）。
     property alias hideTimer: hideControlsTimer
 
     // C8：全文搜索结果跳转目标（书架全文搜索 push 时传入；-1 表示正常打开）。
-    // 打开后 loadChapter(initialChapter) 并滚动到 initialParagraph，跳过滚动恢复。
     property int initialChapter: -1
     property int initialParagraph: -1
-    // C8：书内搜索 Dialog（冒烟测试经此打开/关闭）
     property alias searchDialog: searchDlg
-    // U4：目录 Dialog（右上角菜单/MoreSheet 入口冒烟经此断言打开）
     property alias tocDlg: tocDialog
-    // C1：顶栏返回按钮（冒烟测试经此点击验证返回导航链路，同 SettingsPage.backButton 模式）
-    property alias backButton: backBtn
-    // C1：朗读条（冒烟测试经此断言贴底布局——y=0 即 D7 锚失效回归，见 ttsBar 锚注释）
     property alias ttsBar: ttsBar
-    // C2：控制栏朗读按钮（冒烟测试经此点击启动朗读会话——TtsBar 门控后的唯一启动入口）
-    property alias readAloudButton: controls.readAloudBtn
-    // D4：控制栏字体弹层句柄（冒烟经此打开弹层/驱动字体切换）
-    property alias fontPopup: controls.fontPopup
-    property alias fontList: controls.fontList
-    // E3：控制栏本体（冒烟经此按 children 索引点按钮）+ 三个上拉框句柄
-    property alias controlsBar: controls
-    property alias bgPopup: controls.bgPopup
-    property alias bgList: controls.bgList
-    property alias alignPopup: controls.alignPopup
-    property alias alignList: controls.alignList
-    property alias widthPopup: controls.widthPopup
-    property alias widthList: controls.widthList
 
     ReaderBackground {
         anchors.fill: parent
@@ -98,84 +84,52 @@ Page {
         brightness: page.bgBrightness
     }
 
-    // B5：Kindle 化顶栏——细条极简（36px）：返回 + 书名 · 章节，去加粗装饰。
-    // 颜色随背景模式：dark 深底浅字、其余浅底深字。
-    Rectangle {
-        id: topBar
+    KdTopToolbar {
+        id: topToolbar
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: 36
-        color: page.effectiveBg === "dark" ? "#E6121212" : "#E6FFFFFF"
-        Rectangle {
-            anchors.bottom: parent.bottom
-            anchors.left: parent.left
-            anchors.right: parent.right
-            height: 1
-            color: page.effectiveBg === "dark" ? "#33FFFFFF" : "#1A000000"
+        visible: page.sheetOpen
+        z: 20
+        bookmarked: page.currentBookmarked
+        onBack: {
+            page.menuOpen = false
+            const sv = page.StackView.view
+            if (sv) sv.pop()
         }
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 8
-            anchors.rightMargin: 12
-            spacing: 6
-            ToolButton {
-                id: backBtn
-                text: qsTr("返回")
-                font.pixelSize: 13
-                onClicked: page.StackView.view.pop()
-            }
-            Label {
-                id: topBarTitle
-                Layout.fillWidth: true
-                // D7：顶栏显示 书名 · 章节——章节标题与书名相同（TXT 单章书首章即书名）
-                // 时不再重复拼接
-                text: {
-                    const t = page.book && page.book.title ? page.book.title : ""
-                    const c = page.chapter && page.chapter.title ? page.chapter.title : ""
-                    return t + (c && c !== t ? " · " + c : "")
-                }
-                elide: Text.ElideRight
-                font.pixelSize: 13
-                color: page.effectiveBg === "dark" ? "#CCCCCC" : "#555555"
-            }
-            // U4：右上角菜单入口（§5：点击弹出下拉菜单 + 遮罩）——"⋯" 三点按钮
-            ToolButton {
-                id: menuBtn
-                text: "⋯"
-                font.pixelSize: 18
-                padding: 4
-                onClicked: page.menuOpen = !page.menuOpen
-            }
+        onAa: {
+            page.menuOpen = false
+            page.sheetOpen = true
+            page.sheetTab = "theme"
+        }
+        onLayout: {
+            page.menuOpen = false
+            page.sheetOpen = true
+            page.sheetTab = "layout"
+        }
+        onNotes: notesDlg.open()
+        onBookmark: page.toggleBookmark()
+        onSearch: searchDlg.open()
+        onMenu: {
+            page.sheetOpen = true
+            page.menuOpen = !page.menuOpen
         }
     }
 
     ReaderContent {
         id: content
-        anchors.top: topBar.bottom
+        anchors.top: page.sheetOpen ? topToolbar.bottom : parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: page.ttsBarVisible ? ttsBar.top : controlsHost.top
+        anchors.bottom: page.ttsBarVisible ? ttsBar.top : parent.bottom
         chapter: page.chapter
         typography: page.typography
-        // B3：正文前景色随背景模式——dark 传 Kindle 深色系浅字（darkTextPrimary
-        // #E8E8E3）；其余（light/paper/image）视为浅底用暖白系深字（lightTextPrimary
-        // #1A1A1A，image 模式内容区域透明露出自定义图片，按浅色处理）。
-        // U1：两色均引用 UITheme Token（原 #E0E0E0/#212121）。
-        // U4：随 effectiveBg（darkFollow 开时跟随主题深浅）
         textColor: page.effectiveBg === "dark" ? UITheme.darkTextPrimary : UITheme.lightTextPrimary
-        // C7：划线上下文——bookId 供 addHighlight，highlights 供逐句渲染查表
         bookId: (page.book && page.book.id) || -1
         highlights: page.highlights
-        // L5（P0#6）：当前章 1 起索引随翻章更新（currentChapter 由 loadChapter 写），
-        // addHighlight 末参——划线按阅读顺序跨章排序
         chapterIndex: Books.currentChapter + 1
-        // E4：翻页方式（方向键分流 + 页边界吸附）
         pageMode: page.pageMode
-        // 规格 §7：滚动接近章末 → 自动加载下一章（末章由 autoNextChapter 兜底不换）
         onRequestNextChapter: page.autoNextChapter()
-        // E4：方向键 ← 翻上一章（autoPrevChapter：首章兜底不换，同 autoNextChapter 对称；
-        // paged 模式 pagePrev 在章首 contentY=0 时发本信号，见 E4 复审）
         onRequestPrevChapter: page.autoPrevChapter()
     }
 
@@ -217,12 +171,7 @@ Page {
         id: ttsBar
         anchors.left: parent.left
         anchors.right: parent.right
-        // C1 修复：D7 把 ReaderControls 包进 controlsHost 后，controls 不再是 ttsBar 的
-        // 兄弟项，锚 controls.top 被 QML 丢弃（"Cannot anchor to an item that isn't a
-        // parent or sibling"）→ ttsBar 失去纵向定位落到 y=0 压住顶栏（返回不可点）、
-        // content.bottom 解析为 0（内容高度 -36 全空白）。改锚兄弟项 controlsHost.top，
-        // 几何不变（controlsHost 恒 52px 贴底，可见性动画不影响布局）。
-        anchors.bottom: controlsHost.top
+        anchors.bottom: parent.bottom
         visible: page.ttsBarVisible
         bgMode: page.effectiveBg
         onPlayClicked: Tts.play()
@@ -231,8 +180,32 @@ Page {
         onPrevClicked: Tts.previous()
         onNextClicked: Tts.next()
         onRateChanged: (r) => { Tts.rate = r; Settings.setValue("tts/rate", r) }
-        // L7（P1#15）：音色键按引擎拆分；TtsBar 音色下拉仅系统引擎有列表（Tts.voices），写 tts/systemVoice
         onVoiceChanged: (v) => { Tts.voice = v; Settings.setValue("tts/systemVoice", v) }
+    }
+
+    // 兼容旧版阅读页显隐状态接口；不再渲染底部控制栏，计时器只控制 Sheet。
+    property bool controlsVisible: true
+    property int controlsHideDelay: 5000
+    property real chapterProgress: {
+        const id = page.book ? page.book.id : -1
+        if (id <= 0) return 0
+        const n = Books.chapterCount(id)
+        return n > 0 ? Math.min(1, (Books.currentChapter + 1) / n) : 0
+    }
+
+    Timer {
+        id: hideControlsTimer
+        interval: page.controlsHideDelay
+        repeat: false
+        running: false
+        onTriggered: {
+            page.controlsVisible = false
+            page.sheetOpen = false
+        }
+    }
+    onControlsVisibleChanged: {
+        if (page.controlsVisible && !page.sheetOpen) hideControlsTimer.start()
+        else if (!page.controlsVisible) hideControlsTimer.stop()
     }
 
     // C5：Tts 状态/错误同步到 TtsBar（playing 图标切换、错误提示 4 秒后消失）
@@ -259,108 +232,6 @@ Page {
         onTriggered: page.saveScroll()
     }
 
-    // C3：底部控制栏显隐框架——点击正文底部 1/4 唤出；5s 无操作淡出隐藏
-    // （用户反馈 BUG ⑤：D7 的 hover 恢复在隐藏后无法唤出，改点击唤出）。
-    // 鼠标移动/轻点只重置 5s 计时（不再唤出），隐藏后计时停止。
-    // opacity 动画不改变布局（内容区锚点不动，无跳动）。
-    // C2 协同决策：本框架只作用于控制栏；TtsBar 显隐仍由 ttsBarVisible
-    // （C2 门控，state!=0 显示）单独决定，唤出不带出、隐藏不影响朗读条
-    // （朗读中暂停/停止随时可达）。见 task-C3-report。
-    property bool controlsVisible: true
-    // C3：无操作自动隐藏延迟（ms）——冒烟测试注入短间隔收敛 5s 语义
-    property int controlsHideDelay: 5000
-    // C5：阅读进度（0..1，章节粒度）——驱动控制栏底部 Kindle 式进度细条与
-    // 百分比；按章节序（currentChapter+1）/总章数，末章封顶 1（与书架进度条
-    // 同语义：读完即满）。无书/无章节信息时为 0。
-    property real chapterProgress: {
-        const id = page.book ? page.book.id : -1
-        if (id <= 0) return 0
-        // L6（P1#14）：改读 Books.chapterCount 缓存（chapterTitles/loadChapter 已解析本书
-        // 时直接命中；绑定随 currentChapter 变更重算，不再每次构造完整标题列表）
-        const n = Books.chapterCount(id)
-        return n > 0 ? Math.min(1, (Books.currentChapter + 1) / n) : 0
-    }
-
-    Item {
-        id: controlsHost
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        // C5：46px 与 TtsBar 同高——控制栏更细条（Kindle 底部工具栏为细条），
-        // tst_readerpage 的几何断言（正文高 = 总高 - 36 顶栏 - 46 控制栏）同步更新
-        height: 46
-        opacity: page.controlsVisible ? 1.0 : 0.0
-        visible: page.controlsVisible || opacity > 0.01
-        Behavior on opacity {
-            NumberAnimation { duration: 200; easing.type: Easing.OutQuad }
-        }
-        ReaderControls {
-            id: controls
-            anchors.fill: parent
-            bgMode: page.effectiveBg
-            fontSize: page.typography.fontSize ?? 18
-            chapterProgress: page.chapterProgress
-            // E3：当前值注入——bgImagePath 驱动上拉框 image 项启用态，
-            // align/pageWidth 驱动高亮当前项（Settings 无变更信号，页面属性作响应层）
-            bgImagePath: page.bgImagePath
-            align: page.typography.align ?? "left"
-            pageWidth: page.typography.pageWidth ?? "normal"
-            // D4：当前字族（存储 token）——打开弹层时经 onFontMenuOpenChanged 重读刷新
-            fontFamily: String(Settings.value("typography/fontFamily") || "思源宋体 VF")
-            onPrevChapter: page.loadChapter(Books.currentChapter - 1)
-            onNextChapter: page.loadChapter(Books.currentChapter + 1)
-            onChangeFontSize: (size) => page.setFontSize(size)
-            // E3：上拉框直接选择——不再轮询循环
-            onSetBackgroundMode: (m) => page.setBackgroundMode(m)
-            onSetAlign: (a) => page.setAlign(a)
-            onSetPageWidth: (w) => page.setPageWidth(w)
-            onOpenToc: tocDialog.open()
-            onOpenNotes: notesDlg.open()
-            onOpenSearch: searchDlg.open()
-            // C2：朗读入口——无会话/已暂停时启动（播放中忽略，TtsBar 已显示）；
-            // Tts.play 对暂停态恢复、对空闲态开播，会话激活后 TtsBar 随门控显示
-            onReadAloud: { if (Tts.state !== 1) Tts.play() }
-            // D4：字体切换——写 typography/fontFamily 并立即刷新排版（见 setFontFamily）
-            onSetFontFamily: (value) => page.setFontFamily(value)
-            // D4：弹层开合联动——打开时暂停控制栏 5s 自动隐藏（弹层是独立窗口，
-            // 其内点击不会重置页面 hideControlsTimer，不暂停会弹层开着控制栏就淡出）；
-            // 关闭且控制栏显示态时恢复计时。同时重读 Settings 刷新弹层高亮
-            //（Settings 无变更信号，靠打开时重读保证刚切换过的字体仍高亮正确）。
-            onFontMenuOpenChanged: {
-                if (controls.fontMenuOpen) {
-                    hideControlsTimer.stop()
-                    controls.fontFamily = String(Settings.value("typography/fontFamily") || "思源宋体 VF")
-                } else if (page.controlsVisible) {
-                    hideControlsTimer.restart()
-                }
-            }
-            // E3：上拉框开合联动——任一打开暂停 5s 自动隐藏（同 fontMenuOpen 语义：
-            // 弹层是独立窗口，其内点击不重置页面计时器）；全部关闭且控制栏显示态时恢复
-            onSheetOpenChanged: {
-                if (controls.sheetOpen) {
-                    hideControlsTimer.stop()
-                } else if (page.controlsVisible) {
-                    hideControlsTimer.restart()
-                }
-            }
-        }
-    }
-
-    // C3：无操作 5s 自动隐藏控制栏——显示后启动、隐藏后停止（running 不绑定声明式
-    // 表达式：restart()/start() 的命令式写入会与绑定纠缠，改由 onControlsVisibleChanged
-    // 显式启停，状态单一）。计时重置入口：正文 hover 移动（下方 MouseArea）、
-    // 任意轻点（下方 TapHandler）。
-    Timer {
-        id: hideControlsTimer
-        interval: page.controlsHideDelay
-        repeat: false
-        running: false
-        onTriggered: page.controlsVisible = false
-    }
-    onControlsVisibleChanged: {
-        if (page.controlsVisible) hideControlsTimer.start()
-        else hideControlsTimer.stop()
-    }
 
     // C7：划线增删改（addHighlight/removeHighlight/updateNote）后从 Highlights 重载，
     // 驱动 content.highlights → 逐句重渲染
@@ -378,6 +249,11 @@ Page {
     Connections {
         target: Sync
         function onDataApplied() { page.reloadHighlights() }
+    }
+
+    Connections {
+        target: Books
+        function onCurrentChapterChanged() { page.syncCurrentBookmark() }
     }
 
     Dialog {
@@ -487,6 +363,24 @@ Page {
             ScrollBar.vertical: ScrollBar {}
         }
         onOpened: page.reloadHighlights()
+    }
+
+    Dialog {
+        id: infoDialog
+        title: qsTr("图书信息")
+        modal: true
+        standardButtons: Dialog.Ok
+        width: 380
+        contentItem: Label {
+            text: qsTr("书名：%1\n作者：%2\n出版社：%3\n格式：%4\n进度：%5%")
+                .arg(page.book && page.book.title ? page.book.title : "")
+                .arg(page.book && page.book.author ? page.book.author : "")
+                .arg(page.book && page.book.publisher ? page.book.publisher : "")
+                .arg(page.book && page.book.format ? page.book.format : "")
+                .arg(Math.round((page.book && page.book.progress ? page.book.progress : 0) * 100))
+            wrapMode: Text.Wrap
+            color: UITheme.textPrimary
+        }
     }
 
     // C7：编辑笔记 Dialog
@@ -610,6 +504,23 @@ Page {
             align: Settings.value("typography/align") || "left",
             pageWidth: Settings.value("typography/pageWidth") || "normal"
         }
+    }
+
+    function syncCurrentBookmark() {
+        const ch = Number(Books.currentChapter)
+        page.currentBookmarked = page.bookmarks.indexOf(ch) >= 0
+    }
+
+    function toggleBookmark() {
+        if (!page.book || !page.book.id) return
+        const ch = Number(Books.currentChapter)
+        var list = Array.isArray(page.bookmarks) ? page.bookmarks.slice() : []
+        const i = list.indexOf(ch)
+        if (i >= 0) list.splice(i, 1)
+        else list.push(ch)
+        page.bookmarks = list
+        Settings.setValue("bookmarks/" + page.book.id, list)
+        page.syncCurrentBookmark()
     }
 
     function loadChapter(i) {
@@ -864,10 +775,10 @@ Page {
     // 已重置计时，按钮操作在 5s 内保持可见。
     // acceptedButtons: Qt.NoButton 不拦截任何点击（正文选择/按钮点击照常透传）。
     MouseArea {
-        anchors.top: topBar.bottom
+        anchors.top: page.sheetOpen ? topToolbar.bottom : parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: page.ttsBarVisible ? ttsBar.top : controlsHost.top
+        anchors.bottom: page.ttsBarVisible ? ttsBar.top : parent.bottom
         acceptedButtons: Qt.NoButton
         hoverEnabled: true
         onPositionChanged: {
@@ -891,21 +802,17 @@ Page {
     // 注意：Timer.restart() 对停止态的计时器会重新启动（Qt 语义），隐藏态禁止
     // 调用——否则违反"隐藏后计时停止"；重置只发生在显示态。
     function handleContentTap(y) {
-        // E4：点击正文重新聚焦（弹层/控制栏按钮抢焦点后，方向键翻页随点击恢复）
         content.forceActiveFocus()
         if (page.sheetOpen) { page.sheetOpen = false; return }
         if (page.menuOpen) { page.menuOpen = false; return }
+        // 保留隐藏态底部唤出语义；其余位置切换 Kindle Sheet。
         const summonBottom = content.y + content.height * 0.75
         if (!page.controlsVisible && y >= summonBottom) {
-            // 隐藏态：底部轻点唤出快捷控制栏（计时经 onControlsVisibleChanged 启动）
             page.controlsVisible = true
-        } else {
-            // 中部/边缘轻点（含显示态任意轻点）→ 弹 Sheet（onSheetOpenChanged 暂停计时）
-            page.sheetOpen = true
+            return
         }
+        page.sheetOpen = true
     }
-    // U4：Sheet 开合联动——打开暂停控制栏 5s 自动隐藏（Sheet 是页面内覆盖层，
-    // 其内点击不重置页面计时器）；关闭且控制栏显示态时恢复（同 E3 弹层语义）
     onSheetOpenChanged: {
         if (page.sheetOpen) hideControlsTimer.stop()
         else if (page.controlsVisible) hideControlsTimer.restart()
@@ -917,34 +824,36 @@ Page {
     // ---- U4：Kindle 底部 Sheet 工具栏（点屏幕中部弹出）----
     // 四个标签面板以 ReaderPage 内联 Component 注入（创建上下文为 ReaderPage，
     // 面板可直接引用 page/Settings；经 KdBottomSheet 的 Loader 按 currentId 切换）。
-    // 面板只渲染与上报，业务读写集中在 ReaderPage（与 ReaderControls 同模式）。
+    // 面板只渲染与上报，业务读写集中在 ReaderPage。
 
     // 右上角下拉菜单数据（§5：KdListItem 风格列表）——功能入口与 MoreSheet 一致
     property var menuModel: [
-        { icon: "toc", text: qsTr("目录"), act: "openToc" },
-        { icon: "notes", text: qsTr("笔记"), act: "openNotes" },
-        { icon: "search", text: qsTr("书内搜索"), act: "openSearch" },
-        { icon: "read", text: qsTr("朗读"), act: "readAloud" },
-        { icon: "prev", text: qsTr("上一章"), act: "prevChapter" },
-        { icon: "next", text: qsTr("下一章"), act: "nextChapter" }
+        { id: "read", icon: "read", text: qsTr("朗读"), act: "read" },
+        { id: "toc", icon: "toc", text: qsTr("目录"), act: "toc" },
+        { id: "prev", icon: "prev", text: qsTr("上一章"), act: "prev" },
+        { id: "next", icon: "next", text: qsTr("下一章"), act: "next" },
+        { divider: true },
+        { id: "info", icon: "info", text: qsTr("图书信息"), act: "info" }
     ]
 
-    // 菜单项分发（关闭菜单后执行对应动作——与 MoreSheet 入口同一组功能）
+    function startReadAloud() {
+        if (Tts.state !== 1) Tts.play()
+    }
+
     function menuAction(act) {
         page.menuOpen = false
         switch (act) {
-        case "openToc": tocDialog.open(); break
-        case "openNotes": notesDlg.open(); break
-        case "openSearch": searchDlg.open(); break
-        case "readAloud": if (Tts.state !== 1) Tts.play(); break
-        case "prevChapter": page.loadChapter(Books.currentChapter - 1); break
-        case "nextChapter": page.loadChapter(Books.currentChapter + 1); break
+        case "read": page.startReadAloud(); break
+        case "toc": tocDialog.open(); break
+        case "prev": page.loadChapter(Books.currentChapter - 1); break
+        case "next": page.loadChapter(Books.currentChapter + 1); break
+        case "info": infoDialog.open(); break
         }
     }
-
-    // 右上角下拉菜单（§5：右上弹出、60-65% 宽、实色面板 + 全页遮罩，点击遮罩关闭）
     Item {
         id: menuOverlay
+        z: 30
+
         anchors.fill: parent
         visible: page.menuOpen
         // 遮罩（rgba(0,0,0,0.3)，淡入）
@@ -978,12 +887,14 @@ Page {
                     Rectangle {
                         required property var modelData
                         width: parent.width
-                        height: 48
-                        color: menuRowMouse.containsMouse ? "#0A000000" : "transparent"
+                        height: modelData.divider ? 1 : 48
+                        color: modelData.divider ? UITheme.divider
+                                                 : (menuRowMouse.containsMouse ? "#0A000000" : "transparent")
                         MouseArea {
                             id: menuRowMouse
                             anchors.fill: parent
-                            hoverEnabled: true
+                            enabled: !modelData.divider
+                            hoverEnabled: !modelData.divider
                             onClicked: page.menuAction(modelData.act)
                         }
                         RowLayout {
@@ -991,13 +902,14 @@ Page {
                             anchors.leftMargin: 16
                             anchors.rightMargin: 16
                             spacing: 14
+                            visible: !modelData.divider
                             KdIcons {
-                                name: modelData.icon
+                                name: modelData.icon || "dot"
                                 size: 22
                                 color: UITheme.textPrimary
                             }
                             Label {
-                                text: modelData.text
+                                text: modelData.text || ""
                                 Layout.fillWidth: true
                                 elide: Text.ElideRight
                                 font.pixelSize: 15
@@ -1057,7 +969,7 @@ Page {
             onRequestToc: tocDialog.open()
             onRequestNotes: notesDlg.open()
             onRequestSearch: searchDlg.open()
-            onRequestReadAloud: { if (Tts.state !== 1) Tts.play() }
+            onRequestReadAloud: page.startReadAloud()
             onRequestPrevChapter: page.loadChapter(Books.currentChapter - 1)
             onRequestNextChapter: page.loadChapter(Books.currentChapter + 1)
         }
@@ -1090,18 +1002,17 @@ Page {
     }
 
     Component.onCompleted: {
-        hideControlsTimer.start()   // C3：初始可见 → 5s 无操作自动隐藏
+        hideControlsTimer.start()
         page.typography = page.typographyFromSettings()
         page.backgroundFromSettings()
-        // E4：翻页方式——reading/pageMode 白名单归一（非法值回退 scroll）
         const pm = Settings.value("reading/pageMode")
         page.pageMode = (pm === "paged") ? "paged" : "scroll"
-        // U4：MoreSheet 开关与当前字族初值（reading/autoContinue 默认开、
-        // darkFollow 默认关；fontFamily 供 FontSheet 高亮/选择）
         page.autoContinue = Settings.value("reading/autoContinue") !== false
         page.darkFollow = Settings.value("reading/darkFollow") === true
         page.fontFamily = String(Settings.value("typography/fontFamily") || "思源宋体 VF")
-        // 恢复：定位到保存的章节（progress/<bookId>），滚动偏移交给 ReaderContent
+        const savedBookmarks = Settings.value("bookmarks/" + (page.book ? page.book.id : ""))
+        page.bookmarks = Array.isArray(savedBookmarks) ? savedBookmarks.slice() : []
+        page.syncCurrentBookmark()
         // 在内容高度就绪后设置（progress/scroll_<bookId>）。
         // C8：全文搜索跳转打开时（initialChapter/initialParagraph >= 0）改用目标章节，
         // 并跳过滚动恢复（恢复会覆盖跳转位置）；段落滚动由 paraJumpTimer 完成。

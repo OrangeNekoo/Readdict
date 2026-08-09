@@ -5,8 +5,7 @@ import Readdict.Backend
 import Readdict.UI 1.0
 
 // U4：Sheet「主题」标签面板（分析报告 §4：2×2 主题预设网格、单选 ○● 勾选标记、
-// 选中即应用）。本组件只渲染与上报——读写由 ReaderPage 处理（与 ReaderControls
-// 同模式：组件无状态，current 值由宿主注入）。
+// 只渲染与上报。读写由 ReaderPage 处理，组件无状态，current 值由宿主注入。
 // 四态数据与 ReaderPage bgMode / Settings background/mode 一致（浅/深/米白/自定义
 // 图片——E1 后无 eink）；"保存当前设置"描边按钮在 Sheet 容器底部操作区（§4）。
 // L10（P1#10）：主题预设持久化——

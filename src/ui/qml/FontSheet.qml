@@ -5,8 +5,7 @@ import Readdict.UI 1.0
 
 // U4：Sheet「字体」标签面板——4 字体族单选（映射 D4 字体弹层同源数据：
 // 思源宋体/黑体 + 已加载的 HW/得意黑）+ 字号分段滑块。
-// 数据与 ReaderControls.fontListModel / Books.resolveFontFamily 映射链一致
-//（value 为存储 token，text 可翻译；译文不改变 token）。字号分段 [14,16,18,20,22,24]。
+// 数据与阅读页字体选择同源（value 为存储 token，text 可翻译；译文不改变 token）。字号分段 [14,16,18,20,22,24]。
 // 只渲染与上报：current 值由宿主注入，变更发信号由宿主写 Settings 并刷新排版。
 // 接口：fontFamily（存储 token）、fontSize；信号 setFontFamily/setFontSize。
 // 测试句柄：fontItems/sizeItems（两个 Repeater，供点击驱动）。

@@ -5,7 +5,7 @@ import Readdict.UI 1.0
 
 // U4：Sheet「更多」标签面板——Toggle 开关项（自动续章 reading/autoContinue、
 // 深色跟随 reading/darkFollow）+ 功能菜单项（目录/笔记/书内搜索/朗读/上一章/
-// 下一章——现有 ReaderControls 入口迁入 Sheet，功能不丢）。
+// 下一章——现有阅读页入口迁入 Sheet，功能不丢）。
 // 只渲染与上报：开关当前值由宿主注入，变更发信号由宿主写 Settings（自动续章
 // 门控 ReaderPage.autoNextChapter，深色跟随门控 effectiveBg 派生）；菜单项发
 // 信号由宿主打开对应 Dialog / 换章 / 启动朗读。

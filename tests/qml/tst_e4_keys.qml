@@ -328,9 +328,9 @@ Item {
             while (guard++ < 10) {
                 cv.handleKey(Qt.Key_Right, Qt.NoModifier)
                 wait(450)
-                if (cv.contentY >= maxY - 2) break
+                if (cv.contentY >= maxY - 0.5) break
             }
-            verify(cv.contentY >= maxY - 2,
+            verify(cv.contentY >= maxY - 0.5,
                    "pageNext 应推进到章末最后一页（contentY=" + cv.contentY + "，maxY=" + maxY + "）")
             // 章末按住 →（autoRepeat）不应翻章；正常按下才翻
             cv.handleKey(Qt.Key_Right, Qt.NoModifier, true)

@@ -48,7 +48,7 @@ Rectangle {
             text: "⋮"
             font.pixelSize: 18
             // U1 修正：contentItem.color 非有效属性（Material 下报错致组件加载失败）；
-            // 按仓库既有惯例（KdBottomSheet/TtsBar/ReaderControls）用 contentItem 赋值
+            // 按仓库既有惯例用 contentItem 赋值
             contentItem: Text {
                 text: parent.text
                 color: UITheme.textPrimary
