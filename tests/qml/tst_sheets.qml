@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtTest
+import Readdict.UI 1.0
 
 // U5：阅读页布局/更多 Sheet 的真实组件冒烟。组件经 Loader + qrc 加载，
 // 驱动 KdIconCard、Sheet Repeater 与 requestToc 信号，避免仅检查源码结构。
@@ -35,6 +36,14 @@ Item {
             card.selected = true
             compare(card.lines, 5, "图标卡应保留 lines")
             compare(card.glyph, "wide", "图标卡应保留 glyph")
+            compare(card.lineItems.count, 5, "横线 Repeater 数量应跟随 lines")
+            compare(String(card.border.color), String(UITheme.borderActive),
+                    "选中卡片应使用活跃边框 Token")
+            compare(card.border.width, 2.5, "选中卡片边框应加粗")
+            card.glyph = "v"
+            card.dense = true
+            compare(card.verticalLineItems.count, 5, "竖线 Repeater 数量应跟随 lines")
+            verify(card.verticalLineItems.itemAt(0).visible, "dense/vertical 卡应有可见竖线")
             var clicked = false
             card.clicked.connect(function () { clicked = true })
             mouseClick(card, card.width / 2, card.height / 2)
@@ -56,6 +65,16 @@ Item {
                 return sheet.modeItems.count === 2 && sheet.marginItems.count === 3
                        && sheet.lineItems.count === 3
             }, 3000, "三组图标卡应完成实例化")
+            var selectedCard = sheet.modeItems.itemAt(0)
+            compare(String(selectedCard.border.color), String(UITheme.borderActive),
+                    "默认方向卡应使用活跃边框 Token")
+            compare(selectedCard.border.width, 2.5, "选中方向卡边框应为 2.5px")
+            var first = sheet.modeItems.itemAt(0)
+            var last = sheet.modeItems.itemAt(1)
+            var left = first.mapToItem(sheet, 0, 0).x
+            var right = last.mapToItem(sheet, last.width, 0).x
+            verify(Math.abs((left + right) / 2 - sheet.width / 2) < 1,
+                   "方向图标卡组应在 Sheet 中水平居中")
             compare(sheet.modeItems.itemAt(0).glyph, "v", "连续滚动应使用竖排 glyph")
             compare(sheet.modeItems.itemAt(1).glyph, "h", "整页翻动应使用横排 glyph")
             compare(sheet.marginItems.itemAt(0).glyph, "narrow", "窄页边距 glyph")

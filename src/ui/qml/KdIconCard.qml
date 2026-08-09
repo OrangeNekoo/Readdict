@@ -16,8 +16,9 @@ Rectangle {
     property bool selected: false
     property int lines: 4
     property bool dense: false
-    property string glyph: "h" // h 横线；v 竖线；narrow/normal/wide 宽度；tight/loose 间距
     property alias lineItems: lineRepeater
+    property alias verticalLineItems: verticalRepeater
+    property string glyph: "h" // h 横线；v 竖线；narrow/normal/wide 宽度；tight/loose 间距
     signal clicked()
 
     MouseArea {
@@ -53,6 +54,7 @@ Rectangle {
         spacing: card.dense ? 2 : 4
 
         Repeater {
+            id: verticalRepeater
             model: card.lines
             Rectangle {
                 width: 2

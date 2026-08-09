@@ -56,18 +56,22 @@ Item {
             font.pixelSize: 13
             color: UITheme.textSecondary
         }
-        Row {
+        Item {
             Layout.fillWidth: true
-            Layout.alignment: Qt.AlignHCenter
-            spacing: 10
-            Repeater {
-                id: modeRepeater
-                model: layoutSheet.modeModel
-                KdIconCard {
-                    required property var modelData
-                    selected: modelData.value === layoutSheet.pageMode
-                    glyph: modelData.glyph
-                    onClicked: layoutSheet.setPageMode(modelData.value)
+            Layout.preferredHeight: 52
+            Row {
+                id: modeRow
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: 10
+                Repeater {
+                    id: modeRepeater
+                    model: layoutSheet.modeModel
+                    KdIconCard {
+                        required property var modelData
+                        selected: modelData.value === layoutSheet.pageMode
+                        glyph: modelData.glyph
+                        onClicked: layoutSheet.setPageMode(modelData.value)
+                    }
                 }
             }
         }
@@ -77,18 +81,22 @@ Item {
             font.pixelSize: 13
             color: UITheme.textSecondary
         }
-        Row {
+        Item {
             Layout.fillWidth: true
-            Layout.alignment: Qt.AlignHCenter
-            spacing: 10
-            Repeater {
-                id: marginRepeater
-                model: layoutSheet.marginModel
-                KdIconCard {
-                    required property var modelData
-                    selected: modelData.value === layoutSheet.pageWidth
-                    glyph: modelData.glyph
-                    onClicked: layoutSheet.setPageWidth(modelData.value)
+            Layout.preferredHeight: 52
+            Row {
+                id: marginRow
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: 10
+                Repeater {
+                    id: marginRepeater
+                    model: layoutSheet.marginModel
+                    KdIconCard {
+                        required property var modelData
+                        selected: modelData.value === layoutSheet.pageWidth
+                        glyph: modelData.glyph
+                        onClicked: layoutSheet.setPageWidth(modelData.value)
+                    }
                 }
             }
         }
@@ -98,18 +106,22 @@ Item {
             font.pixelSize: 13
             color: UITheme.textSecondary
         }
-        Row {
+        Item {
             Layout.fillWidth: true
-            Layout.alignment: Qt.AlignHCenter
-            spacing: 10
-            Repeater {
-                id: lineRepeater
-                model: layoutSheet.lineModel
-                KdIconCard {
-                    required property var modelData
-                    selected: modelData.value === layoutSheet.lineHeight
-                    glyph: modelData.glyph
-                    onClicked: layoutSheet.setLineHeight(modelData.value)
+            Layout.preferredHeight: 52
+            Row {
+                id: lineRow
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: 10
+                Repeater {
+                    id: lineRepeater
+                    model: layoutSheet.lineModel
+                    KdIconCard {
+                        required property var modelData
+                        selected: modelData.value === layoutSheet.lineHeight
+                        glyph: modelData.glyph
+                        onClicked: layoutSheet.setLineHeight(modelData.value)
+                    }
                 }
             }
         }
@@ -123,3 +135,4 @@ Item {
         }
     }
 }
+

@@ -481,6 +481,16 @@ Item {
                     && Number(page.typography.lineHeight) === 1.6
             }, 3000, "选标准行距图标卡应写 typography/lineHeight")
             verify(panel.alignSlider !== undefined, "布局面板应保留对齐分段滑块")
+            panel.alignSlider.selectValue("center")
+            tryVerify(function () {
+                return String(Settings.value("typography/align")) === "center"
+                    && page.typography.align === "center"
+            }, 3000, "对齐滑块选择居中应持久化并即时生效")
+            panel.alignSlider.selectValue("left")
+            tryVerify(function () {
+                return String(Settings.value("typography/align")) === "left"
+                    && page.typography.align === "left"
+            }, 3000, "对齐滑块还原左对齐应持久化")
             // 还原
             mouseClick(panel.modeItems.itemAt(0), 15, 15)
             mouseClick(panel.marginItems.itemAt(1), 15, 15)
