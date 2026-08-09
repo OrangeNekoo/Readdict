@@ -231,8 +231,8 @@ qt_add_resources(tst_qml "qml_ui"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/qml"
     FILES
         ../src/ui/qml/Main.qml
+        ../src/ui/qml/HomePage.qml
         ../src/ui/qml/KdTabBar.qml
-        ../src/ui/qml/KdBottomNav.qml
         ../src/ui/qml/KdIcons.qml
         ../src/ui/qml/KdListItem.qml
         ../src/ui/qml/KdRadioGrid.qml

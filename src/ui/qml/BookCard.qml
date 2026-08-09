@@ -7,6 +7,7 @@ import Readdict.UI 1.0
 Item {
     id: card
     property var book: ({})
+    property bool compact: false
     // 测试/外部句柄（QML 冒烟经此驱动删除对话框交互，对齐 ShelfPage/SettingsPage 模式）
     property alias deleteDialog: deleteDialog
     property alias deleteFilesCheck: deleteFilesCheck
@@ -30,8 +31,8 @@ Item {
     // U3：Kindle 封面网格——封面 3:4（宽 -12 = 168，高 224）、无圆角、轻投影
     //（UITheme.shadowBook rgba(0,0,0,0.08)）、无卡片边框；标题下置 15px（fsListItem）、
     // 作者小字灰（textSecondary）、进度细条。卡片 180×296（网格 cell 190×306，见 ShelfPage）。
-    width: 180
-    height: 296
+    width: compact ? 96 : 180
+    height: compact ? 168 : 296
     // C5：作者行句柄（冒烟断言有作者显示/无作者隐藏）
     property alias authorLabel: authorLabel
 
@@ -73,7 +74,7 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.topMargin: 8
             width: parent.width - 12
-            height: 224 // 3:4（168 × 224）
+            height: compact ? 128 : 224 // 3:4；compact 适配主页横排封面
             radius: 0
             clip: true
             Image {
@@ -128,7 +129,7 @@ Item {
             anchors.rightMargin: 8
             anchors.topMargin: 2
             text: card.book.author ?? ""
-            visible: (card.book.author ?? "").length > 0
+            visible: !card.compact && (card.book.author ?? "").length > 0
             elide: Text.ElideRight
             font.pixelSize: 12
             color: UITheme.textSecondary
@@ -138,6 +139,7 @@ Item {
         // U1：填充色改 Kindle 选中 Token（light #1A1A1A / dark #E8E8E3）；
         // U3：轨道色改 divider Token（原硬编码 #33FFFFFF/#22000000 移除）
         Rectangle {
+            visible: !card.compact
             id: progressLine
             anchors.bottom: parent.bottom
             anchors.left: parent.left

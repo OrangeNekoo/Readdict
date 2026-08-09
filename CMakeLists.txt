@@ -73,8 +73,8 @@ qt_add_qml_module(Readdict
     OUTPUT_DIRECTORY ReaddictQml
     QML_FILES
         src/ui/qml/Main.qml
+        src/ui/qml/HomePage.qml
         src/ui/qml/KdTabBar.qml
-        src/ui/qml/KdBottomNav.qml
         src/ui/qml/KdIcons.qml
         src/ui/qml/KdListItem.qml
         src/ui/qml/KdRadioGrid.qml
