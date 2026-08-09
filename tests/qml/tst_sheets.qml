@@ -41,14 +41,51 @@ Item {
                     "选中卡片应使用活跃边框 Token")
             compare(card.border.width, 2.5, "选中卡片边框应加粗")
             card.glyph = "v"
-            card.dense = true
+            card.dense = false
             compare(card.verticalLineItems.count, 5, "竖线 Repeater 数量应跟随 lines")
-            verify(card.verticalLineItems.itemAt(0).visible, "dense/vertical 卡应有可见竖线")
+            verify(card.verticalLines.visible, "glyph=v 且非 dense 时 verticalLines 应可见")
+            verify(!card.horizontalLines.visible, "glyph=v 且非 dense 时 horizontalLines 应隐藏")
             var clicked = false
             card.clicked.connect(function () { clicked = true })
             mouseClick(card, card.width / 2, card.height / 2)
             verify(clicked, "点击图标卡应发 clicked")
             loader.destroy()
+        }
+
+        function test_denseAndGlyphVisibilityBranches() {
+            // 分支一：glyph='v' + dense=false → verticalLines 可见、horizontalLines 隐藏。
+            var vLoader = cardComp.createObject(root)
+            var vCard = vLoader.item
+            verify(vCard !== null, "竖排卡应能加载")
+            vCard.glyph = "v"
+            vCard.dense = false
+            compare(vCard.lines, 4, "竖排卡默认 lines 应为 4")
+            verify(vCard.verticalLines.visible, "glyph=v 且 dense=false 时 verticalLines 应可见")
+            verify(!vCard.horizontalLines.visible, "glyph=v 且 dense=false 时 horizontalLines 应隐藏")
+            compare(vCard.verticalLineItems.count, 4, "竖排卡竖线数量应跟随 lines")
+            compare(vCard.lineItems.count, 4, "竖排卡横线 Repeater 数量应保留")
+
+            // 分支二：glyph='h' + dense=true → verticalLines 可见、horizontalLines 隐藏。
+            var hLoader = cardComp.createObject(root)
+            var hCard = hLoader.item
+            verify(hCard !== null, "密排卡应能加载")
+            hCard.glyph = "h"
+            hCard.dense = true
+            compare(hCard.lines, 4, "密排卡默认 lines 应为 4")
+            verify(hCard.verticalLines.visible, "glyph=h 且 dense=true 时 verticalLines 应可见")
+            verify(!hCard.horizontalLines.visible, "glyph=h 且 dense=true 时 horizontalLines 应隐藏")
+            compare(hCard.verticalLineItems.count, 4, "密排卡竖线数量应跟随 lines")
+            compare(hCard.lineItems.count, 4, "密排卡横线 Repeater 数量应保留")
+
+            // 对照：默认 h + 非 dense → horizontalLines 可见、verticalLines 隐藏，证明分支未被掩盖。
+            var dLoader = cardComp.createObject(root)
+            var dCard = dLoader.item
+            verify(dCard.horizontalLines.visible, "默认卡 horizontalLines 应可见")
+            verify(!dCard.verticalLines.visible, "默认卡 verticalLines 应隐藏")
+
+            vLoader.destroy()
+            hLoader.destroy()
+            dLoader.destroy()
         }
     }
 

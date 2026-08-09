@@ -18,6 +18,8 @@ Rectangle {
     property bool dense: false
     property alias lineItems: lineRepeater
     property alias verticalLineItems: verticalRepeater
+    property alias horizontalLines: hLines
+    property alias verticalLines: vLines
     property string glyph: "h" // h 横线；v 竖线；narrow/normal/wide 宽度；tight/loose 间距
     signal clicked()
 
@@ -28,7 +30,7 @@ Rectangle {
 
     // 横线示意：页边距和行间距卡片通过 glyph 控制线宽/线距。
     Column {
-        id: horizontalLines
+        id: hLines
         visible: !card.dense && card.glyph !== "v"
         anchors.centerIn: parent
         spacing: card.glyph === "loose" ? 6 : card.glyph === "tight" ? 2 : 4
@@ -48,7 +50,7 @@ Rectangle {
 
     // 竖线示意：连续滚动/竖排 glyph，dense 也可供调用方显式启用。
     Row {
-        id: verticalLines
+        id: vLines
         visible: card.dense || card.glyph === "v"
         anchors.centerIn: parent
         spacing: card.dense ? 2 : 4
