@@ -949,16 +949,18 @@ Page {
             onSetFontSize: (s) => page.setFontSize(s)
         }
     }
-    // 布局标签面板：方向/页边距/行间距（current 经 page.pageMode/typography 注入）
+    // 布局标签面板：方向/页边距/行间距/对齐（current 经 page.pageMode/typography 注入）
     Component {
         id: layoutPanelComp
         LayoutSheet {
             pageMode: page.pageMode
             pageWidth: page.typography.pageWidth ?? "normal"
             lineHeight: page.typography.lineHeight ?? 1.6
+            align: page.typography.align ?? "left"
             onSetPageMode: (m) => page.setPageMode(m)
             onSetPageWidth: (w) => page.setPageWidth(w)
             onSetLineHeight: (lh) => page.setLineHeight(lh)
+            onSetAlign: (a) => page.setAlign(a)
         }
     }
     // 更多标签面板：开关 + 功能菜单入口
@@ -970,11 +972,6 @@ Page {
             onSetAutoContinue: (on) => page.setAutoContinue(on)
             onSetDarkFollow: (on) => page.setDarkFollow(on)
             onRequestToc: tocDialog.open()
-            onRequestNotes: notesDlg.open()
-            onRequestSearch: searchDlg.open()
-            onRequestReadAloud: page.startReadAloud()
-            onRequestPrevChapter: page.loadChapter(Books.currentChapter - 1)
-            onRequestNextChapter: page.loadChapter(Books.currentChapter + 1)
         }
     }
 

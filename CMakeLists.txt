@@ -79,6 +79,7 @@ qt_add_qml_module(Readdict
         src/ui/qml/KdListItem.qml
         src/ui/qml/KdRadioGrid.qml
         src/ui/qml/KdSegmentedSlider.qml
+        src/ui/qml/KdIconCard.qml
         src/ui/qml/KdToggle.qml
         src/ui/qml/KdBottomSheet.qml
         src/ui/qml/ThemeManagePage.qml

@@ -447,26 +447,40 @@ Item {
             var panel = page.bottomSheet.contentLoader.item
             tryVerify(function () { return panel.objectName === "layoutSheetPanel" }, 3000,
                       "内容应为布局面板")
-            // 方向：整页翻动（index 1）
-            tryVerify(function () { return panel.modeItems.itemAt(1) !== null }, 2000,
-                      "方向分段应就绪")
-            mouseClick(panel.modeItems.itemAt(1), 15, 15)
+            // 方向：整页翻动（图标卡 index 1）
+            tryVerify(function () {
+                var card = panel.modeItems.itemAt(1)
+                return card !== null && card.width === 72 && card.height === 52
+                       && card.glyph === "h"
+            }, 2000, "方向图标卡应就绪")
+            mouseClick(panel.modeItems.itemAt(1), 36, 26)
             tryVerify(function () {
                 return String(Settings.value("reading/pageMode")) === "paged"
                     && page.pageMode === "paged"
-            }, 3000, "选整页翻动应写 reading/pageMode=paged 并即时生效")
-            // 页边距：宽（index 2）
-            mouseClick(panel.marginItems.itemAt(2), 15, 15)
+            }, 3000, "选整页翻动图标卡应写 reading/pageMode=paged 并即时生效")
+            // 页边距：宽（图标卡 index 2）
+            tryVerify(function () {
+                var card = panel.marginItems.itemAt(2)
+                return card !== null && card.width === 72 && card.height === 52
+                       && card.glyph === "wide"
+            }, 2000, "页边距图标卡应就绪")
+            mouseClick(panel.marginItems.itemAt(2), 36, 26)
             tryVerify(function () {
                 return String(Settings.value("typography/pageWidth")) === "wide"
                     && page.typography.pageWidth === "wide"
-            }, 3000, "选页边距宽应写 typography/pageWidth")
-            // 行间距：标准（index 1）
-            mouseClick(panel.lineItems.itemAt(1), 15, 15)
+            }, 3000, "选页边距宽图标卡应写 typography/pageWidth")
+            // 行间距：标准（图标卡 index 1）
+            tryVerify(function () {
+                var card = panel.lineItems.itemAt(1)
+                return card !== null && card.width === 72 && card.height === 52
+                       && card.glyph === "normal"
+            }, 2000, "行间距图标卡应就绪")
+            mouseClick(panel.lineItems.itemAt(1), 36, 26)
             tryVerify(function () {
                 return Number(Settings.value("typography/lineHeight")) === 1.6
                     && Number(page.typography.lineHeight) === 1.6
-            }, 3000, "选标准行距应写 typography/lineHeight")
+            }, 3000, "选标准行距图标卡应写 typography/lineHeight")
+            verify(panel.alignSlider !== undefined, "布局面板应保留对齐分段滑块")
             // 还原
             mouseClick(panel.modeItems.itemAt(0), 15, 15)
             mouseClick(panel.marginItems.itemAt(1), 15, 15)
@@ -490,6 +504,17 @@ Item {
             var panel = page.bottomSheet.contentLoader.item
             tryVerify(function () { return panel.objectName === "moreSheetPanel" }, 3000,
                       "内容应为更多面板")
+            verify(panel.progressRow !== undefined, "更多面板应有阅读进度行")
+            verify(panel.menuModel === undefined && panel.menuItems === undefined,
+                   "更多面板不应再渲染旧功能菜单")
+            var tocBefore = page.tocDlg.visible
+            mouseClick(panel.progressRow, panel.progressRow.width / 2,
+                       panel.progressRow.height / 2)
+            tryVerify(function () { return page.tocDlg.visible !== tocBefore }, 3000,
+                      "点击阅读进度行应经 requestToc 打开目录")
+            page.tocDlg.close()
+            tryVerify(function () { return !page.tocDlg.visible }, 3000,
+                      "目录关闭后应恢复隐藏")
             // 自动续章默认开
             verify(page.autoContinue, "自动续章默认应开启")
             // 关闭开关（真实点击；状态感知：当前开 → 点一次关闭）
