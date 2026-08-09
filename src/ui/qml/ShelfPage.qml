@@ -23,12 +23,29 @@ Page {
     property alias searchBox: searchBox
     property alias searchIcon: searchIcon
     property alias catFilter: catFilter
+    // L9（P1#17）：分类筛选按值维护——onActivated 只记分类名，currentIndex 在
+    // booksChanged（模型重排/增删）后按值重算，索引漂移不再串选。
+    property string currentCategory: ""
 
     Connections {
         target: Importer
         function onImportFailed(message, fileName) {
             shelf.toastText = message + "：" + fileName
             toastTimer.restart()
+        }
+    }
+    Connections {
+        target: Books
+        // 分类模型随 booksChanged 重算——按值找回选中项索引（indexOf+1 偏移首项
+        // "全部"）；分类消失（书被删/改类）则回"全部"并清值
+        function onBooksChanged() {
+            const idx = catFilter.model.indexOf(shelf.currentCategory)
+            if (idx < 0) {
+                shelf.currentCategory = ""
+                catFilter.currentIndex = 0
+            } else {
+                catFilter.currentIndex = idx + 1
+            }
         }
     }
 
@@ -133,8 +150,11 @@ Page {
                 id: catFilter
                 Layout.preferredWidth: 110
                 model: [qsTr("全部")].concat(Books.categoriesModel)
-                onActivated: Books.setFilter(catFilter.currentIndex === 0
-                                             ? "" : catFilter.model[catFilter.currentIndex])
+                onActivated: {
+                    shelf.currentCategory = catFilter.currentIndex === 0
+                        ? "" : catFilter.model[catFilter.currentIndex]
+                    Books.setFilter(shelf.currentCategory)
+                }
             }
 
             ComboBox {

@@ -264,6 +264,9 @@ int main(int argc, char *argv[]) {
     // 生产模块路径带 src/ui/qml（见 main.cpp 注释），两进程 URL 各自匹配其资源布局。
     qmlRegisterSingletonType(QUrl("qrc:/qt/qml/Readdict/ui/qml/Theme.qml"),
                              "Readdict.UI", 1, 0, "UITheme");
+    // L9（P2#33）：背景归一化单例（同 UITheme；测试资源路径无 src 前缀）
+    qmlRegisterSingletonType(QUrl("qrc:/qt/qml/Readdict/ui/qml/BackgroundNorm.qml"),
+                             "Readdict.UI", 1, 0, "BackgroundNorm");
     // D3：Sync 单例（同生产 main.cpp；指向测试临时库，run() 读同一 settings.json）。
     // L8（P1#18）：dataApplied → Books.booksChanged 接线同生产 main.cpp（同步应用远端
     // 数据后书架刷新；ReaderPage 的划线刷新经其 Sync.onDataApplied 连接）

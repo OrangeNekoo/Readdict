@@ -98,6 +98,7 @@ qt_add_qml_module(Readdict
         src/ui/qml/ReaderControls.qml
         src/ui/qml/ReaderBackground.qml
         src/ui/qml/Theme.qml
+        src/ui/qml/BackgroundNorm.qml
         src/ui/qml/TtsBar.qml
         src/ui/qml/PdfReaderPage.qml
 )

@@ -94,6 +94,24 @@ void SettingsStore::setValue(const QString &dottedKey, const QJsonValue &value) 
     save();
 }
 
+// L9（P2#27）：沿 key 链逐级下钻到父对象 remove 尾键（与 insertPath 同递归模式）。
+// 与 setValue 不同：中途层缺失/非对象即无操作返回，不产生空对象副作用。
+static void removePath(QJsonObject &obj, const QStringList &parts, int idx) {
+    if (idx == parts.size() - 1) {
+        obj.remove(parts[idx]);
+        return;
+    }
+    if (!obj.value(parts[idx]).isObject()) return; // 键不存在：无操作
+    QJsonObject child = obj.value(parts[idx]).toObject();
+    removePath(child, parts, idx + 1);
+    obj.insert(parts[idx], child);
+}
+
+void SettingsStore::removeValue(const QString &dottedKey) {
+    removePath(m_root, dottedKey.split('/'), 0);
+    save();
+}
+
 // D5：背景图片导入——源文件（file:// URL 或本地路径）复制到 AppData/backgrounds/。
 // AppData 由 settings.json 所在目录推导（生产与测试注入的目录一致），不用
 // QStandardPaths::AppDataLocation：测试进程若走系统 AppData 会写真实用户目录。

@@ -45,9 +45,6 @@ public:
     Q_INVOKABLE void stopTracking();
     void setSort(SortField field);
     QVector<Book> search(const QString &query) const;
-    QStringList categories() const;
-    void addCategory(const QString &name);
-    void removeCategory(const QString &name);
     // ---- QML 可见封装 ----
     QVariantList booksModel() const;
     QVariantList categoriesModel() const;

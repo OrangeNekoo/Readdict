@@ -24,6 +24,9 @@ Page {
     property alias pdfView: pdfView
     // B10：恢复完成前不写进度——Ready 后首次 currentPageChanged(0) 不得覆盖保存值
     property bool restoreDone: false
+    // L9（P2#34）：翻页进度节流——currentPageChanged 只置 dirty，2s 合并 Timer 触发
+    // 才写 Settings/DB（快翻不逐页落盘）；onDestruction 兜底 flush 不丢最后页码。
+    property bool progressDirty: false
     // B10：关闭竞态防护——QPdfDocument 销毁（FPDF_DestroyLibrary）若撞上
     // QQuickPixmapReader 在途渲染（QPdfIOHandler 持文档指针）会 use-after-free 崩溃
     //（30MB 大 PDF 实测复现）。返回键先等渲染稳定（无在途读取）再 pop，
@@ -49,11 +52,12 @@ Page {
         anchors.fill: parent
         anchors.topMargin: 44
         document: pdfDoc
-        // 阅读进度：当前页变化 → settings.json 的 progress/pdf_<bookId>（写时持久化）
-        // + books.progress 百分比（页码/总页数，含 last_read_at）
+        // 阅读进度：当前页变化仅置 dirty，2s 合并 Timer 触发才写 settings.json 的
+        // progress/pdf_<bookId> + books.progress（页码/总页数，含 last_read_at）
         onCurrentPageChanged: {
-            if (page.restoreDone)
-                page.recordProgress()
+            if (!page.restoreDone) return
+            page.progressDirty = true
+            progressFlush.restart()
         }
         // 双击切换宽度适配 / 整页适配
         TapHandler {
@@ -110,6 +114,12 @@ Page {
         Settings.setValue("progress/pdf_" + page.book.id, pdfView.currentPage)
         Books.setProgress(page.book.id, (pdfView.currentPage + 1) / pdfDoc.pageCount)
     }
+    // 兜底 flush：onDestruction 为同步时机，Timer 来不及触发，直接写最终页码
+    function flushProgress() {
+        if (!page.progressDirty) return
+        page.progressDirty = false
+        page.recordProgress()
+    }
 
     // 无在途渲染：image.status 为 Ready（渲染完成）/ Error / Null（无渲染任务）时安全
     function renderSettled() {
@@ -148,12 +158,20 @@ Page {
         }
     }
 
+    Timer {
+        id: progressFlush
+        interval: 2000
+        repeat: false
+        onTriggered: page.flushProgress()
+    }
+
     Component.onCompleted: {
         if (page.book && page.book.id)
             Books.startTracking(page.book.id)  // 阅读计时开始
     }
 
     Component.onDestruction: {
+        page.flushProgress()   // L9（P2#34）：未落盘的翻页进度兜底写入
         Books.stopTracking()  // 结算阅读秒数
     }
 }

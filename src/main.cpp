@@ -115,6 +115,10 @@ int main(int argc, char *argv[]) {
     // 路径嵌入；测试进程的资源路径不同（见 tst_qmlmain.cpp 注释）。
     qmlRegisterSingletonType(QUrl("qrc:/qt/qml/Readdict/src/ui/qml/Theme.qml"),
                              "Readdict.UI", 1, 0, "UITheme");
+    // L9（P2#33）：背景归一化单例（同 UITheme 机制；ReaderPage/SettingsBackgroundPage
+    // 共用的 background/mode 四态白名单归一）
+    qmlRegisterSingletonType(QUrl("qrc:/qt/qml/Readdict/src/ui/qml/BackgroundNorm.qml"),
+                             "Readdict.UI", 1, 0, "BackgroundNorm");
     auto *books = new BookManager(appData + "/Readdict.db");
     // 阅读器进度（progress/<bookId>）与 Books 单例解耦读写 settings.json（B8）
     books->setSettingsStore(settings);

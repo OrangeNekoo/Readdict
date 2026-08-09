@@ -120,7 +120,6 @@ DocumentModel TextParser::parse(const QString &filePath) {
     const QStringList lines = text.split('\n');
     Chapter ch; ch.title = m.title = QFileInfo(filePath).completeBaseName();
     Paragraph cur;
-    bool inPre = false;
     for (const QString &raw : lines) {
         const QString line = raw.trimmed();
         if (line.startsWith("# ") || line.startsWith("## ") || line.startsWith("### ")) {
@@ -132,12 +131,9 @@ DocumentModel TextParser::parse(const QString &filePath) {
             ch.paragraphs.append(h);
         } else if (line.isEmpty()) {
             if (!cur.text.isEmpty()) { cur.html = mdToHtml(cur.text); ch.paragraphs.append(cur); cur = Paragraph(); }
-        } else if (line.startsWith("```")) {
-            inPre = !inPre;
         } else {
             if (!cur.text.isEmpty()) cur.text += "\n";
             cur.text += line;
-            if (!inPre && !cur.html.isEmpty()) cur.html += " ";
             cur.html = mdToHtml(cur.text);
         }
     }

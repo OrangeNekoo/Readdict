@@ -5,6 +5,8 @@
 #include <QFontDatabase>
 #include <QSet>
 #include <QSignalSpy>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include "core/BookManager.h"
 #include "core/SearchEngine.h"
@@ -50,16 +52,31 @@ private slots:
         m_mgr->setProgress(1, 0.8);
         QCOMPARE(m_mgr->bookById(1).progress, 0.8);
     }
-    void categoryCrud() {
-        m_mgr->addCategory("历史");
-        QVERIFY(m_mgr->categories().contains("历史"));
-        m_mgr->removeCategory("历史");
-        QVERIFY(!m_mgr->categories().contains("历史"));
-    }
     void deletesBook() {
         m_mgr->removeBook(1);
         QCOMPARE(m_mgr->books().size(), 1);
         QCOMPARE(m_mgr->search("红楼梦").size(), 0); // FTS 索引同步清理
+    }
+    void removeBookCascadesHighlightsAndProgressKeys() {
+        // L9（P2#27）：级联删除——删书后 highlights 表无本书残留行，
+        // settings 的 progress/<id> 与 progress/scroll_<id> 键一并移除
+        QSqlDatabase db = QSqlDatabase::database("readdict_main"); // 与 m_mgr 同一 :memory: 连接
+        QSqlQuery ins(db);
+        ins.prepare("INSERT INTO highlights(book_id, chapter, sentence_index, text, color, note, created_at, chapter_index)"
+                    " VALUES(?,?,?,?,?,?,?,?)");
+        ins.addBindValue(1); ins.addBindValue("第一章"); ins.addBindValue(0);
+        ins.addBindValue("划线文本"); ins.addBindValue("#FFD54F"); ins.addBindValue("");
+        ins.addBindValue("2026-01-01T00:00:00"); ins.addBindValue(1);
+        QVERIFY(ins.exec());
+        m_mgr->savePosition(1, 3, 512.5); // progress/1 与 progress/scroll_1
+        m_mgr->removeBook(1);
+        QSqlQuery cnt(db);
+        cnt.prepare("SELECT COUNT(*) FROM highlights WHERE book_id=1");
+        QVERIFY(cnt.exec());
+        QVERIFY(cnt.next());
+        QCOMPARE(cnt.value(0).toInt(), 0); // 划线级联清除
+        QVERIFY(m_settings->value("progress/1").isUndefined());
+        QVERIFY(m_settings->value("progress/scroll_1").isUndefined());
     }
     void removeBookWithFilesDeletesDbAndFiles() {
         // B1：删书+删文件——DB 行、书文件、真实封面（cover_ 前缀）一并删除且发 booksChanged
@@ -105,7 +122,7 @@ private slots:
         const QString db = tmp.path() + "/t.db";
         {
             SearchEngine se(db);
-            se.indexBook(1, "第一章", {"魔女现身。"});
+            se.rebuildBook(1, {qMakePair(QStringLiteral("第一章"), QStringList{"魔女现身。"})});
             QCOMPARE(se.searchAll("魔女").size(), 1);
         }
         BookManager mgr(db, "readdict_fts_test");

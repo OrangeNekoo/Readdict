@@ -131,6 +131,36 @@ private slots:
         QCOMPARE(s2.value("webdav/url").toString(), QString("https://x"));
         QCOMPARE(s2.value("theme/mode").toString(), QString("auto")); // 默认分区仍在
     }
+    void removeValueDeletesAndPersists() {
+        // L9（P2#27）：removeValue 删除点分键，持久化且兄弟键不受影响
+        QTemporaryDir dir;
+        const QString path = dir.path() + "/settings.json";
+        {
+            SettingsStore s(path);
+            s.setValue("progress/1", 3);
+            s.setValue("progress/scroll_1", 123.5);
+            s.setValue("progress/2", 7);
+            s.removeValue("progress/1");
+            s.removeValue("progress/scroll_1");
+            QVERIFY(s.value("progress/1").isUndefined());
+            QVERIFY(s.value("progress/scroll_1").isUndefined());
+            QCOMPARE(s.value("progress/2").toInt(), 7); // 兄弟键保留
+        }
+        SettingsStore s2(path);
+        QVERIFY(s2.value("progress/1").isUndefined());   // 落盘后仍无
+        QVERIFY(s2.value("progress/scroll_1").isUndefined());
+        QCOMPARE(s2.value("progress/2").toInt(), 7);
+    }
+    void removeValueMissingKeyIsNoop() {
+        // L9：删除不存在的键（含中间层缺失）为无操作，不崩、不动既有值
+        QTemporaryDir dir;
+        SettingsStore s(dir.path() + "/settings.json");
+        s.setValue("tts/engine", "openai");
+        s.removeValue("progress/999");       // progress 分区不存在
+        s.removeValue("progress/999/scroll"); // 更深一层同样无操作
+        QCOMPARE(s.value("tts/engine").toString(), QString("openai"));
+        QCOMPARE(s.value("theme/mode").toString(), QString("auto")); // 默认分区仍在
+    }
 };
 QTEST_MAIN(TestSettings)
 #include "tst_settings.moc"

@@ -26,12 +26,10 @@ void DatabaseManager::migrate() {
     const int v = schemaVersion();
     QSqlQuery q(m_db);
     if (v < 1) {
-        // 迁移必须是原子的：任一语句失败即回滚，避免留下半套 schema + 悬空事务
-        // （悬空事务会在连接关闭时被 SQLite 隐式回滚，后续写入静默丢失）。
-        if (!q.exec("BEGIN")) {
-            qWarning("数据库迁移: BEGIN 失败: %s", qPrintable(q.lastError().text()));
-            return;
-        }
+        // L9（P2#32）：迁移失败致命化——与 open 失败同等 qFatal 终止进程，
+        // 绝不在半套 schema 上继续运行（进程终止时 SQLite 自动回滚未提交事务）。
+        if (!q.exec("BEGIN"))
+            qFatal("数据库迁移失败: %s", qPrintable(q.lastError().text()));
         const QStringList steps = {
             QStringLiteral("CREATE TABLE IF NOT EXISTS books("
                            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -53,19 +51,11 @@ void DatabaseManager::migrate() {
         for (const QString &sql : steps) {
             if (q.exec(sql))
                 continue;
-            qWarning("数据库迁移: 步骤失败: %s\nSQL: %s",
-                     qPrintable(q.lastError().text()), qPrintable(sql));
-            // 回滚使 user_version 与 schema 保持一致（保持 0，下次启动重试完整迁移）；
-            // 绝不让事务悬空——否则连接关闭时 SQLite 隐式回滚，后续写入静默丢失
-            if (!q.exec("ROLLBACK"))
-                qWarning("数据库迁移: ROLLBACK 失败: %s", qPrintable(q.lastError().text()));
-            return;
+            qFatal("数据库迁移失败: %s\nSQL: %s",
+                   qPrintable(q.lastError().text()), qPrintable(sql));
         }
-        if (!q.exec("COMMIT")) {
-            qWarning("数据库迁移: COMMIT 失败: %s", qPrintable(q.lastError().text()));
-            q.exec("ROLLBACK");
-            return;
-        }
+        if (!q.exec("COMMIT"))
+            qFatal("数据库迁移失败: %s", qPrintable(q.lastError().text()));
     }
     if (v < 2) {
         // v1→v2：highlights 增 chapter_index（旧行默认 0，经 backfillChapterIndexes 回填）

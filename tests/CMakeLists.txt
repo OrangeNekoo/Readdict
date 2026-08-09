@@ -256,6 +256,7 @@ qt_add_resources(tst_qml "qml_ui"
         ../src/ui/qml/ReaderControls.qml
         ../src/ui/qml/ReaderBackground.qml
         ../src/ui/qml/Theme.qml
+        ../src/ui/qml/BackgroundNorm.qml
         ../src/ui/qml/TtsBar.qml
         ../src/ui/qml/PdfReaderPage.qml
 )

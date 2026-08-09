@@ -49,6 +49,20 @@ void BookManager::removeBook(qint64 id) {
     q.prepare("DELETE FROM books WHERE id=?");
     q.addBindValue(id);
     if (!q.exec()) return;
+    // L9（P2#27）：级联清理——删书同时清本书划线，避免 highlights 残留孤儿行
+    //（笔记页/划线渲染按 book_id 查表，书没了行还在，重导入同 id 时串线）
+    QSqlQuery h(m_db);
+    h.prepare("DELETE FROM highlights WHERE book_id=?");
+    h.addBindValue(id);
+    if (!h.exec())
+        qWarning() << "removeBook: 划线清理失败:" << h.lastError().text();
+    // L9（P2#27）：阅读进度键残留清理——progress/<id>（章节索引）与
+    // progress/scroll_<id>（滚动偏移）。键按 bookId 命名，删书不清则永久残留；
+    // 自增 id 不复用，不会串扰，但 settings.json 只增不减
+    if (m_settings) {
+        m_settings->removeValue(QStringLiteral("progress/%1").arg(id));
+        m_settings->removeValue(QStringLiteral("progress/scroll_%1").arg(id));
+    }
     // 同步清理 FTS 索引，避免残留条目（search 的 JOIN 本可掩盖，仍保持索引干净）。
     QSqlQuery f(m_db);
     f.prepare("DELETE FROM books_fts WHERE rowid=?");
@@ -303,7 +317,7 @@ QVariantMap BookManager::bookByIdModel(qint64 id) const {
 
 QVariantList BookManager::categoriesModel() const {
     // 分类来源为书籍实际填写的分类值（导入时 category 恒空，A8 补分类编辑入口后生效）；
-    // categories 表是独立维护的字典（addCategory/removeCategory），UI 分类栏以书籍分类为准。
+    // UI 分类栏以书籍分类为准（categories 表独立字典，无读写入口，已移除）。
     QVariantList out;
     QSqlQuery q(m_db);
     q.exec("SELECT DISTINCT category FROM books WHERE category != '' ORDER BY category");
@@ -367,28 +381,6 @@ QVariantMap BookManager::stats() const {
     }
     out.insert("byCategory", byCategory);
     return out;
-}
-
-QStringList BookManager::categories() const {
-    QStringList out;
-    QSqlQuery q(m_db);
-    q.exec("SELECT name FROM categories ORDER BY name");
-    while (q.next()) out.append(q.value(0).toString());
-    return out;
-}
-
-void BookManager::addCategory(const QString &name) {
-    QSqlQuery q(m_db);
-    q.prepare("INSERT OR IGNORE INTO categories(name) VALUES(?)");
-    q.addBindValue(name);
-    if (q.exec()) emit booksChanged();
-}
-
-void BookManager::removeCategory(const QString &name) {
-    QSqlQuery q(m_db);
-    q.prepare("DELETE FROM categories WHERE name=?");
-    q.addBindValue(name);
-    if (q.exec()) emit booksChanged();
 }
 
 // ---- 阅读器接口（B8）----

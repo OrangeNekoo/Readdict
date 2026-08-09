@@ -12,6 +12,8 @@ public:
     explicit SettingsStore(const QString &path, QObject *parent = nullptr);
     Q_INVOKABLE QJsonValue value(const QString &dottedKey) const;
     Q_INVOKABLE void setValue(const QString &dottedKey, const QJsonValue &value);
+    // L9（P2#27）：删除点分键对应值（删书清 progress/<id> 残留键用）；键不存在为无操作
+    Q_INVOKABLE void removeValue(const QString &dottedKey);
     // D5：把用户选择的背景图片复制到 AppData/backgrounds/，返回复制后的绝对路径（失败返回空串）
     Q_INVOKABLE QString copyToBackgrounds(const QString &sourceUrl);
     void save();

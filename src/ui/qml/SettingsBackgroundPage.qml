@@ -255,13 +255,12 @@ Page {
     }
     // 启动恢复：从 Settings 读 background/ 分区应用到单选/滑条/路径（含钳制）
     function restoreBackground() {
-        let mode = Settings.value("background/mode")
-        // E1：四态白名单；旧版 eink（B5 彩色墨水屏）值在此归一为 light（默认回退，
-        // 与其余非法值同路径），并回写 settings.json 使存储值同步归一
-        if (mode !== "light" && mode !== "paper" && mode !== "dark" && mode !== "image") {
-            mode = "light"
+        // L9（P2#33）：四态白名单归一抽至 BackgroundNorm（与 ReaderPage 共用）；
+        // 旧版 eink 等非法值归一为 light，且回写 settings.json 使存储值同步归一
+        const rawMode = Settings.value("background/mode")
+        const mode = BackgroundNorm.norm(rawMode)
+        if (mode !== rawMode)
             Settings.setValue("background/mode", mode)
-        }
         bgGrid.currentValue = mode
         page.bgImagePath = Settings.value("background/imagePath") || ""
         bgImageHint.text = page.bgImagePath || qsTr("未选择")
