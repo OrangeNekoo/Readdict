@@ -36,15 +36,16 @@ Page {
     }
     Connections {
         target: Books
-        // 分类模型随 booksChanged 重算——按值找回选中项索引（indexOf+1 偏移首项
-        // "全部"）；分类消失（书被删/改类）则回"全部"并清值
+        // 分类模型随 booksChanged 重算——按值找回选中项索引（model 已含首项"全部"，
+        // indexOf 返回值即 ComboBox 索引，无额外偏移）；分类消失（书被删/改类）则
+        // 回"全部"并清值
         function onBooksChanged() {
             const idx = catFilter.model.indexOf(shelf.currentCategory)
             if (idx < 0) {
                 shelf.currentCategory = ""
                 catFilter.currentIndex = 0
             } else {
-                catFilter.currentIndex = idx + 1
+                catFilter.currentIndex = idx
             }
         }
     }
