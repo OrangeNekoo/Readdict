@@ -343,6 +343,43 @@ Item {
                     && String(Settings.value("themes/active")) === "护眼"
                     && page.bgMode === "paper"
             }, 3000, "选中自定义预设应应用其值并激活 themes/active")
+            // L10 复审：应用预设后 page.fontFamily 应同步预设字体（FontSheet 高亮/
+            // 下次保存快照不漂移）——先经 setFontFamily 换成另一字体再重新应用
+            page.setFontFamily("思源宋体 VF")
+            compare(page.fontFamily, "思源宋体 VF", "模拟用户换字体应生效")
+            mouseClick(panel.themeItems.itemAt(4), 20, 20)
+            tryVerify(function () { return page.fontFamily === "得意黑" }, 3000,
+                      "应用预设后 page.fontFamily 应同步预设字体")
+            // 再保存新预设 → 快照应取预设字体（非面板旧字体）
+            page.onSaveThemeRequested()
+            tryVerify(function () { return panel.saveDialog.visible }, 3000,
+                      "命名 Dialog 应再次打开")
+            panel.themeNameField.text = "护眼2"
+            panel.saveDialog.accept()
+            tryVerify(function () { return !panel.saveDialog.visible }, 3000,
+                      "命名 Dialog 应完全关闭")
+            tryVerify(function () {
+                var list = Settings.value("themes/custom")
+                return list && list.length === 2 && list[1].name === "护眼2"
+                    && String(list[1].fontFamily) === "得意黑"
+                    && Number(list[1].fontSize) === 22
+            }, 3000, "新预设快照应取预设字体（page.fontFamily 已同步）")
+            tryVerify(function () { return panel.themeItems.count === 6 }, 3000,
+                      "网格应重算为 4 内置 + 2 自定义")
+            // L10 复审：应用自定义后点内置背景 → 清除 themes/active（网格高亮回
+            // 内置项；删除旧预设不再误触发回退）
+            mouseClick(panel.themeItems.itemAt(0), 20, 20)
+            tryVerify(function () {
+                return String(Settings.value("background/mode")) === "light"
+                    && String(Settings.value("themes/active")) === ""
+                    && page.bgMode === "light"
+            }, 3000, "点内置背景应清除 themes/active")
+            tryVerify(function () {
+                return String(panel.themeItems.itemAt(0).border.color)
+                           === String(UITheme.borderActive)
+                    && String(panel.themeItems.itemAt(4).border.color)
+                           === String(UITheme.borderDefault)
+            }, 3000, "清除激活态后网格高亮应回内置项（自定义项不再高亮）")
             // 管理主题入口：点击行 → 上报 ReaderPage push ThemeManagePage（阅读栈之上）
             tryVerify(function () { return panel.manageRow !== undefined }, 2000,
                       "应暴露管理主题入口")

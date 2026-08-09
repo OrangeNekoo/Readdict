@@ -752,6 +752,9 @@ Page {
         Settings.setValue("background/mode", bg)
         Settings.setValue("themes/active", p.name)
         page.bgMode = bg
+        // L10 复审：同步存储 token——FontSheet 高亮与下次「保存当前设置」快照取
+        // 预设字体（镜像 setFontFamily 模式；否则 page.fontFamily 残留旧值漂移）
+        page.fontFamily = String(p.fontFamily || "思源宋体 VF")
         page.typography = page.typographyFromSettings()
     }
 
@@ -764,12 +767,19 @@ Page {
     }
 
     // E3：上拉框直接选择——背景四态白名单校验后应用（写 background/mode）；
-    // image 无图时防御性拒绝（上拉框已禁用该选项，双保险防手改属性绕过）
+    // image 无图时防御性拒绝（上拉框已禁用该选项，双保险防手改属性绕过）。
+    // L10 复审：内置背景选择清除自定义预设激活态（themes/active）——否则网格
+    // 高亮/管理页 ○● 失真，且删除该预设会误触发回退内置默认。先写 active 再切
+    // bgMode，保证面板 onBgModeChanged 刷新读到已清除值；显式 panel.refresh()
+    // 覆盖同 bg 再选（bgMode 不变不触发 onChanged）的路径。
     function setBackgroundMode(mode) {
         if (mode !== "light" && mode !== "paper" && mode !== "dark" && mode !== "image") return
         if (mode === "image" && !page.bgImagePath) return
+        Settings.setValue("themes/active", "")
         page.bgMode = mode
         Settings.setValue("background/mode", mode)
+        const panel = bottomSheet.contentLoader.item
+        if (panel && panel.refresh) panel.refresh()
     }
 
     function setAlign(a) {
@@ -1123,6 +1133,8 @@ Page {
     // 重读同值无副作用。
     StackView.onActivated: {
         page.typography = page.typographyFromSettings()
+        // L10 复审：删除回退同样重读存储 token（页面属性作响应层，镜像 onCompleted）
+        page.fontFamily = String(Settings.value("typography/fontFamily") || "思源宋体 VF")
         page.backgroundFromSettings()
         const panel = bottomSheet.contentLoader.item
         if (panel && panel.refresh) panel.refresh()

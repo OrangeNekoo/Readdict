@@ -45,6 +45,9 @@ Item {
     property var customThemes: themeSheet.loadCustomThemes()
     property string activeCustom: String(Settings.value("themes/active") || "")
     property var model: themeSheet.buildModel()
+    // L10 复审：宿主切换背景模式（内置选择/预设应用/删除回退）后重读激活态与
+    // 网格模型——Settings 无变更信号，bgMode 注入变化作响应层触发（幂等，无副作用）
+    onBgModeChanged: themeSheet.refresh()
 
     property alias themeItems: themeRepeater
     property alias saveDialog: saveThemeDialog
