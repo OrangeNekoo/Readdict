@@ -430,8 +430,8 @@ Item {
             compare(first.text, "深色模式", "首行应为深色模式（KdListItem）")
             compare(first.textLabel.font.pixelSize, 15, "列表项文字应为 fsListItem 15px（Kindle §7）")
             verify(first.chevronIcon !== undefined && !first.chevronIcon.visible,
-                   "开关行（内嵌 KdToggle）不应显示 chevron")
-            verify(page.themeModeToggle !== undefined, "设置页应暴露深色模式 KdToggle 句柄")
+                   "开关行（内嵌三态 radio）不应显示 chevron")
+            verify(page.themeModeGrid !== undefined, "设置页应暴露深色三态 radio 网格句柄")
             compare(layout.children.length, 8,
                     "列表应为 7 行 + 版本标签（无字体行），实际 " + layout.children.length)
             loader.destroy()

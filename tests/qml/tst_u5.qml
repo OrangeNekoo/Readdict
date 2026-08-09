@@ -5,9 +5,9 @@ import Readdict.Backend
 import Readdict.UI 1.0
 
 // U5：设置页 Kindle 全屏列表化冒烟——列表项结构（KdListItem 图标/文字/chevron/
-// 字号 Token）、深色模式 KdToggle 即时生效（写 theme/mode + Main.applyTheme +
-// UITheme Token 跟随 + 启动恢复）、子页 push/返回（语言/TTS/背景/同步/统计入口
-// 不丢、背景子页 radio 选择生效）。
+// 字号 Token）、深色模式三态 radio 即时生效（L10：写 theme/mode auto/light/dark +
+// Main.applyTheme + UITheme Token 跟随 + 启动恢复）、子页 push/返回（语言/TTS/
+// 背景/同步/统计入口不丢、背景子页 radio 选择生效）。
 // 结构约定（与 tst_main 等一致）：根为带尺寸的 Item，TestCase 是其子项，
 // 组件经 createObject(root) 挂到该 Item 下；Main.qml 用例结束先隐藏再销毁。
 Item {
@@ -56,9 +56,10 @@ Item {
             loader.destroy()
         }
 
-        // 深色模式 KdToggle：即时生效（写 theme/mode + Main.applyTheme →
-        // Material/UITheme Token 跟随）+ 启动恢复（dark/light/auto 三值）
-        function test_themeToggleImmediate() {
+        // L10：深色三态 KdRadioGrid——选择即写 theme/mode(auto/light/dark) +
+        // Main.applyTheme → Material/UITheme Token 跟随；subtext 显示当前值；
+        // 启动恢复三值
+        function test_themeModeRadio() {
             const prevMode = String(Settings.value("theme/mode") || "auto")
             Settings.setValue("theme/mode", "light")
             var loader = mainComp.createObject(root)
@@ -68,35 +69,43 @@ Item {
             win.navigateTo("settings")
             var sp = win.navStack.currentItem
             verify(sp !== null && sp.navId === "settings", "应进入设置页")
-            verify(sp.themeModeToggle !== undefined, "设置页应暴露深色模式 KdToggle")
-            verify(!sp.themeModeToggle.checked, "light 模式开关应关闭")
-            // 开 → 深色：写 Settings + applyTheme（Token 跟随）
-            sp.themeModeToggle.setChecked(true)
-            compare(String(Settings.value("theme/mode")), "dark", "开应写 theme/mode=dark")
+            verify(sp.themeModeGrid !== undefined, "设置页应暴露深色三态 radio 网格")
+            compare(sp.themeModeGrid.currentValue, "light", "light 模式应选中浅色")
+            compare(sp.settingsLayout.children[0].subtext, "浅色", "subtext 应显示当前值")
+            // 选深色 → 写 theme/mode=dark + applyTheme（Token 跟随）
+            sp.themeModeGrid.selectValue("dark")
+            compare(String(Settings.value("theme/mode")), "dark", "选深色应写 theme/mode=dark")
             compare(win.theme, "dark", "Main.theme 应同步为 dark")
             tryVerify(function () { return UITheme.isDark === true }, 2000,
                       "深色 Token 应即时生效")
-            // 关 → 浅色
-            sp.themeModeToggle.setChecked(false)
-            compare(String(Settings.value("theme/mode")), "light", "关应写 theme/mode=light")
+            compare(sp.settingsLayout.children[0].subtext, "深色", "subtext 应显示深色")
+            // 选浅色
+            sp.themeModeGrid.selectValue("light")
+            compare(String(Settings.value("theme/mode")), "light", "选浅色应写 theme/mode=light")
             tryVerify(function () { return UITheme.isDark === false }, 2000,
                       "浅色 Token 应即时生效")
+            // 选跟随系统 → auto（L10：三态直写，不再单向丢失）
+            sp.themeModeGrid.selectValue("auto")
+            compare(String(Settings.value("theme/mode")), "auto", "选跟随系统应写 theme/mode=auto")
+            compare(win.theme, "auto", "Main.theme 应同步为 auto")
+            var sysDark = Qt.styleHints.colorScheme === Qt.ColorScheme.Dark
+            tryVerify(function () { return UITheme.isDark === sysDark }, 2000,
+                      "auto 模式 Token 应跟随系统实际深浅")
+            compare(sp.settingsLayout.children[0].subtext, "跟随系统", "subtext 应显示跟随系统")
             win.visible = false
             loader.destroy()
-            // 启动恢复：dark → 开；light → 关；auto → 系统实际深色
+            // 启动恢复：dark/light/auto 三值 → currentValue 对应选中
             Settings.setValue("theme/mode", "dark")
             var l2 = settingsComp.createObject(root)
-            verify(l2.item.themeModeToggle.checked, "theme/mode=dark 时开关应开")
+            compare(l2.item.themeModeGrid.currentValue, "dark", "theme/mode=dark 应选中深色")
             l2.destroy()
             Settings.setValue("theme/mode", "light")
             var l3 = settingsComp.createObject(root)
-            verify(!l3.item.themeModeToggle.checked, "theme/mode=light 时开关应关")
+            compare(l3.item.themeModeGrid.currentValue, "light", "theme/mode=light 应选中浅色")
             l3.destroy()
             Settings.setValue("theme/mode", "auto")
             var l4 = settingsComp.createObject(root)
-            var sysDark = Qt.styleHints.colorScheme === Qt.ColorScheme.Dark
-            compare(l4.item.themeModeToggle.checked, sysDark,
-                    "auto 模式开关应反映系统实际深色")
+            compare(l4.item.themeModeGrid.currentValue, "auto", "theme/mode=auto 应选中跟随系统")
             l4.destroy()
             Settings.setValue("theme/mode", prevMode)
         }

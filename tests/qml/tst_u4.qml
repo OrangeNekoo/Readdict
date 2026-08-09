@@ -15,7 +15,9 @@ import Readdict.UI 1.0
 //    Settings 键：background/mode、typography/fontFamily/fontSize/pageWidth/
 //    lineHeight、reading/pageMode/autoContinue/darkFollow）、自动续章开关门控
 //    autoNextChapter、深色跟随派生 effectiveBg、右上角下拉菜单（目录/笔记/搜索/
-//    朗读/上/下章入口可达）。
+//    朗读/上/下章入口可达）；
+// 4. L10：自定义主题预设持久化——保存当前设置（命名 Dialog → themes/custom 追加 →
+//    网格重算 → 选中应用 typography/background 键）、管理主题页删除与激活回退。
 // 结构约定（与 tst_readerpage/tst_nav 一致）：根为带尺寸的 Item，ReaderPage 经
 // StackView push（生产路径）；手势注入经 page.handleContentTap(y)（TapHandler
 // 桥接共用同一状态机——quicktest harness 无法可靠合成鼠标事件，见 C3 报告）；
@@ -287,6 +289,79 @@ Item {
             h.stack.destroy()
         }
 
+        // L10：保存当前设置为主题预设——命名输入 Dialog → 追加 themes/custom →
+        // 网格重算（4 内置 + 1 自定义）→ 选中自定义应用其值（typography/background
+        // 键 + themes/active 激活）；管理主题入口 push 并可返回
+        function test_saveAndApplyCustomTheme() {
+            // 预置辨识性排版/背景值（ReaderPage onCompleted 读取后作为保存快照）
+            Settings.setValue("typography/fontFamily", "得意黑")
+            Settings.setValue("typography/fontSize", 22)
+            Settings.setValue("typography/lineHeight", 2.0)
+            Settings.setValue("background/mode", "paper")
+            Settings.setValue("themes/custom", [])
+            Settings.setValue("themes/active", "")
+            var h = openPage()
+            var page = h.page
+            page.controlsHideDelay = 100000
+            page.handleContentTap(200)
+            tryVerify(function () { return page.sheetOpen }, 3000, "Sheet 应弹出")
+            var panel = page.bottomSheet.contentLoader.item
+            tryVerify(function () { return panel.objectName === "themeSheetPanel" }, 3000,
+                      "内容应为主题面板")
+            // 面板注入保存快照：fontFamily 存储 token + typography 原始值
+            tryVerify(function () {
+                return panel.fontFamily === "得意黑" && Number(panel.typography.fontSize) === 22
+            }, 3000, "面板应注入当前排版快照")
+            // 「保存当前设置」按钮路径：onSaveThemeRequested → 命名输入 Dialog
+            page.onSaveThemeRequested()
+            tryVerify(function () { return panel.saveDialog.visible }, 3000,
+                      "命名输入 Dialog 应打开")
+            panel.themeNameField.text = "护眼"
+            panel.saveDialog.accept()
+            // 模态 Dialog 关闭是动画过程，遮罩残留会吞掉下一次点击（tst_u4 既有
+            // 经验：Dialog.close 后需等退出动画完全结束，visible=false）
+            tryVerify(function () { return !panel.saveDialog.visible }, 3000,
+                      "命名 Dialog 应完全关闭")
+            // 追加 themes/custom + 网格重算（内置 4 + 自定义 1）
+            tryVerify(function () {
+                var list = Settings.value("themes/custom")
+                return list && list.length === 1 && list[0].name === "护眼"
+                    && list[0].bg === "paper"
+                    && Number(list[0].fontSize) === 22
+                    && String(list[0].fontFamily) === "得意黑"
+                    && Number(list[0].lineHeight) === 2.0
+            }, 3000, "保存应追加 themes/custom 预设（含排版/背景快照）")
+            tryVerify(function () { return panel.themeItems.count === 5 }, 3000,
+                      "网格应重算为 4 内置 + 1 自定义")
+            // 选中自定义预设 → 应用其值到 typography/background 键并激活
+            mouseClick(panel.themeItems.itemAt(4), 20, 20)
+            tryVerify(function () {
+                return Number(Settings.value("typography/fontSize")) === 22
+                    && String(Settings.value("typography/fontFamily")) === "得意黑"
+                    && Number(Settings.value("typography/lineHeight")) === 2.0
+                    && String(Settings.value("background/mode")) === "paper"
+                    && String(Settings.value("themes/active")) === "护眼"
+                    && page.bgMode === "paper"
+            }, 3000, "选中自定义预设应应用其值并激活 themes/active")
+            // 管理主题入口：点击行 → 上报 ReaderPage push ThemeManagePage（阅读栈之上）
+            tryVerify(function () { return panel.manageRow !== undefined }, 2000,
+                      "应暴露管理主题入口")
+            mouseClick(panel.manageRow, 100, 20)
+            tryVerify(function () { return h.stack.currentItem.title === "管理主题" }, 3000,
+                      "管理主题应 push 到阅读栈")
+            h.stack.pop(null, StackView.Immediate)
+            tryVerify(function () { return h.stack.currentItem === page }, 3000,
+                      "返回应回阅读页")
+            h.stack.destroy()
+            // 清理：还原共享 Settings（避免污染后续用例）
+            Settings.setValue("themes/custom", [])
+            Settings.setValue("themes/active", "")
+            Settings.setValue("typography/fontFamily", "思源宋体 VF")
+            Settings.setValue("typography/fontSize", 18)
+            Settings.setValue("typography/lineHeight", 1.6)
+            Settings.setValue("background/mode", "light")
+        }
+
         // 字体面板：4 字体族单选 + 字号分段生效（typography/fontFamily、fontSize）
         function test_fontPanelApplies() {
             var h = openPage()
@@ -478,6 +553,71 @@ Item {
             mouseClick(page.readerMenu, 30, 10)
             tryVerify(function () { return !page.menuOpen }, 3000, "点击遮罩应关闭菜单")
             h.stack.destroy()
+        }
+    }
+
+    TestCase {
+        name: "ThemeManageSmoke"
+        // L10：管理主题页——自定义预设列表 + 删除；删除当前激活预设回退内置默认，
+        // 删除非激活预设仅移除（themes/custom / themes/active / typography 键）
+        function test_deletePreset() {
+            Settings.setValue("themes/custom", [
+                { name: "护眼", bg: "paper", text: "lightTextPrimary",
+                  fontFamily: "得意黑", fontSize: 22, lineHeight: 2.0 },
+                { name: "夜间", bg: "dark", text: "darkTextPrimary",
+                  fontFamily: "思源宋体 VF", fontSize: 20, lineHeight: 1.8 }
+            ])
+            Settings.setValue("themes/active", "护眼")
+            Settings.setValue("typography/fontFamily", "得意黑")
+            Settings.setValue("typography/fontSize", 22)
+            Settings.setValue("background/mode", "paper")
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { width: 1100; height: 720 }",
+                root, "u4ManageStack")
+            verify(stack !== null, "管理页测试 StackView 应能创建")
+            // 基座 Item：StackView 不能 pop 到空（depth=1 时 pop 为无操作，Qt 语义），
+            // 与生产一致（主栈恒有 ShelfPage 根）——先压基座再压管理页
+            var base = Qt.createQmlObject("import QtQuick; Item {}", stack, "u4ManageBase")
+            stack.push(base)
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/ThemeManagePage.qml")
+            var mgr = stack.currentItem
+            verify(mgr !== null, "ThemeManagePage 应能加载")
+            compare(mgr.title, "管理主题", "页面标题应为管理主题")
+            tryVerify(function () { return mgr.themeList.count === 2 }, 3000,
+                      "列表应显示 2 个自定义预设")
+            // 删除当前激活预设（护眼）→ themes/custom 剩 1 + 回退内置默认
+            mgr.deletePreset("护眼")
+            tryVerify(function () {
+                var list = Settings.value("themes/custom")
+                return list && list.length === 1 && list[0].name === "夜间"
+            }, 3000, "删除后 themes/custom 应剩 1 项")
+            compare(String(Settings.value("themes/active")), "", "删除激活预设应清空激活态")
+            compare(String(Settings.value("typography/fontFamily")), "思源宋体 VF",
+                    "回退内置默认字体")
+            compare(Number(Settings.value("typography/fontSize")), 18, "回退内置默认字号")
+            compare(Number(Settings.value("typography/lineHeight")), 1.6, "回退内置默认行距")
+            compare(String(Settings.value("background/mode")), "light", "回退内置默认浅色背景")
+            tryVerify(function () { return mgr.themeList.count === 1 }, 3000,
+                      "删除后列表应实时刷新")
+            // 删除非激活预设（夜间）→ 仅移除，不回退排版
+            mgr.deletePreset("夜间")
+            tryVerify(function () {
+                var list = Settings.value("themes/custom")
+                return list && list.length === 0
+            }, 3000, "删除非激活预设应仅移除")
+            compare(String(Settings.value("typography/fontFamily")), "思源宋体 VF",
+                    "非激活删除不应改排版")
+            // 返回按钮路径（pop 为动画过程，depth 在动画结束前不回落——断言
+            // currentItem 同步切回基座即可，同 tst_u5 子页返回断言模式）
+            mgr.goBack()
+            tryVerify(function () { return stack.currentItem === base }, 3000,
+                      "返回应 pop 回基座")
+            stack.destroy()
+            // 清理
+            Settings.setValue("themes/custom", [])
+            Settings.setValue("themes/active", "")
+            Settings.setValue("typography/fontSize", 18)
+            Settings.setValue("background/mode", "light")
         }
     }
 }

@@ -239,6 +239,7 @@ qt_add_resources(tst_qml "qml_ui"
         ../src/ui/qml/KdSegmentedSlider.qml
         ../src/ui/qml/KdToggle.qml
         ../src/ui/qml/KdBottomSheet.qml
+        ../src/ui/qml/ThemeManagePage.qml
         ../src/ui/qml/ThemeSheet.qml
         ../src/ui/qml/FontSheet.qml
         ../src/ui/qml/LayoutSheet.qml

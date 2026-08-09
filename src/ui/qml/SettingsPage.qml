@@ -8,14 +8,14 @@ import Readdict.UI 1.0
 
 // U5：设置页 Kindle 全屏列表化（分析报告 §4/§7：无卡片分组，全屏列表——
 // 线性图标 + 文字 + 右箭头 chevron → 进入子页；开关项即时生效）。
-// 行结构：深色模式（KdToggle 即时生效）/ 语言（→ SettingsLanguagePage 子页）/
+// 行结构：深色模式（L10 改三态 radio 即时生效）/ 语言（→ SettingsLanguagePage 子页）/
 // 朗读（TTS）（→ SettingsTtsPage 子页）/ 阅读背景（→ SettingsBackgroundPage 子页）/
 // 刷新封面（操作行）/ 同步（→ SyncPage）/ 统计（→ StatsPage）/ 版本标签。
 // 功能行为不变（设置键/入口与 D3-D6/C5/B2 一致），仅 UI 从 SectionCard 分组
 // 迁移到 KdListItem 列表 + StackView push 子页（语言/TTS/背景）。
 // 返回按钮保持 B4 固定顶部（移出滚动区，左上角无滚动残影）。
 // 测试/外部句柄：syncEntryButton/statsEntryButton/refreshCoversButton/
-// refreshCoversHint/themeModeToggle/backButton/settingsLayout/settingsScroll/
+// refreshCoversHint/themeModeGrid/backButton/settingsLayout/settingsScroll/
 // ttsEntryButton/languageEntryButton/backgroundEntryButton、goBack()。
 Page {
     id: page
@@ -29,8 +29,8 @@ Page {
     // B2：封面刷新按钮/提示测试句柄（QML 冒烟经此触发 refreshCovers 数据流）
     property alias refreshCoversButton: refreshItem
     property alias refreshCoversHint: refreshCoversHint
-    // U5：深色模式 KdToggle 句柄（冒烟经此驱动即时生效）
-    property alias themeModeToggle: themeToggle
+    // L10：深色三态 radio 句柄（冒烟经此驱动 theme/mode auto/light/dark 选择）
+    property alias themeModeGrid: themeGrid
     // U5：子页入口句柄（冒烟经此驱动 push 语言/TTS/背景子页）
     property alias languageEntryButton: languageItem
     property alias ttsEntryButton: ttsItem
@@ -81,34 +81,40 @@ Page {
             width: settingsScroll.availableWidth
             spacing: 0
 
-            // ---- 深色模式：KdToggle 即时生效（写 theme/mode + Main.applyTheme）----
-            // U5：原三态 ComboBox（跟随系统/浅色/深色）改为二元开关——开=深色、关=浅色。
-            // 初始 checked 取"实际是否深色"（显式 dark 或 auto 跟随系统深色），
-            // 首次拨动后写入显式 light/dark 并持久化（auto 在用户交互前保持）。
+            // ---- 深色模式：三选一 radio（跟随系统/浅色/深色 → theme/mode）----
+            // L10（P1#8）：原二元 KdToggle 改 KdRadioGrid 三态——修复 auto 单向丢失：
+            // 三值直写 theme/mode = auto/light/dark，subtext 显示当前值；选择后经
+            // Main.applyTheme 同步 Material.theme 三态与 UITheme.isDark（既有机制不变）。
             KdListItem {
                 id: themeItem
                 icon: "theme"
                 text: qsTr("深色模式")
                 subtext: page.themeModeName()
                 showChevron: false
-                KdToggle {
-                    id: themeToggle
-                    // 恢复：显式 dark → 开；light → 关；auto → 按系统实际深色
+                KdRadioGrid {
+                    id: themeGrid
+                    width: 300
+                    height: 44
+                    columns: 3
+                    options: [
+                        { text: qsTr("跟随系统"), value: "auto" },
+                        { text: qsTr("浅色"), value: "light" },
+                        { text: qsTr("深色"), value: "dark" }
+                    ]
+                    // 恢复：按 theme/mode 三态选中（直接赋 currentValue 不触发
+                    // selected，不会回写 Settings——与语言/背景恢复同语义）
                     Component.onCompleted: {
-                        const mode = Settings.value("theme/mode")
-                        themeToggle.checked = mode === "dark"
-                            || (mode !== "light"
-                                && Qt.styleHints.colorScheme === Qt.ColorScheme.Dark)
+                        const mode = String(Settings.value("theme/mode") || "auto")
+                        themeGrid.currentValue = (mode === "light" || mode === "dark") ? mode : "auto"
                     }
-                    onToggled: (on) => {
-                        const mode = on ? "dark" : "light"
-                        Settings.setValue("theme/mode", mode)
+                    onSelected: (v) => {
+                        Settings.setValue("theme/mode", v)
                         page.refreshSubtexts()
                         // Main.qml 的 applyTheme 同步 Material.theme 三态与 UITheme.isDark
                         //（Window.window 附加属性指向 ApplicationWindow 根对象；测试宿主
                         // 无窗口时跳过——Loader 直载场景下主题仍写 Settings 持久化）
                         const win = Window.window
-                        if (win && win.applyTheme) win.applyTheme(mode)
+                        if (win && win.applyTheme) win.applyTheme(v)
                     }
                 }
             }

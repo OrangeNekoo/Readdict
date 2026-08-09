@@ -728,10 +728,39 @@ Page {
         Settings.setValue("reading/darkFollow", page.darkFollow)
     }
 
-    // U4：Sheet 底部"保存当前设置"按钮（§4 占位）——保存主题预设功能待 U 审核后
-    // 实现；当前为占位：记录操作不改变任何设置
+    // U4/L10：Sheet 底部"保存当前设置"按钮 → 主题面板命名输入 Dialog
+    //（保存当前排版/背景快照为主题预设，追加 themes/custom，见 ThemeSheet）
     function onSaveThemeRequested() {
-        console.log("U4 占位：保存当前设置为主题预设（功能待 U 审核）")
+        const panel = bottomSheet.contentLoader.item
+        if (panel && panel.openSaveDialog) panel.openSaveDialog()
+    }
+
+    // L10（P1#10）：应用自定义预设——写 typography/* 与 background/* 键并刷新
+    // 响应层（Settings 无变更信号，页面属性作响应层）。text 为派生文字色 token，
+    // 应用不写（文字色随背景模式派生，B3 语义）；image 预设无图防御性拒绝。
+    function applyThemePreset(p) {
+        if (!p || typeof p !== "object" || !p.name) return
+        Settings.setValue("typography/fontFamily", p.fontFamily || "思源宋体 VF")
+        Settings.setValue("typography/fontSize", Number(p.fontSize) || 18)
+        Settings.setValue("typography/lineHeight", Number(p.lineHeight) || 1.6)
+        const bg = (p.bg === "dark" || p.bg === "paper" || p.bg === "image") ? p.bg : "light"
+        if (bg === "image") {
+            if (!p.bgImagePath) return   // 无图不可应用 image 预设（同 setBackgroundMode 门控）
+            Settings.setValue("background/imagePath", p.bgImagePath)
+            page.bgImagePath = p.bgImagePath
+        }
+        Settings.setValue("background/mode", bg)
+        Settings.setValue("themes/active", p.name)
+        page.bgMode = bg
+        page.typography = page.typographyFromSettings()
+    }
+
+    // L10：「管理主题」入口——push ThemeManagePage.qml（主题面板位于 Loader 内
+    // StackView.view 不解析，经 requestManageThemes 上报到本页再 push——本页是
+    // 主栈直接子项，附加属性可解析）
+    function openThemeManagePage() {
+        const sv = page.StackView.view
+        if (sv) sv.push("ThemeManagePage.qml")
     }
 
     // E3：上拉框直接选择——背景四态白名单校验后应用（写 background/mode）；
@@ -971,13 +1000,18 @@ Page {
         }
     }
 
-    // 主题标签面板：四态背景网格（与 bgMode/Settings background/mode 一致）
+    // 主题标签面板：四态背景网格 + L10 自定义预设（与 bgMode/Settings background/mode、
+    // typography/fontFamily、fontSize/lineHeight 一致；保存快照/应用经宿主处理）
     Component {
         id: themePanelComp
         ThemeSheet {
             bgMode: page.bgMode
             bgImagePath: page.bgImagePath
+            fontFamily: page.fontFamily
+            typography: page.typography
             onSetBackgroundMode: (m) => page.setBackgroundMode(m)
+            onApplyPreset: (p) => page.applyThemePreset(p)
+            onRequestManageThemes: page.openThemeManagePage()
         }
     }
     // 字体标签面板：4 字体族 + 字号分段（current 经 page.fontFamily/typography 注入）
@@ -1037,7 +1071,8 @@ Page {
             { id: "more", source: morePanelComp }
         ]
         currentId: page.sheetTab
-        // §4：底部描边按钮"保存当前设置"——仅主题标签显示（占位：功能待 U 审核）
+        // §4：底部描边按钮"保存当前设置"——仅主题标签显示（L10 已实现：
+        // onActionClicked → onSaveThemeRequested → 主题面板命名输入 Dialog）
         actionText: page.sheetTab === "theme" ? qsTr("保存当前设置") : ""
         onTabClicked: (id) => page.sheetTab = id
         onActionClicked: page.onSaveThemeRequested()
@@ -1080,6 +1115,17 @@ Page {
         // 打开即聚焦正文（方向键立即可用）；点击正文（handleContentTap）同样
         // 重新聚焦（弹层/按钮抢焦点后点击内容即恢复方向键）。
         content.forceActiveFocus()
+    }
+
+    // L10（P1#10）：从管理主题页返回（pop 回阅读页）时重读 Settings——删除当前
+    // 激活预设已回退内置默认（typography/background 键），刷新响应层使排版/背景
+    // 即时生效，并让主题面板重算预设网格（删除项不再残留）。初推入时亦触发，
+    // 重读同值无副作用。
+    StackView.onActivated: {
+        page.typography = page.typographyFromSettings()
+        page.backgroundFromSettings()
+        const panel = bottomSheet.contentLoader.item
+        if (panel && panel.refresh) panel.refresh()
     }
 
     Component.onDestruction: {
