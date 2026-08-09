@@ -8,7 +8,9 @@ import Readdict.UI 1.0
 //   shelf 书库(首页) / stats 统计 / sync 同步 / settings 设置 / toc 目录 /
 //   theme 主题 / font 字体 / layout 布局 / more 更多 / back 返回 /
 //   search 搜索 / prev 上一章 / next 下一章 / read 朗读 / notes 笔记 /
-//   chevron 右箭头 / globe 语言 / image 图片背景
+//   chevron 右箭头 / globe 语言 / image 图片背景 /
+//   import 导入 / info 信息 / bookmark 书签 / bookmarkFill 书签(实心) /
+//   dot 圆点（菜单兜底） / filter 筛选
 // 接口：name（图标名）、color（描边色，默认 textPrimary）、size（边长，默认 24）。
 Item {
     id: kdIcon
@@ -183,6 +185,35 @@ Item {
             poly(ctx, [[4.5,4.5],[19.5,4.5],[19.5,19.5],[4.5,19.5]], true)
             poly(ctx, [[5.5,17.5],[10,11.5],[13.5,15.5],[16,12.5],[18.5,17.5]], false)
             ring(ctx, 15.5, 8, 1.6)
+            break
+        // 导入：下箭头落入托盘（U1：菜单项"导入"）
+        case "import":
+            seg(ctx, 12, 4.5, 12, 13.5)
+            poly(ctx, [[8.5,10.2],[12,13.7],[15.5,10.2]], false)
+            poly(ctx, [[4.5,14.5],[4.5,19.5],[19.5,19.5],[19.5,14.5]], false)
+            break
+        // 信息：圆 + i（U1：菜单项"关于/信息"）
+        case "info":
+            ring(ctx, 12, 12, 8)
+            seg(ctx, 12, 11, 12, 16.5)
+            ctx.beginPath(); ctx.arc(12, 7.8, 1.1, 0, Math.PI * 2); ctx.fill()
+            break
+        // 书签：缎带（U1：菜单项"书签"；bookmarkFill 为其实心变体）
+        case "bookmark":
+            poly(ctx, [[7,4.5],[17,4.5],[17,19.5],[12,15.5],[7,19.5]], true)
+            break
+        case "bookmarkFill":
+            ctx.beginPath()
+            ctx.moveTo(7, 4.5); ctx.lineTo(17, 4.5); ctx.lineTo(17, 19.5)
+            ctx.lineTo(12, 15.5); ctx.lineTo(7, 19.5); ctx.closePath(); ctx.fill()
+            break
+        // 圆点：菜单无图标条目的兜底占位（填充小圆）
+        case "dot":
+            ctx.beginPath(); ctx.arc(12, 12, 2.2, 0, Math.PI * 2); ctx.fill()
+            break
+        // 筛选：漏斗（U1：筛选入口）
+        case "filter":
+            poly(ctx, [[4.5,5.5],[19.5,5.5],[14,12],[14,19],[10,19],[10,12]], true)
             break
         default:
             break   // 未知图标名：不绘制（静默，保持布局占位）

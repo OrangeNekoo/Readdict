@@ -288,6 +288,16 @@ QVariantList BookManager::booksModel() const {
     return out;
 }
 
+QVariantList BookManager::recentBooks(int limit) const {
+    // U1：只收有进度（progress>0）且有阅读记录的书，last_read_at DESC（id DESC 兜底）
+    const QVector<Book> list = selectBooks("WHERE progress > 0 AND last_read_at IS NOT NULL",
+                                           " ORDER BY last_read_at DESC, id DESC");
+    QVariantList out;
+    for (int i = 0; i < list.size() && out.size() < limit; ++i)
+        out.append(bookToMap(list.at(i)));
+    return out;
+}
+
 QVariantMap BookManager::bookToMap(const Book &b) {
     // L6：单书 → QML map 的唯一构造源（booksModel 逐行 / bookByIdModel 单行共用）
     QVariantMap m;

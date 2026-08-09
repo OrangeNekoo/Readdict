@@ -102,6 +102,9 @@ qt_add_qml_module(Readdict
         src/ui/qml/BackgroundNorm.qml
         src/ui/qml/TtsBar.qml
         src/ui/qml/PdfReaderPage.qml
+        src/ui/qml/KdTopSearchBar.qml
+        src/ui/qml/KdDropdownMenu.qml
+        src/ui/qml/KdBottomTabs.qml
 )
 
 qt_add_resources(Readdict "app_resources"

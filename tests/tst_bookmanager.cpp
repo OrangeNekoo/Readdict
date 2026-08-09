@@ -329,12 +329,46 @@ private slots:
         m.chapterTitles(id);
         QCOMPARE(m.chapterCount(id), 2); // sample.epub 实际 2 章（chap1/chap2.xhtml，tst_epubparser 同断言）
     }
+    void recentBooksFiltersAndLimits() {
+        // U1：recentBooks 只收 progress>0 且 last_read_at 非空的书，
+        // 按 last_read_at DESC, id DESC 排序，limit 截断
+        BookManager m(dbPath, "readdict_bm_r1");
+        const qint64 a = addSampleBook(m, "", 0.5, "2026-08-01T10:00:00"); // 有进度
+        const qint64 b = addSampleBook(m, "", 0.0, "2026-08-02T10:00:00"); // 无进度
+        const QVariantList r = m.recentBooks(5);
+        QCOMPARE(r.size(), 1);                       // 仅 progress>0
+        QCOMPARE(r.first().toMap().value("id").toLongLong(), a);
+        Q_UNUSED(b);
+        // U1 补充：排序（last_read_at DESC，同刻按 id DESC 兜底）与 limit 截断
+        const qint64 c = addSampleBook(m, "", 0.7, "2026-08-03T10:00:00");
+        const qint64 d = addSampleBook(m, "", 0.2, "2026-08-01T12:00:00");
+        const QVariantList all = m.recentBooks(10);
+        QCOMPARE(all.size(), 3);
+        QCOMPARE(all.at(0).toMap().value("id").toLongLong(), c); // 最近阅读
+        QCOMPARE(all.at(1).toMap().value("id").toLongLong(), d); // 08-01T12 晚于 a 的 08-01T10
+        QCOMPARE(all.at(2).toMap().value("id").toLongLong(), a);
+        QCOMPARE(m.recentBooks(2).size(), 2);        // limit 截断
+    }
 private:
     // L6：独立文件库（dbPath）用例的加书辅助——books.path 为 UNIQUE 列，序号保证唯一
     qint64 addSampleBook(BookManager &m, const QString &category = QString()) {
         const QString n = QString::number(++m_seq);
         return m.addBook(Book{-1, "样例书" + n, "作者", "出版社", category, "TXT",
                               m_tmp->path() + "/sample_" + n + ".txt", QString(), 0.0});
+    }
+    // U1：带 progress/lastReadAt 的重载——addBook 后 SQL 回填 progress 与
+    // last_read_at（addBook INSERT 不写 last_read_at；setProgress 只写当前时间，
+    // 无法指定时间戳）。连接名默认与本组用例构造的 readdict_bm_r1 一致
+    qint64 addSampleBook(BookManager &m, const QString &category, double progress,
+                         const QString &lastReadAt,
+                         const QString &connection = QStringLiteral("readdict_bm_r1")) {
+        const qint64 id = addSampleBook(m, category);
+        QSqlQuery q(QSqlDatabase::database(connection));
+        q.prepare("UPDATE books SET progress=?, last_read_at=? WHERE id=?");
+        q.addBindValue(progress);
+        q.addBindValue(lastReadAt);
+        q.addBindValue(id);
+        return q.exec() ? id : -1;
     }
     qint64 addSampleBookFromEpub(BookManager &m) {
         return m.addBook(Book{-1, "fixture", "作者", "出版社", "", "EPUB",

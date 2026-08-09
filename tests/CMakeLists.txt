@@ -260,6 +260,9 @@ qt_add_resources(tst_qml "qml_ui"
         ../src/ui/qml/BackgroundNorm.qml
         ../src/ui/qml/TtsBar.qml
         ../src/ui/qml/PdfReaderPage.qml
+        ../src/ui/qml/KdTopSearchBar.qml
+        ../src/ui/qml/KdDropdownMenu.qml
+        ../src/ui/qml/KdBottomTabs.qml
 )
 add_test(NAME tst_qml COMMAND tst_qml)
 

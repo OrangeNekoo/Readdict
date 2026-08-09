@@ -48,6 +48,9 @@ public:
     // ---- QML 可见封装 ----
     QVariantList booksModel() const;
     QVariantList categoriesModel() const;
+    // U1：最近阅读列表——progress>0 且 last_read_at 非空，按 last_read_at DESC
+    //（id DESC 兜底）取前 limit 条（主页"继续阅读"区数据源）
+    Q_INVOKABLE QVariantList recentBooks(int limit) const;
     Q_INVOKABLE void setSort(int index); // 0 Added 1 Author 2 Publisher 3 Category 4 Recent
     Q_INVOKABLE void setFilter(const QString &category);
     Q_INVOKABLE void setCategory(qint64 bookId, const QString &category);
