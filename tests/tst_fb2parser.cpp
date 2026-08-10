@@ -47,6 +47,26 @@ private slots:
         QVERIFY(m.empty());
         QVERIFY(m.title.isEmpty()); // 出错时元数据也不带出
     }
+    // 任务4 复审：description 良构但其后正文 XML 错配——readMetadataOnly 必须
+    // 完整扫描整份文档并检查 QXmlStreamReader error，不能读完 <description>
+    // 就 break 放行（与 parse() 的整文档良构校验语义一致）。
+    void readMetadataOnlyRejectsTrailingXmlError() {
+        QTemporaryDir dir;
+        QFile f(dir.path() + "/badmeta.fb2");
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("<?xml version=\"1.0\"?><FictionBook><description><title-info>"
+                "<book-title>坏书</book-title><author><first-name>坏</first-name>"
+                "<last-name>作者</last-name></author></title-info></description>"
+                "<body><section><p>未闭合</section></body></FictionBook>");
+        f.close();
+        Fb2Parser p;
+        const DocumentModel m = p.readMetadataOnly(f.fileName());
+        QVERIFY(m.title.isEmpty());
+        QVERIFY(m.author.isEmpty());
+        QVERIFY(m.publisher.isEmpty());
+        // 与完整 parse 语义一致：同一份文件 parse() 也必须失败
+        QVERIFY(p.parse(f.fileName()).empty());
+    }
     void extractsImagesToTemp() {
         // 自带一张 1x1 PNG（base64）的临时 FB2：<image l:href> 引用 <binary>，
         // 解出到临时目录并写入 Paragraph.imagePath；二进制置于 body 之后

@@ -252,9 +252,10 @@ QString BookImporter::adoptFile(const QString &pathInLibrary) {
 QString BookImporter::registerBook(const QString &destPath, const QString &format,
                                    qint64 *importedId) {
     const QString coverDir = m_libraryDir + "/covers/";
-    // 任务4：注册前以最小开销解析一次元数据（EPUB 只扫 OPF、FB2 只扫 description、
-    // MOBI 只 init/load+EXTH，避免整书二次解析）。标题元数据优先、文件名兜底；
-    // 解析失败不阻断入库（标题回退文件名，作者/出版社留空不伪造）。
+    // 任务4：注册前以最小开销解析一次元数据（EPUB 只扫 OPF、FB2 完整扫描 XML
+    // 校验良构但不收 binary/正文、MOBI 只 init/load+EXTH，避免整书二次解析）。
+    // 标题元数据优先、文件名兜底；解析失败（含缺 spine/畸形 OPF、FB2 尾部 XML
+    // 错误）不阻断入库（标题回退文件名，作者/出版社留空不伪造）。
     const DocumentModel meta = ParserFactory::readMetadata(destPath, format);
     const QString title = meta.title.isEmpty()
         ? QFileInfo(destPath).completeBaseName() : meta.title;

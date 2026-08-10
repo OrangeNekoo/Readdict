@@ -162,6 +162,75 @@ static QString makeIriCoverEpub(const QString &path) {
     return writeZipFile(path, entries) ? path : QString();
 }
 
+// 任务4 复审：有效容器 + OPF 有元数据但缺 spine 的 EPUB（元数据可读但整书无效）
+static QString makeNoSpineEpub(const QString &path) {
+    const QString container =
+        QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                       "<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">"
+                       "<rootfiles><rootfile full-path=\"OEBPS/content.opf\" "
+                       "media-type=\"application/oebps-package+xml\"/></rootfiles></container>");
+    const QString opf =
+        QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                       "<package xmlns=\"http://www.idpf.org/2007/opf\" unique-identifier=\"id\" version=\"2.0\">"
+                       "<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">"
+                       "<dc:title>缺spine书</dc:title><dc:creator>作者乙</dc:creator>"
+                       "<dc:publisher>出版社乙</dc:publisher>"
+                       "</metadata>"
+                       "<manifest>"
+                       "<item href=\"Text/ch1.xhtml\" id=\"ch1\" media-type=\"application/xhtml+xml\"/>"
+                       "</manifest>"
+                       "</package>");
+    const QList<QPair<QString, QByteArray>> entries = {
+        {QStringLiteral("META-INF/container.xml"), container.toUtf8()},
+        {QStringLiteral("OEBPS/content.opf"), opf.toUtf8()},
+    };
+    return writeZipFile(path, entries) ? path : QString();
+}
+
+// 任务4 复审：有效容器 + OPF 元数据后有 XML 良构错误的 EPUB（<itemref> 未闭合
+// 即遇 </spine>）；含 ch1.xhtml，确保错误前收集到的 spine 引用足以"看似可解析"。
+static QString makeBadOpfEpub(const QString &path) {
+    const QString container =
+        QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                       "<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">"
+                       "<rootfiles><rootfile full-path=\"OEBPS/content.opf\" "
+                       "media-type=\"application/oebps-package+xml\"/></rootfiles></container>");
+    const QString opf =
+        QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                       "<package xmlns=\"http://www.idpf.org/2007/opf\" unique-identifier=\"id\" version=\"2.0\">"
+                       "<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">"
+                       "<dc:title>坏书</dc:title><dc:creator>坏作者</dc:creator>"
+                       "<dc:publisher>坏出版社</dc:publisher>"
+                       "</metadata>"
+                       "<manifest>"
+                       "<item href=\"Text/ch1.xhtml\" id=\"ch1\" media-type=\"application/xhtml+xml\"/>"
+                       "</manifest>"
+                       "<spine><itemref idref=\"ch1\"></spine>"
+                       "</package>");
+    const QString ch1 =
+        QStringLiteral("<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+                       "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>Ch1</title></head>"
+                       "<body><p>第一章文本。</p></body></html>");
+    const QList<QPair<QString, QByteArray>> entries = {
+        {QStringLiteral("META-INF/container.xml"), container.toUtf8()},
+        {QStringLiteral("OEBPS/content.opf"), opf.toUtf8()},
+        {QStringLiteral("OEBPS/Text/ch1.xhtml"), ch1.toUtf8()},
+    };
+    return writeZipFile(path, entries) ? path : QString();
+}
+
+// 任务4 复审：description 良构但其后正文 XML 错配的 FB2
+static QString makeBadTrailingFb2(const QString &path) {
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly)) return QString();
+    f.write("<?xml version=\"1.0\"?><FictionBook><description><title-info>"
+            "<book-title>坏书</book-title><author><first-name>坏</first-name>"
+            "<last-name>作者</last-name></author></title-info></description>"
+            "<body><section><p>未闭合</section></body></FictionBook>");
+    f.close();
+    return path;
+}
+
 class TestImporter : public QObject {
     Q_OBJECT
 private slots:
@@ -304,6 +373,49 @@ private slots:
         QCOMPARE(epub->title, QStringLiteral("无封面声明书"));
         QCOMPARE(epub->author, QString());
         QCOMPARE(epub->publisher, QString());
+    }
+    // 任务4 复审：畸形 OPF（缺 spine / XML 良构错误）仍允许入库，但元数据视为
+    // 缺失——标题回退文件名、作者/出版社为空（不阻断、不伪造）。
+    void malformedEpubImportsWithFallbackTitle() {
+        QTemporaryDir libDir;
+        QTemporaryDir srcDir;
+        BookImporter imp(libDir.path(), ":memory:");
+        // 缺 spine：OPF 有 dc:title/creator/publisher，但整书无效
+        const QString noSpine = makeNoSpineEpub(srcDir.path() + "/nospine.epub");
+        QVERIFY(!noSpine.isEmpty());
+        QVERIFY(imp.importFile(noSpine).isEmpty());
+        QCOMPARE(imp.books().size(), 1);
+        QCOMPARE(imp.books()[0].title, QStringLiteral("nospine"));
+        QCOMPARE(imp.books()[0].author, QString());
+        QCOMPARE(imp.books()[0].publisher, QString());
+        // OPF XML 良构错误：同样回退文件名
+        const QString badOpf = makeBadOpfEpub(srcDir.path() + "/badopf.epub");
+        QVERIFY(!badOpf.isEmpty());
+        QVERIFY(imp.importFile(badOpf).isEmpty());
+        QCOMPARE(imp.books().size(), 2);
+        const QVector<Book> all = imp.books();
+        const Book *epub = nullptr;
+        for (const Book &b : all)
+            if (b.format == QLatin1String("EPUB") && b.title == QStringLiteral("badopf"))
+                { epub = &b; break; }
+        QVERIFY(epub);
+        QCOMPARE(epub->title, QStringLiteral("badopf"));
+        QCOMPARE(epub->author, QString());
+        QCOMPARE(epub->publisher, QString());
+    }
+    // 任务4 复审：description 后正文 XML 错配的 FB2——readMetadataOnly 必须判失败，
+    // 入库时标题回退文件名、作者/出版社为空。
+    void malformedFb2ImportsWithFallbackTitle() {
+        QTemporaryDir libDir;
+        QTemporaryDir srcDir;
+        const QString bad = makeBadTrailingFb2(srcDir.path() + "/bad.fb2");
+        QVERIFY(!bad.isEmpty());
+        BookImporter imp(libDir.path(), ":memory:");
+        QVERIFY(imp.importFile(bad).isEmpty());
+        QCOMPARE(imp.books().size(), 1);
+        QCOMPARE(imp.books()[0].title, QStringLiteral("bad"));
+        QCOMPARE(imp.books()[0].author, QString());
+        QCOMPARE(imp.books()[0].publisher, QString());
     }
     void epubFirstImageFallback() {
         // 无 OPF 封面声明：回退「解析首图」，须取第一章首图（红），

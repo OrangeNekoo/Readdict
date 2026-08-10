@@ -122,8 +122,9 @@ DocumentModel Fb2Parser::parse(const QString &fb2Path) {
     return m;
 }
 
-// 轻量元数据读取（任务4）：只做第一遍的 <description> 扫描（不含 binary 收集与
-// 正文分章），供 BookImporter 注册时以最小开销取 title/author/publisher。
+// 轻量元数据读取（任务4）：完整扫描整份 XML 校验良构（与 parse() 第一遍的
+// 良构校验语义一致——description 后的尾部 XML 错配同样判失败），但不收集
+// binary、不分章，供 BookImporter 注册时以最小开销取 title/author/publisher。
 // 元数据语义与 parse() 完全一致（共用 readMetadata）；XML 损坏返回空模型，
 // 调用方按"元数据缺失"处理，不阻断入库。
 DocumentModel Fb2Parser::readMetadataOnly(const QString &fb2Path) {
@@ -143,7 +144,7 @@ DocumentModel Fb2Parser::readMetadataOnly(const QString &fb2Path) {
         if (!meta.isStartElement()) continue;
         if (meta.name() == QLatin1String("description")) {
             readMetadata(meta, &m);
-            break; // 只要 description；body/binary 不扫
+            // 不 break：继续扫到文档尾，确保 description 之后的 XML 也良构
         }
     }
     if (meta.hasError()) {

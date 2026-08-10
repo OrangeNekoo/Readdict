@@ -6,10 +6,36 @@
 #include <QFileInfo>
 #include <QTemporaryDir>
 
+#include <zip.h>   // minizip 写端（构造畸形测试 EPUB）
+#include <zlib.h>
+
 // 编译期注入 fixture 目录（构建目录与源码目录不同，ctest 工作目录为 build/tests）
 #ifndef EPUB_FIXTURES_DIR
 #  define EPUB_FIXTURES_DIR "tests/fixtures"
 #endif
+
+// 用 minizip 把 entries（zip 内路径 → 内容）打包成 zip 文件（同 tst_bookimporter 模式）
+static bool writeZipFile(const QString &zipPath,
+                         const QList<QPair<QString, QByteArray>> &entries) {
+    zipFile zf = zipOpen64(zipPath.toUtf8().constData(), APPEND_STATUS_CREATE);
+    if (!zf) return false;
+    for (const auto &e : entries) {
+        zip_fileinfo zi = {};
+        if (zipOpenNewFileInZip(zf, e.first.toUtf8().constData(), &zi,
+                                nullptr, 0, nullptr, 0, nullptr,
+                                Z_DEFLATED, Z_DEFAULT_COMPRESSION) != ZIP_OK) {
+            zipClose(zf, nullptr);
+            return false;
+        }
+        if (zipWriteInFileInZip(zf, e.second.constData(),
+                                static_cast<unsigned>(e.second.size())) != ZIP_OK) {
+            zipClose(zf, nullptr);
+            return false;
+        }
+        zipCloseFileInZip(zf);
+    }
+    return zipClose(zf, nullptr) == ZIP_OK;
+}
 
 class TestEpubParser : public QObject {
     Q_OBJECT
@@ -43,6 +69,78 @@ private slots:
         f.write("this is not a zip file at all"); f.close();
         EpubParser p;
         QVERIFY(p.parse(f.fileName()).empty());
+    }
+    // 任务4 复审：有效容器 + OPF 有元数据但缺 spine——readMetadata 必须与完整
+    // parse() 一样判失败返回空元数据，不能把 OPF 里的 dc:title 带出来
+    // （BookImporter 按"元数据缺失"处理：标题回退文件名、作者/出版社空）。
+    void readMetadataMissingSpineReturnsEmpty() {
+        QTemporaryDir dir;
+        const QString path = dir.path() + "/nospine.epub";
+        const QString container =
+            QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                           "<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">"
+                           "<rootfiles><rootfile full-path=\"OEBPS/content.opf\" "
+                           "media-type=\"application/oebps-package+xml\"/></rootfiles></container>");
+        const QString opf =
+            QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                           "<package xmlns=\"http://www.idpf.org/2007/opf\" unique-identifier=\"id\" version=\"2.0\">"
+                           "<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">"
+                           "<dc:title>缺spine书</dc:title><dc:creator>作者乙</dc:creator>"
+                           "<dc:publisher>出版社乙</dc:publisher>"
+                           "</metadata>"
+                           "<manifest>"
+                           "<item href=\"Text/ch1.xhtml\" id=\"ch1\" media-type=\"application/xhtml+xml\"/>"
+                           "</manifest>"
+                           "</package>");
+        QVERIFY(writeZipFile(path, {
+            {QStringLiteral("META-INF/container.xml"), container.toUtf8()},
+            {QStringLiteral("OEBPS/content.opf"), opf.toUtf8()},
+        }));
+        EpubParser p;
+        const DocumentModel m = p.readMetadata(path);
+        QVERIFY(m.title.isEmpty());
+        QVERIFY(m.author.isEmpty());
+        QVERIFY(m.publisher.isEmpty());
+        // 与完整 parse 的有效性语义一致：parse 同样因缺 spine 失败
+        QVERIFY(p.parse(path).empty());
+    }
+    // 任务4 复审：有效容器 + OPF 元数据后有 XML 良构错误（<itemref> 未闭合即遇
+    // </spine>）——readMetadata 不能忽略 QXmlStreamReader error 带出已读元数据。
+    void readMetadataMalformedOpfReturnsEmpty() {
+        QTemporaryDir dir;
+        const QString path = dir.path() + "/badopf.epub";
+        const QString container =
+            QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                           "<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">"
+                           "<rootfiles><rootfile full-path=\"OEBPS/content.opf\" "
+                           "media-type=\"application/oebps-package+xml\"/></rootfiles></container>");
+        const QString opf =
+            QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                           "<package xmlns=\"http://www.idpf.org/2007/opf\" unique-identifier=\"id\" version=\"2.0\">"
+                           "<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">"
+                           "<dc:title>坏书</dc:title><dc:creator>坏作者</dc:creator>"
+                           "<dc:publisher>坏出版社</dc:publisher>"
+                           "</metadata>"
+                           "<manifest>"
+                           "<item href=\"Text/ch1.xhtml\" id=\"ch1\" media-type=\"application/xhtml+xml\"/>"
+                           "</manifest>"
+                           "<spine><itemref idref=\"ch1\"></spine>"
+                           "</package>");
+        QVERIFY(writeZipFile(path, {
+            {QStringLiteral("META-INF/container.xml"), container.toUtf8()},
+            {QStringLiteral("OEBPS/content.opf"), opf.toUtf8()},
+            {QStringLiteral("OEBPS/Text/ch1.xhtml"),
+                QByteArrayLiteral("<?xml version=\"1.0\"?><html xmlns=\"http://www.w3.org/1999/xhtml\">"
+                                  "<body><p>正文。</p></body></html>")},
+        }));
+        EpubParser p;
+        const DocumentModel m = p.readMetadata(path);
+        QVERIFY(m.title.isEmpty());
+        QVERIFY(m.author.isEmpty());
+        QVERIFY(m.publisher.isEmpty());
+        // 与完整 parse 的有效性语义一致：OPF XML 错误时 parse 也必须整体失败
+        // （不能拿错误 OPF 里的 spine 继续解析章节）
+        QVERIFY(p.parse(path).empty());
     }
     void extractsImagesToTemp() {
         EpubParser p;

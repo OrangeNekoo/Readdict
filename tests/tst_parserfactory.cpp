@@ -143,6 +143,23 @@ private slots:
             QVERIFY2(drmErr.contains(QStringLiteral("DRM")), qPrintable(drmErr));
         }
     }
+    // 任务4 复审：readMetadata 路由到 FB2 时，description 后正文 XML 错配必须
+    // 返回空元数据（与 ParserFactory::parse 的整体失败语义一致）
+    void readMetadataFb2TrailingXmlReturnsEmpty() {
+        QTemporaryDir dir;
+        QFile f(dir.path() + "/badmeta.fb2");
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("<?xml version=\"1.0\"?><FictionBook><description><title-info>"
+                "<book-title>坏书</book-title><author><first-name>坏</first-name>"
+                "<last-name>作者</last-name></author></title-info></description>"
+                "<body><section><p>未闭合</section></body></FictionBook>");
+        f.close();
+        const DocumentModel m = ParserFactory::readMetadata(f.fileName(), "FB2");
+        QVERIFY(m.title.isEmpty());
+        QVERIFY(m.author.isEmpty());
+        QVERIFY(m.publisher.isEmpty());
+        QVERIFY(ParserFactory::parse(f.fileName(), "FB2").empty());
+    }
     void successLeavesErrorEmpty() {
         QString err;
         ParserFactory::parse(QStringLiteral(PARSER_FIXTURES_DIR) + "/sample.epub", "EPUB", &err);

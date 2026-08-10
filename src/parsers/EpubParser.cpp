@@ -94,10 +94,12 @@ struct OpfInfo {
     QStringList spineIds;
 };
 
-// 解析 content.opf（标签名去前缀匹配，兼容 dc:title 等命名空间写法）
+// 解析 content.opf（标签名去前缀匹配，兼容 dc:title 等命名空间写法）。
+// 返回 false 表示 OPF 无效：缺 spine（整书无可读章节）或 XML 良构错误——
+// 与 parse()/readMetadata 的"元数据缺失"语义一致，不把错误 OPF 里的字段带出。
 bool parseOpf(const QByteArray &xml, OpfInfo *out) {
     QXmlStreamReader r(xml);
-    while (!r.atEnd()) {
+    while (!r.atEnd() && !r.hasError()) {
         r.readNext();
         if (!r.isStartElement())
             continue;
@@ -122,7 +124,7 @@ bool parseOpf(const QByteArray &xml, OpfInfo *out) {
                 out->spineIds.append(idref);
         }
     }
-    return !out->spineIds.isEmpty();
+    return !r.hasError() && !out->spineIds.isEmpty();
 }
 
 // 从归一化 html 提取首个 h1-h3 文本（章节标题兜底，<title> 缺失时用）
@@ -562,8 +564,9 @@ DocumentModel EpubParser::parse(const QString &epubPath) {
 
 // 轻量元数据读取（任务4）：只走 container.xml → OPF 扫描，不解压/解析任何章节，
 // 供 BookImporter 注册时以最小开销取 title/author/publisher（避免整书二次解析）。
-// 与 parse() 共用 parseOpf，元数据语义一致；OPF 缺失/损坏时返回空模型不设错误
-// （调用方按"元数据缺失"处理：标题回退文件名，作者/出版社留空，不阻断入库）。
+// 与 parse() 共用 parseOpf，有效性语义一致：OPF 缺失/损坏、缺 spine、XML 良构
+// 错误均返回空模型不设错误（调用方按"元数据缺失"处理：标题回退文件名，
+// 作者/出版社留空，不阻断入库）。
 DocumentModel EpubParser::readMetadata(const QString &epubPath) {
     DocumentModel m;
     m_error.clear();
@@ -581,7 +584,8 @@ DocumentModel EpubParser::readMetadata(const QString &epubPath) {
     if (opf.isEmpty())
         return m;
     OpfInfo info;
-    parseOpf(opf, &info);
+    if (!parseOpf(opf, &info))
+        return m; // 缺 spine 或 XML 错误：返回空元数据（标题回退由调用方处理）
     m.title = info.title;
     m.author = info.author;
     m.publisher = info.publisher;
