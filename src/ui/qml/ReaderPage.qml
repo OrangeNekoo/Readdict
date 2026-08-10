@@ -585,9 +585,19 @@ Page {
         Books.reportProgress(page.book.id, i + 1, Books.chapterCount(page.book.id))
         // C5：拍平本段全部段落句子喂给 Tts（顺序与 ReaderContent 的 sentenceStarts 一致），
         // 换章复位游标 → 高亮回到首句；Tts.currentIndex 驱动逐句高亮与滚动跟随。
+        // 复审修复：段落可能为 null（解析器异常数据）——null 按空段跳过
+        //（(p ?? {}).sentences ?? []，不抛 TypeError、不破坏句子索引对齐，同
+        // ReaderContent 的 computeSentenceStarts/rebuildPageModel 防御）；
+        // 意外异常（如 sentences 非可迭代）兜底置 loadError 显示可读错误占位
+        //（"异常保持 loadError"分支，loadErrorHost 覆盖内容区 + 重试按钮）。
         const all = []
-        for (const p of (page.chapter.paragraphs ?? []))
-            for (const s of (p.sentences ?? [])) all.push(s)
+        try {
+            for (const p of (page.chapter.paragraphs ?? []))
+                for (const s of ((p ?? {}).sentences ?? [])) all.push(s)
+        } catch (err) {
+            page.loadError = qsTr("章节数据异常，部分内容无法朗读")
+            page.loadErrorIndex = i
+        }
         Tts.setSentences(all)
         Tts.setChapter(i)
     }

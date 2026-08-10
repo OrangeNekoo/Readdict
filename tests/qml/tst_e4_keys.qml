@@ -207,6 +207,42 @@ Item {
             compare(Books.currentChapter, titles.length - 1, "末章 → 应钳制在末章")
             h.stack.destroy()
         }
+
+        // 任务3 复审修复：动画停止不得误触发自动续章——scrollPage 翻页动画在途时
+        //（checkNextOnStop=true），尺寸重算/换章停动画（stopPageAnimations →
+        // pageAnim.stop() 同步触发 onStopped）不得把"中断"误判为"自然到达章末"
+        // 触发 requestNextChapter 换章。修复：stop 前保存并清空标志，onStopped
+        // 期间标志为 false 不再误判；恢复保存值保持后续滚动意图语义。
+        function test_animationStopDoesNotChangeChapter() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            compare(cv.pageMode, "scroll", "本用例应为 scroll 模式")
+            Books.currentChapter = 0
+            page.loadChapter(0)
+            tryVerify(function () { return cv.contentHeight > cv.height * 2 }, 3000,
+                      "章 0 内容应远超视口")
+            // 定位到章末阈值带内（距底 < autoNextThreshold=200）——自然翻页到底会续章；
+            // 置位 nextChapterRequested 掩护定位本身不触发 checkAutoNext，再复位
+            cv.nextChapterRequested = true
+            cv.contentY = cv.contentHeight - cv.height - 60
+            cv.nextChapterRequested = false
+            wait(50)
+            // ↓ 翻页动画在途（checkNextOnStop=true；目标=maxY 恰在阈值带内）
+            cv.handleKey(Qt.Key_Down, Qt.NoModifier)
+            verify(cv.pageAnimation.running === true, "↓ 应驱动纵向翻页动画")
+            // 动画中途尺寸重算 → stopPageAnimations：修复前 onStopped 误触发续章
+            var orig = cv.typography
+            cv.typography = { fontSize: Number(orig.fontSize || 18) + 2 }
+            verify(cv.pageAnimation.running === false, "尺寸重算应停止翻页动画")
+            cv.typography = orig
+            wait(450)
+            compare(Books.currentChapter, 0, "动画停止不得误触发自动续章（实际 currentChapter="
+                    + Books.currentChapter + "）")
+            h.stack.destroy()
+        }
     }
 
     TestCase {
@@ -552,6 +588,9 @@ Item {
 
         // 任务3 审查修复：尺寸重算（排版/视口变化 → rebuildPageModel）同样必须
         // 停止全部动画——旧动画目标基于旧几何，重算后继续运行会产生错位。
+        // 任务3 复审修复：动画中断后 contentX 重定位到逻辑页（=动画目标页）× 新页宽，
+        // 满足不变量 contentX === currentPage × 页宽——旧断言"停在 0"与逻辑页 1 错位，
+        // 改为新不变量（中断不丢翻页意图）。
         function test_resizeRebuildStopsPageAnimation() {
             var book = findBook("longbook")
             verify(book !== null, "longbook 应已导入")
@@ -567,10 +606,53 @@ Item {
             var orig = cv.typography
             cv.typography = { fontSize: Number(orig.fontSize || 18) + 4 }
             verify(cv.pageAnimationX.running === false, "尺寸重算应停止横向翻页动画")
+            // 动画目标页（currentPage=1）在重算后保留：contentX 重定位到 1 × 新页宽
+            compare(cv.currentPage, 1, "中断动画的逻辑目标页应保留")
+            tryVerify(function () {
+                return Math.abs(cv.contentX - cv.currentPage * cv.width) < 1
+            }, 3000, "尺寸重算后 contentX 应重定位到 currentPage × 页宽（contentX="
+                    + cv.contentX + "，currentPage=" + cv.currentPage + "，页宽=" + cv.width + "）")
             cv.typography = orig
             wait(450)
-            verify(Math.abs(cv.contentX) < 4,
-                   "尺寸重算后 contentX 应停在 0（旧动画不得写回旧目标），实际 " + cv.contentX)
+            tryVerify(function () {
+                return Math.abs(cv.contentX - cv.currentPage * cv.width) < 1
+            }, 3000, "恢复排版后 contentX 仍应保持 currentPage × 页宽（contentX="
+                    + cv.contentX + "）")
+            h.stack.destroy()
+        }
+
+        // 任务3 复审修复：rebuildPageModel clamp currentPage 后 contentX 必须重定位到
+        // currentPage × 新页宽——页宽变化（窗口 resize）后旧实现只钳 maxX，contentX
+        // 停在旧几何值，与逻辑当前页错位（后续翻页按 currentPage 计算 → 目标错位）。
+        function test_resizeRepositionsContentXToCurrentPage() {
+            var book = findBook("longbook")
+            verify(book !== null, "longbook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.pageMode = "paged"
+            verify(waitPagesSettled(cv), "页面模型应就绪（pageCount=" + cv.pageCount + "）")
+            verify(cv.pageCount >= 3, "longbook 应至少 3 页（pageCount=" + cv.pageCount + "）")
+            // 定位到第 2 页（contentX = 2 × 页宽），逻辑页同步为 2
+            cv.contentX = 2 * cv.width
+            tryVerify(function () { return cv.currentPage === 2 }, 3000,
+                      "contentX 应同步逻辑页 2，实际 " + cv.currentPage)
+            var oldW = cv.width
+            compare(cv.contentX, 2 * oldW, "翻页后 contentX 应在 2 × 页宽")
+            // 视口缩窄（生产 resize 路径：root → StackView → ReaderPage 锚定链）
+            var ow = root.width
+            root.width = 700
+            tryVerify(function () { return Math.abs(cv.width - 700) < 1 }, 3000,
+                      "视口应缩窄到 700，实际 " + cv.width)
+            // 不变量：resize 后 contentX 必须 = 逻辑当前页 × 新页宽
+            tryVerify(function () {
+                return Math.abs(cv.contentX - cv.currentPage * cv.width) < 1
+            }, 3000, "resize 后 contentX 应重定位到 currentPage × 新页宽（contentX="
+                    + cv.contentX + "，currentPage=" + cv.currentPage + "，页宽=" + cv.width + "）")
+            compare(cv.currentPage, 2, "resize 应保留逻辑当前页 2")
+            verify(Math.abs(cv.contentX - 2 * cv.width) < 1,
+                   "contentX 应为 2 × 新页宽（实际 " + cv.contentX + "，新页宽 " + cv.width + "）")
+            root.width = ow
             h.stack.destroy()
         }
 
@@ -637,6 +719,47 @@ Item {
             compare(cv.pageRepeater.count, cv.pageCount, "页面委托应与 pageCount 同步")
             verify(cv.paragraphItemAt(1) !== null, "非 null 段落应可按全局索引定位")
             compare(cv.contentX, 0, "null 段落后 contentX 应保持 0")
+            h.stack.destroy()
+        }
+
+        // 任务3 复审补充：scroll 模式 null 段落——Repeater 的 modelData 为 null 时
+        // globalIndex 必须取 Repeater 自身 index（scroll 模式下即段落全局索引），
+        // 不得经 (modelData ?? 0) 映射为 0——否则 null 段的 sentenceStart 错取
+        // 第 0 段起始、句/划线索引错位（高亮键 "chapter|sentenceIndex" 由
+        // sentenceStart 派生，见 markerFor）。
+        function test_scrollNullParagraphKeepsGlobalIndex() {
+            var book = findBook("longbook")
+            verify(book !== null, "longbook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            compare(cv.pageMode, "scroll", "本用例应为 scroll 模式")
+            page.chapter = {
+                title: "scroll-null",
+                paragraphs: [
+                    { text: "第一段", sentences: ["第一段"] },
+                    null,
+                    { text: "第三段", sentences: ["第三段"] },
+                    null,
+                    { text: "第五段", sentences: ["第五段"] }
+                ]
+            }
+            wait(100)
+            var it0 = cv.paragraphRepeater.itemAt(0)
+            var it1 = cv.paragraphRepeater.itemAt(1)
+            var it3 = cv.paragraphRepeater.itemAt(3)
+            var it4 = cv.paragraphRepeater.itemAt(4)
+            verify(it0 !== null && it1 !== null && it3 !== null && it4 !== null,
+                   "scroll Repeater 应为全部 5 段创建占位项")
+            // 关键：null 段 globalIndex 必须是 Repeater index（1/3），不是 0
+            compare(it1.globalIndex, 1, "null 段 globalIndex 应为 1（旧实现映射为 0）")
+            compare(it3.globalIndex, 3, "null 段 globalIndex 应为 3")
+            // 非 null 段 globalIndex 不受影响
+            compare(it0.globalIndex, 0, "首段 globalIndex 应为 0")
+            compare(it4.globalIndex, 4, "末段 globalIndex 应为 4")
+            // 句索引对齐：第 5 段（全局 4）起始 = 前 4 段句子总数 = 2（两段有句子）
+            compare(cv.sentenceStarts[4], 2, "sentenceStarts[4] 应为 2（null 段按空段对齐）")
+            compare(it4.sentenceStart, 2, "第 5 段 sentenceStart 应为 2")
             h.stack.destroy()
         }
 

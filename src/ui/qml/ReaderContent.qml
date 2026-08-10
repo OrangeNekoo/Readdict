@@ -302,10 +302,12 @@ Flickable {
         if (cur.length > 0) pages.push(cur)
         flick.pageModel = pages
         flick.pageCount = pages.length
-        // 钳制当前页：页数变化后 contentX 不得超过末页，逻辑页同步钳制
-        var maxX = Math.max(0, (pages.length - 1) * flick.pageWidth())
+        // 钳制当前页并重定位 contentX：页数/页宽变化后，contentX 必须 = 逻辑当前页 ×
+        // 新页宽——复审修复：此前只钳 maxX，页宽变化（窗口 resize）后 contentX 停在
+        // 旧几何值，与 currentPage（翻页/吸附按它计算）错位；动画中断时 currentPage
+        // 即逻辑目标页，重定位不丢翻页意图（onContentXChanged 的同步/吸附均为幂等）。
         flick.currentPage = Math.max(0, Math.min(flick.currentPage, pages.length - 1))
-        if (flick.contentX > maxX) flick.contentX = maxX
+        flick.contentX = flick.currentPage * flick.pageWidth()
     }
 
     // 页宽 = 视口宽（paged 页沿 x 轴每页占满一屏）
@@ -351,11 +353,20 @@ Flickable {
         pageAnimX.start()
     }
 
-    // 停掉全部滚动/翻页动画（换章/尺寸重算/翻页互斥共用；stop 对停止态为 no-op）
+    // 停掉全部滚动/翻页动画（换章/尺寸重算/翻页互斥共用；stop 对停止态为 no-op）。
+    // 复审修复：pageAnim.stop() 会**同步**触发 onStopped——若 checkNextOnStop 仍为真
+    //（scrollPage 翻页动画在途）会把"外部中断"误判为"自然到达章末"，onStopped 的
+    // checkAutoNext 随之误触发 requestNextChapter 自动续章（尺寸重算/换章中断动画时
+    // 尤其隐蔽）。stop 前保存并清空标志，onStopped 期间标志为 false 不再误判；
+    // 再恢复保存值——调用方若继续滚动意图（scrollPage 重启 pageAnim）会自行置位，
+    // 恢复保持"中断不丢滚动意图"的语义（自然完成时仍按实际位置补查续章）。
     function stopPageAnimations() {
+        var savedCheck = flick.checkNextOnStop
+        flick.checkNextOnStop = false
         followAnim.stop()
         pageAnim.stop()
         pageAnimX.stop()
+        flick.checkNextOnStop = savedCheck
     }
 
     // 规格 §7：章末自动续章——距底部 autoNextThreshold 内（且用户已实际滚动，contentY>0）
@@ -796,8 +807,18 @@ Flickable {
             id: para
             property var paraData: (modelData !== null && typeof modelData === "object")
                 ? modelData : ((flick.chapter.paragraphs ?? [])[modelData] ?? {})
-            property int globalIndex: (modelData !== null && typeof modelData === "object")
-                ? index : (modelData === undefined ? index : (modelData ?? 0))
+            // 复审修复：scroll 模式下段落为 null（解析器异常数据）时 modelData 为
+            // null，旧逻辑落入 (modelData ?? 0) 把 null 段落映射为全局索引 0——
+            // 其 sentenceStart 错取第 0 段起始、句/划线索引错位。null/undefined
+            // 统一按 Repeater 自身 index 处理（scroll 模式 Repeater index = 段落
+            // 全局索引）；paged 模式 modelData 恒为数字（段落全局索引，index 是
+            // 页内位置），object 恒为 scroll 段落对象 → 均不受影响。
+            property int globalIndex: {
+                var md = modelData
+                if (md === null || md === undefined) return index
+                if (typeof md === "object") return index
+                return md
+            }
             width: para.parent ? para.parent.width : 0
             // 纯图片段（html 去掉 img 标签后无其他内容）走 Image 分支等比缩放；
             // 混合段（如 "文本 <img> 文本"，EpubParser 对段内行内图同时填 html 与 imagePath）
