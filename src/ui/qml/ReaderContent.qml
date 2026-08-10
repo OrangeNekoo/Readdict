@@ -368,6 +368,12 @@ Flickable {
         var maxY = Math.max(0, flick.contentHeight - flick.height)
         var pageH = Math.max(1, flick.height)
         var nearest = Math.max(0, Math.min(Math.round(flick.contentY / pageH) * pageH, maxY))
+        // U6：末页不完整（maxY 非 pageH 整数倍）时 maxY 本身是合法停靠位——
+        // 网格吸附会把停在章末的 contentY 拽回上一整页边界，pageNext 从此
+        // 永远无法在章末触发翻章（键盘与真实读者都卡死在末页）。maxY 更近时
+        // 以其为吸附目标（其余页面 maxY 远在视口外，行为不变）。
+        if (Math.abs(maxY - flick.contentY) < Math.abs(nearest - flick.contentY))
+            nearest = maxY
         if (Math.abs(nearest - flick.contentY) < 1) return
         followAnim.stop()
         pageAnim.stop()

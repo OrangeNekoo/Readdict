@@ -69,6 +69,14 @@ Item {
 
     TestCase {
         name: "MainNavSmoke"
+        // U6：搜索/筛选残留复位（同 tst_readerpage/tst_shelf 约定）——tst_main
+        // FulltextSmoke 的顶部搜索残留会让 booksModel 为空，找不到非 PDF 测试书，
+        // 兜底导入又撞上已存在的同名书库文件（全量套件失败源）。
+        function initTestCase() {
+            Books.doSearch("")
+            Books.setFilter("")
+            Books.setSort(0)
+        }
         function test_navSwitchReaderResume() {
             var loader = mainComp.createObject(root)
             var win = loader.item

@@ -4,6 +4,7 @@ import QtQuick.Controls.Material
 import QtQuick.Layouts
 import QtQuick.Pdf
 import Readdict.Backend
+import Readdict.UI 1.0
 
 // PDF 阅读页（B9）：QtQuick.Pdf 的 PdfScrollablePageView 单页滚动视图。
 // 注意：Qt 6.7 起 QML 模块由 QtPdf 更名为 QtQuick.Pdf，PdfScrollablePageView
@@ -95,7 +96,8 @@ Page {
                 text: page.book.title ?? ""
                 elide: Text.ElideRight
                 font.bold: true
-                color: "#1A1A1A"
+                // U6：Token 审计——原 #1A1A1A 与 lightTextPrimary 同值，收编为 Token
+                color: UITheme.lightTextPrimary
             }
         }
     }

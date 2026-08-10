@@ -163,17 +163,35 @@ Item {
         // 也被判为稳定 → maxY 按旧章算（内容 100 段 vs 新章 61 段时偏差巨大）。
         // 现要求委托数先匹配当前章（paragraphRepeater.count == paragraphs.length）
         // 再判高度稳定，彻底排除旧章高度残留窗口。
+        // U6 再修复：count 同步先于高度落地——委托已重建（count 匹配新章）但各委托
+        // implicitHeight（富文本排版，col.implicitHeight 即 contentHeight）尚未更新时，
+        // contentHeight 仍持旧章值且连续稳定，旧判据直接通过 → maxY 按旧章捕获，
+        // 循环期间高度骤降致 contentY 钳制、pageNext 提前翻章（全量套件 flake 实证：
+        // 章 1 60 段 maxY=2316 被误判为章 0 100 段的 4231）。故要求 count 同步后
+        // 高度相对首同步样本发生一次变动（新章布局落地）再稳定两次才算收敛。
         function waitContentSettled(cv) {
             var last = -1
             var stable = 0
+            var hAtFirstSync = -1
+            var sawSync = false
             var t0 = new Date().getTime()
             while (new Date().getTime() - t0 < 5000) {
                 var h = cv.contentHeight
                 var synced = cv.chapter && cv.chapter.paragraphs
                     && cv.paragraphRepeater.count === cv.chapter.paragraphs.length
-                if (synced && Math.abs(h - last) < 0.5) stable++
-                else stable = 0
-                if (synced && stable >= 2 && h > cv.height) return true
+                if (synced) {
+                    if (!sawSync) {
+                        sawSync = true
+                        hAtFirstSync = h
+                    }
+                    if (Math.abs(h - last) < 0.5) stable++
+                    else stable = 0
+                    if (Math.abs(h - hAtFirstSync) >= 0.5   // 新章高度已落地
+                            && stable >= 2 && h > cv.height) return true
+                } else {
+                    stable = 0
+                    sawSync = false
+                }
                 last = h
                 wait(50)
             }

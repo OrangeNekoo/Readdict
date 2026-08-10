@@ -158,6 +158,14 @@ Item {
         // B1：删除书籍冒烟——requestDelete 打开确认对话框 → 勾选删文件 accept →
         // 书从 booksModel 消失、书库文件被删、共享占位封面保留。
         // 专属书源（delme.txt）由 TestEnv 生成，删它不影响共享的 zeta/alpha/mike。
+        // U6：跨用例搜索/筛选残留复位（同 tst_readerpage/tst_shelf 约定）——
+        // 本文件 FulltextSmoke 的顶部搜索残留会把 booksModel 过滤为空，
+        // 不复位则 delme 导入成功后 findDeleteBook 仍找不到（全量套件失败源）。
+        function initTestCase() {
+            Books.doSearch("")
+            Books.setFilter("")
+            Books.setSort(0)
+        }
         function findDeleteBook() {
             for (let b of Books.booksModel)
                 if (b.title === "delme") return b
@@ -223,6 +231,9 @@ Item {
             verify((hit.snippet || "").length > 0, "命中应带 snippet，实际 " + hit.snippet)
             shelf.filterSheet.scopeList.currentIndex = 0
             verify(shelf.fulltextList.visible === false, "切回元数据后全文结果列表应隐藏")
+            // U6：还原顶部搜索——text 驱动 Books.doSearch，不还原会把 booksModel
+            // 过滤为空，污染同文件后序 DeleteSmoke 与后续 tst_nav 的书目查找
+            win.topSearchBar.text = ""
             win.visible = false
             loader.destroy()
         }

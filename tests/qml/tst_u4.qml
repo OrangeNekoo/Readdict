@@ -221,11 +221,13 @@ Item {
                       "Sheet 关闭应恢复控制栏计时")
             tryVerify(function () { return !page.controlsVisible }, 3000,
                       "计时恢复后控制栏应自动隐藏")
-            // 底部 1/4 轻点仍唤出快捷控制栏（C3 语义保留，与 Sheet 并存）
+            // 底部 1/4 轻点仍唤出快捷控制栏（C3 语义保留），并同时带出 Sheet 与
+            // 顶栏（U4 修复契约：隐藏态底部热区稳定唤出顶栏——同 tst_readerpage
+            // ControlsSummonSmoke::test_clickBottomSummonsAndAutoHides 同款断言）
             page.handleContentTap(600)
-            tryVerify(function () { return page.controlsVisible }, 3000,
-                      "底部 1/4 轻点应唤出快捷控制栏")
-            verify(!page.sheetOpen, "唤出控制栏不应带出 Sheet")
+            tryVerify(function () {
+                return page.controlsVisible && page.sheetOpen && page.topToolbar.visible
+            }, 3000, "底部 1/4 轻点应唤出快捷控制栏与顶栏")
             h.stack.destroy()
         }
 
