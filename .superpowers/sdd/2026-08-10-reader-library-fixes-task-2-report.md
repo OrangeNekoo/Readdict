@@ -61,3 +61,41 @@
 ## 提交
 
 - commit：简体中文 message（见文末）
+
+---
+
+## 复审修复（按钮点击回归）
+
+### 审查发现
+
+ReaderContent 根级 `TapHandler` 覆盖全视口（含 `selectionToolbar`/`colorToolbar` 子按钮）：若轻点命中可见工具条仍发 `contentTapped`，ReaderPage 会连带打开 Sheet，违反"按钮点击不受影响"。
+
+### 实测结论（评审证据）
+
+- 先用探针（真实 `mouseClick` 逐点驱动）验证泄漏是否可复现：划线按钮、色板色块、工具条非按钮内边距、复制按钮共 4 类点击，`contentTapped` 均未触发、sheetOpen 保持 false；仅正文宿主裸表面（左/下边缘留白）触发。Qt 6.11 下 Flickable 对内容区按压的 grab 仲裁会取消根级 TapHandler 的轻点手势——泄漏在当前环境不可复现，但屏蔽依赖该隐式仲裁（不同 Qt 版本/输入设备/未来重构下可能变化）。
+- 复现过程中发现既有缺陷（**范围外，未修**）：复制按钮 `onClicked` 引用 `Clipboard`（`Clipboard.text = selText`），全仓库无任何注册（main.cpp/tst_qmlmain.cpp 均无），点击复制抛 QML ReferenceError 且中断后续 `clearSelection()`——选择工具条不收起。建议后续任务单独修复（注册 Clipboard 单例或改经 C++ 剪贴板助手）。
+
+### 修复（`src/ui/qml/ReaderContent.qml`）
+
+- `TapHandler.onTapped` 发送前做视口命中过滤：`toolbarHitTest(vx, vy)` 检查轻点坐标是否落在**可见** `selBar`/`colorBar` 矩形内（`visible` 门控 + `mapToItem` 换算回视口坐标系，与 `point.position` 同坐标系）；命中则不上报 `contentTapped`。工具条按钮自身行为（复制/划线/笔记/选色）完全不受影响。
+- 屏蔽由"隐式 grab 仲裁"升级为"显式命中判定"：不依赖 Flickable 按压 grab 的行为细节，任何输入路径（鼠标/触控/未来 Qt 版本）下工具条点击都不可能连带开/关 Sheet。
+- 注意点：工具条是 `contentItem` 子项（内容坐标），`mapToItem(flick,0,0)` 正确换算回视口；不可写 `flick.selBar`（id 非属性，会 TypeError 导致全部点击被吞——实现中已实测修正为组件作用域内直接按 id 引用）。
+
+### 回归测试（`tests/qml/tst_readerpage.qml` ControlsSummonSmoke）
+
+- 新增 `test_toolbarButtonClicksDoNotTouchSheet`：打开选择工具条后真实点击「划线」按钮 → 色板展开（按钮行为照常）且 sheetOpen 保持 false；再真实点击色板色块 → 落库一条划线（按钮行为照常）且 sheetOpen 保持 false；用例内清理本次划线（幂等：先清残留首句划线再断言 +1）。
+- 保留既有真实正文点击唤出、拖选、拖动、方向键用例（未改）；Sheet 打开态下工具条被 Sheet 全页遮罩盖住（点面板外关闭是 Sheet 自身契约），故本用例只锁定关闭态的按钮点击解耦。
+
+### 验证
+
+- TDD 顺序：先加回归测试运行——当前 Qt 6.11 下按钮点击已受隐式 grab 屏蔽，测试修复前即绿（守卫性质）；修复后显式过滤生效，测试保持绿。修复过程中暴露的 `flick.selBar` 引用错误曾致全部点击被吞（summon 用例 FAIL），按 id 修正后全绿。
+- 定向运行（`tst_qml -input <abs path>`）：
+  - `tst_readerpage.qml`：18 passed, 0 failed（17 既有 + 1 新增）。
+  - `tst_e4_keys.qml`：16 passed, 0 failed。
+  - `tst_highlightsui.qml`（工具条/色板最相关套件）：24 passed, 0 failed。
+- 构建：`cmake --build build/Qt_6_11_1_for_macOS_Debug --target tst_qml -j2` 成功。
+
+### 提交
+
+- commit：简体中文 message（见文末）
+

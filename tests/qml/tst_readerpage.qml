@@ -277,6 +277,59 @@ Item {
             h.stack.destroy()
         }
 
+        // 任务2复审（评审发现）：ReaderContent 根级 TapHandler 覆盖选择/颜色工具条
+        // 子按钮——若轻点命中可见工具条仍发 contentTapped，ReaderPage 会连带打开
+        // Sheet，违反"按钮点击不受影响"。回归：打开选择/颜色工具条后真实点击其
+        // 按钮/色块，断言 sheetOpen 保持关闭，且按钮自身行为照常（划线按钮展开
+        // 色板、色块落库划线）。注：Sheet 打开态下工具条被 Sheet 全页遮罩盖住
+        //（点面板外关闭是 Sheet 自身契约），本用例只锁定关闭态的按钮点击解耦。
+        function test_toolbarButtonClicksDoNotTouchSheet() {
+            var h = openPage()
+            var page = h.page
+            var cv = page.contentView
+            page.controlsHideDelay = 100000
+            page.controlsVisible = false
+            page.sheetOpen = false
+            wait(50)
+            // 幂等：清掉本书可能残留的首句划线（重复运行/中断遗留），保证 +1 断言确定
+            var stale = Highlights.highlightsForBook(page.book.id)
+            for (var i = 0; i < stale.length; i++)
+                if (stale[i].sentenceIndex === 0) Highlights.removeHighlight(stale[i].id)
+            // 打开选择工具条：模拟选择首段首句（走真实定位逻辑，工具条视口固定）
+            var firstSentence = (page.chapter.paragraphs[0].sentences
+                                 && page.chapter.paragraphs[0].sentences[0]) || "首句"
+            cv.simulateSelection(0, firstSentence)
+            tryVerify(function () { return cv.selectionToolbar.visible }, 3000,
+                      "选择后工具条应出现")
+            verify(!page.sheetOpen, "选择本身不应打开 Sheet")
+            // 工具条结构：selBar(Rectangle) → Row → [复制, 划线, 笔记]（声明序）
+            var row = cv.selectionToolbar.children[0]
+            var markBtn = row.children[1]   // 「划线」按钮
+            verify(markBtn !== undefined && markBtn.text.length > 0, "工具条应含划线按钮")
+            // 真实点击按钮中心（映射到正文宿主视口坐标）——按钮点中的同时不得
+            // 连带触发 contentTapped → Sheet
+            var bp = markBtn.mapToItem(cv, markBtn.width / 2, markBtn.height / 2)
+            mouseClick(cv, bp.x, bp.y)
+            tryVerify(function () { return cv.colorToolbar.visible }, 3000,
+                      "点划线按钮应展开色板（按钮行为照常）")
+            verify(!page.sheetOpen, "点击选择工具条按钮不应连带打开 Sheet")
+            // 色板结构：colorBar(Rectangle) → Row → [色块×3]（Repeater 委托）
+            var cRow = cv.colorToolbar.children[0]
+            var swatch = cRow.children[0]
+            var before = Highlights.highlightsForBook(page.book.id).length
+            var sp = swatch.mapToItem(cv, swatch.width / 2, swatch.height / 2)
+            mouseClick(cv, sp.x, sp.y)
+            tryVerify(function () {
+                return Highlights.highlightsForBook(page.book.id).length === before + 1
+            }, 3000, "点击色块应新增一条划线（按钮行为照常）")
+            verify(!page.sheetOpen, "点击色板色块不应连带打开 Sheet")
+            // 清理本次划线（防污染后续用例与重复运行）
+            var rows = Highlights.highlightsForBook(page.book.id)
+            for (var j = before; j < rows.length; j++)
+                Highlights.removeHighlight(rows[j].id)
+            h.stack.destroy()
+        }
+
         // C2 协同：唤出/隐藏框架只作用于控制栏——朗读会话激活时 TtsBar 照常显示
         // （即使控制栏隐藏），唤出控制栏不带动 TtsBar（state=0 仍隐藏）
         function test_ttsBarGatingUnaffected() {

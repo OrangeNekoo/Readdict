@@ -125,11 +125,37 @@ Flickable {
     // 任务2：点击桥接宿主（见 contentTapped 注释）——与 PdfReaderPage 双击检测
     // 同模式：TapHandler 直接挂 Flickable，DragThreshold 下轻点触发、拖动让给
     // Flickable；point.position 为视口坐标（handler 非视觉项，不随内容滚动）。
+    // 任务2复审：根级 TapHandler 覆盖全视口（含选择工具条/色板）。若轻点命中
+    // 可见工具条仍发 contentTapped，ReaderPage 会连带开/关 Sheet——按钮点击
+    // 不应受阅读页 Sheet 状态机影响。发送前做视口命中过滤：命中 selBar/colorBar
+    // 矩形内不上报（工具条自身按钮行为完全不受影响），屏蔽不依赖 Flickable
+    // 按压 grab 的隐式仲裁（不同 Qt 版本/输入设备下该仲裁可能变化）。
     TapHandler {
         id: contentTapHandler
         acceptedButtons: Qt.LeftButton
         gesturePolicy: TapHandler.DragThreshold
-        onTapped: flick.contentTapped(point.position.y)
+        // 视口坐标命中可见选择/颜色工具条（selBar/colorBar 是 contentItem 子项，
+        // 坐标为内容坐标；mapToItem 换算回视口，与 point.position 同坐标系）
+        function toolbarHitTest(vx, vy) {
+            if (selBar.visible) {
+                var sl = selBar.mapToItem(flick, 0, 0)
+                if (vx >= sl.x && vx <= sl.x + selBar.width
+                        && vy >= sl.y && vy <= sl.y + selBar.height)
+                    return true
+            }
+            if (colorBar.visible) {
+                var cl = colorBar.mapToItem(flick, 0, 0)
+                if (vx >= cl.x && vx <= cl.x + colorBar.width
+                        && vy >= cl.y && vy <= cl.y + colorBar.height)
+                    return true
+            }
+            return false
+        }
+        onTapped: {
+            if (contentTapHandler.toolbarHitTest(point.position.x, point.position.y))
+                return
+            flick.contentTapped(point.position.y)
+        }
     }
 
     // 翻章回到顶部：不继承上一章的滚动偏移（否则新章内容矮时被 Flickable 钳制到中间）；
