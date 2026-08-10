@@ -130,17 +130,42 @@ Item {
     // 任务 1 复审修复：用例级 init/cleanup 显式复位 Books/Settings 状态（排序/
     // 分类用例不再依赖全量套件的执行顺序）；排序/分类选择经真实 delegate 点击
     // 触发（覆盖用户点击路径而非直接赋 currentIndex）。
+    // 任务 1 复审修复（fixture 隔离）：cleanup 只删除本用例实际导入的
+    // alpha/delme（按 id 记录，绝不删除测试前已存在的书），并恢复 alpha 原分类
+    //（不再无条件清空）；宽度测试按 model 稳定定位 delegate，断言文本
+    // contentItem 实际/隐式宽度——仅 delegate.width>0 不足以证明文字可见。
     TestCase {
         name: "FilterSheetBehavior"
 
+        // 本用例实际导入的 fixture 书 id：cleanup 只删这些，绝不触碰测试前
+        // 已存在的书（共享 alpha 被 tst_e2e/tst_readerpage 等依赖，删它会破坏
+        // 后续用例；残留的 delme 则会被 findTxtBook 类用例误取为最新 TXT）。
+        property var createdBookIds: []
+        // alpha 在本用例被改分类前的原值；null = 本用例未修改过（无需恢复）。
+        property var alphaCategoryBefore: null
+
         function titles() {
             return Books.booksModel.map(function (b) { return b.title })
+        }
+
+        function findBook(title) {
+            for (let b of Books.booksModel)
+                if (b.title === title) return b
+            return null
+        }
+
+        function findBookById(id) {
+            for (let b of Books.booksModel)
+                if (b.id === id) return b
+            return null
         }
 
         // 每个用例前显式复位：搜索残留（FulltextSmoke 的顶部搜索会把 booksModel
         // 过滤为空）、分类筛选、排序，以及 Settings 的 shelf 分区（筛选面板
         // onCompleted 按 Settings 恢复并写回 Books）。
         function init() {
+            createdBookIds = []
+            alphaCategoryBefore = null
             Books.doSearch("")
             Books.setFilter("")
             Books.setSort(0)
@@ -149,14 +174,23 @@ Item {
             Settings.setValue("shelf/scope", 0)
         }
 
-        // 每个用例后复原（断言失败也会执行）：先清搜索/筛选，再清本用例可能
-        // 残留的测试分类，最后复位排序与 Settings。
+        // 每个用例后复原（断言失败也会执行）：先清搜索/筛选，再恢复 alpha 原
+        // 分类（本用例改过才恢复），再按 id 删除本用例实际创建的 fixture（若
+        // 行已消失则跳过——至少已恢复数据库字段且不留专用 delme），最后复位
+        // 排序与 Settings（最后写保证终态不被面板 onBooksChanged 覆盖）。
         function cleanup() {
             Books.doSearch("")
             Books.setFilter("")
-            for (let b of Books.booksModel)
-                if (b.category === "筛选行为测试分类")
-                    Books.setCategory(b.id, "")
+            if (alphaCategoryBefore !== null) {
+                var alpha = findBook("alpha")
+                if (alpha) Books.setCategory(alpha.id, alphaCategoryBefore)
+            }
+            for (var k = 0; k < createdBookIds.length; k++) {
+                var created = findBookById(createdBookIds[k])
+                if (created) Books.removeBookWithFiles(created.id, true)
+            }
+            createdBookIds = []
+            alphaCategoryBefore = null
             Books.setSort(0)
             Settings.setValue("shelf/category", "")
             Settings.setValue("shelf/sort", 0)
@@ -164,30 +198,35 @@ Item {
         }
 
         // 判别书 alpha 与 delme：
-        // - alpha：任何测试都不删除（行+书库文件均存活）；缺失时补导入，已有则跳过。
-        // - delme：可能被 DeleteSmoke 删行+删文件（可直接重导入），也可能因外部
-        //   测试执行顺序而残留（先 removeBookWithFiles 删行+删文件再重导入）。
-        //   两种情况下 delme 都是本用例内最新导入的书 → “最近添加”序的首位由
-        //   本用例自控，不依赖外部测试的执行顺序。
+        // - alpha：共享书（tst_e2e/tst_readerpage 等依赖其存在），任何测试都不删；
+        //   缺失时本用例补导入并把新 id 记入 createdBookIds（cleanup 只删本用例
+        //   导入的），已存在则原样使用。
+        // - delme：专用测试书（TestEnv.deleteSource 生成，无真实书语义）。可能被
+        //   DeleteSmoke 删行+删文件，也可能因外部测试执行顺序而残留；残留先清除
+        //   再重导入，保证本用例内 delme 为最新导入 → “最近添加”序的首位由本
+        //   用例自控，不依赖外部测试的执行顺序；新 id 记入 createdBookIds，
+        //   cleanup 删除后不留专用 delme。
         // mike 不可用：tst_e2e 删行后书库文件副本残留，BookImporter 按
         // “同名文件已存在于书库”拒绝重导入。
         function ensureDiscriminantBooks() {
             Books.doSearch("")
             Books.setFilter("")
-            if (titles().indexOf("alpha") < 0) {
+            if (findBook("alpha") === null) {
                 Importer.doImport(TestEnv.sourceFiles[1])
                 var t0 = new Date().getTime()
-                while (titles().indexOf("alpha") < 0 && new Date().getTime() - t0 < 5000)
+                while (findBook("alpha") === null && new Date().getTime() - t0 < 5000)
                     wait(50)
+                var alpha = findBook("alpha")
+                if (alpha) createdBookIds.push(alpha.id)
             }
-            var delme = null
-            for (let b of Books.booksModel)
-                if (b.title === "delme") { delme = b; break }
+            var delme = findBook("delme")
             if (delme) Books.removeBookWithFiles(delme.id, true)
             Importer.doImport(TestEnv.deleteSource)
             var t1 = new Date().getTime()
-            while (titles().indexOf("delme") < 0 && new Date().getTime() - t1 < 5000)
+            while (findBook("delme") === null && new Date().getTime() - t1 < 5000)
                 wait(50)
+            delme = findBook("delme")
+            if (delme) createdBookIds.push(delme.id)
         }
 
         // 选择排序后 booksModel 顺序真实改变：delme 由 ensureDiscriminantBooks 在
@@ -233,10 +272,11 @@ Item {
             Books.doSearch("")
             Books.setFilter("")
             ensureDiscriminantBooks()
-            var alpha = null
-            for (let b of Books.booksModel)
-                if (b.title === "alpha") { alpha = b; break }
+            var alpha = findBook("alpha")
             verify(alpha !== null, "应能找到 alpha 测试书")
+            // 记录原分类，cleanup 恢复——不再无条件清空（alpha 可能是共享书，
+            // 测试前已存在的分类属于外部状态，不得销毁）。
+            alphaCategoryBefore = alpha.category ?? ""
             Books.setCategory(alpha.id, "筛选行为测试分类")
             var loader = shelfComp.createObject(root)
             loader.width = root.width
@@ -260,12 +300,43 @@ Item {
                 var t = titles()
                 return t.length === 1 && t[0] === "alpha"
             }, 3000, "选择分类后 booksModel 应只含该分类的书，实际 " + titles().join(","))
-            Books.setCategory(alpha.id, "")
-            Books.setFilter("")
+            // alpha 原分类由 cleanup 按 alphaCategoryBefore 恢复，此处不再清空。
             loader.destroy()
         }
 
-        // 布局修复实证：分类/排序/范围列表非零宽度，delegate 宽度跟随列表（>0）。
+        // 布局修复实证：分类/排序/范围列表非零宽度，且每个 delegate 的文本
+        // contentItem 实际/隐式宽度 > 0——仅 delegate.width>0 不足以证明文字可见。
+        // 按 model 稳定定位真实 delegate（RadioButton）：contentItem.children 含
+        // 内部定位 QQuickItem，按 string text 过滤跳过；不硬编码中文文案，
+        // 以 list.model 为稳定索引交叉校验每行都有对应 delegate。
+        function verifyListDelegatesVisible(sheet, listName) {
+            var list = sheet[listName]
+            var delegates = []
+            tryVerify(function () {
+                delegates = []
+                var ch = list.contentItem.children
+                for (var i = 0; i < ch.length; i++)
+                    if (typeof ch[i].text === "string")
+                        delegates.push(ch[i])
+                return delegates.length === list.count
+            }, 3000, listName + " 应实例化全部 " + list.count + " 行 delegate")
+            var texts = []
+            for (var m = 0; m < delegates.length; m++) {
+                var del = delegates[m]
+                texts.push(del.text)
+                verify(del.width > 0, listName + " delegate 宽度应大于 0，实际 " + del.width)
+                verify(del.visible, listName + " delegate 应可见")
+                var ci = del.contentItem
+                verify(ci !== null, listName + " delegate 应有文本 contentItem")
+                verify(ci.width > 0 || ci.implicitWidth > 0,
+                       listName + " delegate 文本实际/隐式宽度应大于 0（width=" + ci.width
+                       + ", implicitWidth=" + ci.implicitWidth + "）")
+            }
+            for (var m2 = 0; m2 < list.count; m2++)
+                verify(texts.indexOf(list.model[m2]) >= 0,
+                       listName + " model 行 " + m2 + " 应存在对应 delegate")
+        }
+
         function test_sortAndScopeDelegatesHaveVisibleWidth() {
             var loader = shelfComp.createObject(root)
             loader.width = root.width
@@ -278,18 +349,12 @@ Item {
                        && shelf.filterSheet.sortList.width > 0
                        && shelf.filterSheet.scopeList.width > 0
             }, 3000, "分类/排序/范围列表宽度应非零")
-            var names = ["catList", "sortList", "scopeList"]
-            for (var n = 0; n < names.length; n++) {
-                var list = shelf.filterSheet[names[n]]
-                var children = list.contentItem.children
-                verify(children.length > 0, names[n] + " 应有 delegate 实例")
-                for (var i = 0; i < children.length; i++)
-                    verify(children[i].width > 0,
-                           names[n] + " 选项 delegate 宽度应大于 0，实际 " + children[i].width)
-            }
+            verifyListDelegatesVisible(shelf.filterSheet, "catList")
+            verifyListDelegatesVisible(shelf.filterSheet, "sortList")
+            verifyListDelegatesVisible(shelf.filterSheet, "scopeList")
             loader.destroy()
 
-            // 800x600（验收窗口）下重新加载，列表与 delegate 宽度同样非零
+            // 800x600（验收窗口）下重新加载，列表与 delegate 文本宽度同样非零
             var loader2 = shelfComp.createObject(root)
             loader2.width = 800
             loader2.height = 600
@@ -301,14 +366,9 @@ Item {
                        && shelf2.filterSheet.sortList.width > 0
                        && shelf2.filterSheet.scopeList.width > 0
             }, 3000, "800x600 下分类/排序/范围列表宽度应非零")
-            for (var n2 = 0; n2 < names.length; n2++) {
-                var list2 = shelf2.filterSheet[names[n2]]
-                var children2 = list2.contentItem.children
-                verify(children2.length > 0, names[n2] + " 800x600 下应有 delegate 实例")
-                for (var j = 0; j < children2.length; j++)
-                    verify(children2[j].width > 0,
-                           names[n2] + " 800x600 下选项 delegate 宽度应大于 0，实际 " + children2[j].width)
-            }
+            verifyListDelegatesVisible(shelf2.filterSheet, "catList")
+            verifyListDelegatesVisible(shelf2.filterSheet, "sortList")
+            verifyListDelegatesVisible(shelf2.filterSheet, "scopeList")
             loader2.destroy()
         }
     }
