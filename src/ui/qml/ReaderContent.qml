@@ -846,7 +846,8 @@ Flickable {
             spacing: 12
             Label {
                 text: qsTr("为这条划线添加笔记：")
-                color: "#555555"
+                // U6：辅助文字改 Token（原硬编码 #555555——深色对话框下近不可读）
+                color: UITheme.textSecondary
             }
             TextArea {
                 id: noteArea
