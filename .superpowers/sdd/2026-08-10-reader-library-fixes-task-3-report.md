@@ -100,3 +100,41 @@
 - 必需套件：tst_e4_keys **22**、tst_readerpage **20**、tst_highlightsui **24**、tst_background **13**、tst_u4 **18** 全绿（0 failed）。
 - 补充套件（段落渲染/滚动跟随触点）：tst_c4_scroll 8、tst_sheets 10、tst_textcolor 8、tst_ttsbar 9 全绿。
 - 内嵌 Flickable 未破坏选择/TTS/点击：tst_readerpage 真实点击/拖动用例、tst_highlightsui 选择工具条用例、tst_c4_scroll TTS 跟随用例全部通过。
+
+---
+
+# 任务3 审查修复回归（ReaderRestore 恢复/搜索跳转测试）
+
+## 症状与复现
+
+全量 QML 258 pass/2 fail（提交 33ee3fc 修复后 260/0）：
+- `tst_main.qml ReaderRestore::test_scrollRestore`：首断言「长文本书内容高度应远大于视口」（`contentView.contentHeight > 2000`）失败。
+- `tst_main.qml ReaderRestore::test_searchJumpScrolls`：跳转后 `contentView.contentY=0`（期望 > 500）。
+
+定向复现：`tst_qml -input <abs>/tst_main.qml` 单独跑即复现同款 2 失败——**排除跨文件 settings 污染**（全量跑与单文件跑同样失败；且诊断实测 `reading/pageMode=scroll`，`page.pageMode=scroll`，`contentView.pageMode=scroll`）。
+
+## 根因（A/B 实证）
+
+1. `contentWidth`/`contentHeight`/`flickableDirection` 三绑定在 e8f0c74 前后**逐字相同**（`contentHeight = pageMode==="paged" ? height : col.implicitHeight`）——scroll contentHeight 未被页面组件覆盖；pageComp/内嵌 Flickable 仅 paged 渲染，scroll 路径不参与。
+2. 真根因是 **e8f0c74 第 5 项修复（w<48 防负宽 `Math.max(1, w-48)`）改变了 0 尺寸视口行为**：tst_main 的 `openReader` 用 Loader **无尺寸**创建 ReaderPage（无头环境 Page 锚定布局不可靠 → 0×0，同文件 test_scrollAutoNextSignal 注释早已记载该约定），ReaderContent 宽 0 → scroll 列宽公式：
+   - 旧（e8f0c74^）：`Math.min(0*0.9, 0-48, cap) = -48` → 负宽怪癖使 TextEdit 隐式高巨大 → `contentHeight > 2000` **假通过**；
+   - 新（e8f0c74）：`Math.min(0*0.9, max(1,-48), cap) = 0` → 列宽 0 → `col.implicitHeight` 塌陷为 0 → contentHeight=0 → 首断言失败；scrollToParagraph 的 `rep.itemAt(250)` 无布局 → contentY 恒 0。
+3. A/B 锁定：单独把 scroll 列宽公式还原为 `flick.width - 48` 重建后两测试即 PASS（50 pass/1 fail，余 1 为既有 FulltextSmoke 环境性失败，见任务3报告「验证」节）。
+
+结论：e8f0c74 的防负宽修复本身**正确**（负宽是真实缺陷，tst_e4_keys 的窄宽用例锁定），不回退；回归源是测试环境 0×0 视口，此前靠负宽怪癖意外假通过。
+
+## 修复（最小、不放宽断言）
+
+- `tests/qml/tst_main.qml` `openReader`：显式 `loader.width = 800; loader.height = 600` 真实视口（同文件 ContentSmoke/test_scrollAutoNextSignal 的既有约定——锚定布局在无头测试环境不可靠，显式设宽高），恢复/搜索跳转在真实内容高度下验证。
+- `test_scrollRestore` 追加真实视口健全断言（`contentView.width > 100`）——防止未来再次静默 0×0。
+- 产品代码（ReaderContent/ReaderPage）**未动**；横向分页不回退；无断言放宽。
+
+## 验证
+
+- 构建：`cmake --build build/Qt_6_11_1_for_macOS_Debug --target tst_qml -j10` 成功（0 error）。
+- 定向：tst_main.qml **50 passed, 1 failed**（唯一失败 FulltextSmoke::test_shelfFulltextHits 为既有环境性失败——搜索词只在 zeta/alpha/mike 书，由其他文件导入，本文件单独跑无命中；任务3报告已记载，全量套件通过）、tst_e4_keys.qml **22 passed, 0 failed**、tst_readerpage.qml **20 passed, 0 failed**。
+- 全量 QML：**260 passed, 0 failed, 4 skipped**（此前 258/2 fail，两失败均修复，无新增破坏）。
+
+## 提交
+
+- `33ee3fc 修复任务3审查回归：ReaderRestore 恢复/搜索跳转测试显式视口尺寸`
