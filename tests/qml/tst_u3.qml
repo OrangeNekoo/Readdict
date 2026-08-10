@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtTest
 import Readdict.Backend
+import Readdict.Test
 import Readdict.UI 1.0
 
 // U3 冒烟：筛选面板按值持久化、顶部搜索迁移后的全文范围、以及书卡角标。
@@ -121,6 +122,128 @@ Item {
             compare(shelf.filterSheet.catList.currentIndex, 0,
                     "分类删除后应选中全部")
             loader.destroy()
+        }
+    }
+
+    // 任务 1：筛选面板真实行为——排序选择改变 booksModel 顺序、分类选择过滤
+    // booksModel 内容、排序/范围选项 delegate 宽度非零（布局修复的实证）。
+    TestCase {
+        name: "FilterSheetBehavior"
+
+        function titles() {
+            return Books.booksModel.map(function (b) { return b.title })
+        }
+        // 判别顺序用两本书：alpha 与 delme。
+        // - alpha：隔离运行需导入；全量套件中 tst_e2e 已导入且无测试删除（存活）。
+        // - delme：全量套件中 DeleteSmoke 已随文件删除（库内副本消失，可重导入）；
+        //   隔离运行直接导入。mike/zeta 不可靠——tst_e2e 删除 mike 后其库内文件副本
+        //   残留，BookImporter 按"同名文件已存在于书库"拒绝重导入。
+        function ensureBooks() {
+            var want = ["alpha", "delme"]
+            for (var w = 0; w < want.length; w++) {
+                if (titles().indexOf(want[w]) >= 0) continue
+                var src = want[w] === "alpha" ? TestEnv.sourceFiles[1] : TestEnv.deleteSource
+                Importer.doImport(src)
+                var t0 = new Date().getTime()
+                while (titles().indexOf(want[w]) < 0 && new Date().getTime() - t0 < 5000)
+                    wait(50)
+            }
+        }
+
+        // 选择排序后 booksModel 顺序真实改变：默认最近添加在前（后导入的 delme 在
+        // alpha 之前），切到“作者”（按标题升序）→ alpha 排到最前。
+        function test_sortSelectionReordersBooksModel() {
+            ensureBooks()
+            var t0 = titles()
+            verify(t0.indexOf("alpha") >= 0 && t0.indexOf("delme") >= 0,
+                   "判别书应就绪，实际 " + t0.join(","))
+            verify(t0.indexOf("delme") < t0.indexOf("alpha"),
+                   "默认应为最近添加在前（delme 在 alpha 之前），实际 " + t0.join(","))
+            var loader = shelfComp.createObject(root)
+            loader.width = root.width
+            loader.height = root.height
+            var shelf = loader.item
+            verify(shelf !== null, "ShelfPage 应能加载")
+            shelf.filterSheet.open()
+            shelf.filterSheet.sortList.currentIndex = 1 // 作者
+            tryVerify(function () {
+                var t = titles()
+                return t.indexOf("alpha") < t.indexOf("delme") && t[0] === "alpha"
+            }, 3000, "选择作者排序后 booksModel 应按标题升序（alpha 最前），实际 " + titles().join(","))
+            compare(Number(Settings.value("shelf/sort")), 1, "排序选择应持久化")
+            loader.destroy()
+        }
+
+        // 选择分类后 booksModel 只含该分类的书（Books.setFilter 真实过滤）。
+        function test_categorySelectionFiltersBooksModel() {
+            ensureBooks()
+            var alpha = null
+            for (let b of Books.booksModel)
+                if (b.title === "alpha") { alpha = b; break }
+            verify(alpha !== null, "应能找到 alpha 测试书")
+            Books.setCategory(alpha.id, "筛选行为测试分类")
+            var loader = shelfComp.createObject(root)
+            loader.width = root.width
+            loader.height = root.height
+            var shelf = loader.item
+            verify(shelf !== null, "ShelfPage 应能加载")
+            shelf.filterSheet.open()
+            var catIdx = Books.categoriesModel.indexOf("筛选行为测试分类") + 1
+            verify(catIdx > 0, "分类应出现在 categoriesModel")
+            shelf.filterSheet.catList.currentIndex = catIdx
+            tryVerify(function () {
+                var t = titles()
+                return t.length === 1 && t[0] === "alpha"
+            }, 3000, "选择分类后 booksModel 应只含该分类的书，实际 " + titles().join(","))
+            Books.setCategory(alpha.id, "")
+            loader.destroy()
+        }
+
+        // 布局修复实证：分类/排序/范围列表非零宽度，delegate 宽度跟随列表（>0）。
+        function test_sortAndScopeDelegatesHaveVisibleWidth() {
+            var loader = shelfComp.createObject(root)
+            loader.width = root.width
+            loader.height = root.height
+            var shelf = loader.item
+            verify(shelf !== null, "ShelfPage 应能加载")
+            shelf.filterSheet.open()
+            tryVerify(function () {
+                return shelf.filterSheet.catList.width > 0
+                       && shelf.filterSheet.sortList.width > 0
+                       && shelf.filterSheet.scopeList.width > 0
+            }, 3000, "分类/排序/范围列表宽度应非零")
+            var names = ["catList", "sortList", "scopeList"]
+            for (var n = 0; n < names.length; n++) {
+                var list = shelf.filterSheet[names[n]]
+                var children = list.contentItem.children
+                verify(children.length > 0, names[n] + " 应有 delegate 实例")
+                for (var i = 0; i < children.length; i++)
+                    verify(children[i].width > 0,
+                           names[n] + " 选项 delegate 宽度应大于 0，实际 " + children[i].width)
+            }
+            loader.destroy()
+
+            // 800x600（验收窗口）下重新加载，列表与 delegate 宽度同样非零
+            var loader2 = shelfComp.createObject(root)
+            loader2.width = 800
+            loader2.height = 600
+            var shelf2 = loader2.item
+            verify(shelf2 !== null, "800x600 下 ShelfPage 应能加载")
+            shelf2.filterSheet.open()
+            tryVerify(function () {
+                return shelf2.filterSheet.catList.width > 0
+                       && shelf2.filterSheet.sortList.width > 0
+                       && shelf2.filterSheet.scopeList.width > 0
+            }, 3000, "800x600 下分类/排序/范围列表宽度应非零")
+            for (var n2 = 0; n2 < names.length; n2++) {
+                var list2 = shelf2.filterSheet[names[n2]]
+                var children2 = list2.contentItem.children
+                verify(children2.length > 0, names[n2] + " 800x600 下应有 delegate 实例")
+                for (var j = 0; j < children2.length; j++)
+                    verify(children2[j].width > 0,
+                           names[n2] + " 800x600 下选项 delegate 宽度应大于 0，实际 " + children2[j].width)
+            }
+            loader2.destroy()
         }
     }
 }

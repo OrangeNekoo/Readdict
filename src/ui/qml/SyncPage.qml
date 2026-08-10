@@ -9,6 +9,11 @@ import Readdict.UI 1.0
 // 见 SyncManager.cpp 的 kSyncSections 白名单）。L8（P1#11）：所有配置项即改即写
 // （与设置页即时生效语义一致），「立即同步」按钮只触发 Sync.run。
 // 同步日志来自 SyncController.log（SyncManager 逐条操作记录，含时间戳）。
+//
+// 任务 1：整页表单放入页面级 ScrollView——小窗口下全部配置项可滚动可达；
+// 日志区保留明确高度与内部垂直滚动（不做页面级滚动条的替身）。宽度基于实际
+// viewport 与 padding 单向计算（不绑 availableWidth：内容尺寸计算前可能为 0，
+// 会使行内控件宽度坍缩，同 SettingsPage 裁定）。
 Page {
     id: page
     title: qsTr("WebDAV 同步")
@@ -17,123 +22,140 @@ Page {
     // 测试/外部句柄（QML 冒烟经此驱动配置与自动同步开关，ShelfPage 同模式）
     property alias syncUrlField: urlField
     property alias syncAutoCheck: cbAuto
-    ColumnLayout {
+    // 任务 1：页面级滚动容器与日志列表句柄（滚动/宽度冒烟断言用）
+    property alias syncScroll: syncScroll
+    property alias syncForm: syncForm
+    property alias syncLogView: logView
+
+    ScrollView {
+        id: syncScroll
         anchors.fill: parent
         anchors.margins: 24
-        spacing: 12
+        // 任务 1：页面级滚动条——内容超出视口时可见，保证小窗口下表单可达
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+        ColumnLayout {
+            id: syncForm
+            // 单向宽度约束：view 实际宽度 - padding（不依赖 availableWidth，
+            // 该属性在内容尺寸计算前可能为 0）
+            width: Math.max(0, syncScroll.width
+                                - syncScroll.leftPadding - syncScroll.rightPadding)
+            spacing: 12
 
-        RowLayout {
-            Button {
-                text: qsTr("返回")
-                onClicked: page.StackView.view.pop()
-            }
-            Label {
-                text: qsTr("WebDAV 同步")
-                font.bold: true
-                font.pixelSize: 18
-            }
-        }
-
-        RowLayout {
-            Label { text: qsTr("服务器地址") }
-            TextField {
-                id: urlField
-                Layout.fillWidth: true
-                text: Settings.value("webdav/url").toString()
-                placeholderText: "https://dav.example.com/dav/readdict"
-                // L8（P1#11）：即改即写——按钮不再承担保存职责
-                onTextChanged: Settings.setValue("webdav/url", text.trim())
-            }
-        }
-        RowLayout {
-            Label { text: qsTr("用户名") }
-            TextField {
-                id: userField
-                Layout.fillWidth: true
-                text: Settings.value("webdav/user").toString()
-                onTextChanged: Settings.setValue("webdav/user", text.trim())
-            }
-        }
-        RowLayout {
-            Label { text: qsTr("密码") }
-            TextField {
-                id: passField
-                Layout.fillWidth: true
-                echoMode: TextInput.Password
-                text: Settings.value("webdav/password").toString()
-                onTextChanged: Settings.setValue("webdav/password", text)
-            }
-        }
-        Label { text: qsTr("同步内容") }
-        Column {
-            spacing: 4
-            CheckBox {
-                id: cbSettings
-                text: qsTr("设置")
-                checked: Settings.value("webdav/syncSettings") === true
-                // L8（P1#11）：勾选即写
-                onCheckedChanged: Settings.setValue("webdav/syncSettings", checked)
-            }
-            CheckBox {
-                id: cbProgress
-                text: qsTr("阅读进度")
-                checked: Settings.value("webdav/syncProgress") === true
-                onCheckedChanged: Settings.setValue("webdav/syncProgress", checked)
-            }
-            CheckBox {
-                id: cbNotes
-                text: qsTr("划线笔记")
-                checked: Settings.value("webdav/syncHighlights") === true
-                onCheckedChanged: Settings.setValue("webdav/syncHighlights", checked)
-            }
-            CheckBox {
-                id: cbBooks
-                text: qsTr("书籍文件")
-                checked: Settings.value("webdav/syncBooks") === true
-                onCheckedChanged: Settings.setValue("webdav/syncBooks", checked)
-            }
-            CheckBox {
-                id: cbAuto
-                text: qsTr("每 30 分钟自动同步")
-                // autoSync 持久化（webdav/autoSync，默认 false）：重启后恢复上次选择，
-                // main.cpp 启动时据此调 Sync.setAutoSync。L8：勾选即写并即时启停定时器
-                checked: Settings.value("webdav/autoSync") === true
-                onCheckedChanged: {
-                    Settings.setValue("webdav/autoSync", checked)
-                    Sync.setAutoSync(checked)
+            RowLayout {
+                Button {
+                    text: qsTr("返回")
+                    onClicked: page.StackView.view.pop()
+                }
+                Label {
+                    text: qsTr("WebDAV 同步")
+                    font.bold: true
+                    font.pixelSize: 18
                 }
             }
-        }
-        RowLayout {
-            Button {
-                // L8（P1#11）：配置已即改即写，按钮只触发同步
-                text: qsTr("立即同步")
-                onClicked: page.syncNow()
+
+            RowLayout {
+                Label { text: qsTr("服务器地址") }
+                TextField {
+                    id: urlField
+                    Layout.fillWidth: true
+                    text: Settings.value("webdav/url").toString()
+                    placeholderText: "https://dav.example.com/dav/readdict"
+                    // L8（P1#11）：即改即写——按钮不再承担保存职责
+                    onTextChanged: Settings.setValue("webdav/url", text.trim())
+                }
             }
-            BusyIndicator { running: Sync.running }
-            Label {
-                id: statusLabel
-                text: ""
-                color: UITheme.success
+            RowLayout {
+                Label { text: qsTr("用户名") }
+                TextField {
+                    id: userField
+                    Layout.fillWidth: true
+                    text: Settings.value("webdav/user").toString()
+                    onTextChanged: Settings.setValue("webdav/user", text.trim())
+                }
             }
-        }
-        Label { text: qsTr("同步日志"); font.bold: true }
-        ListView {
-            id: logView
-            Layout.fillHeight: true
-            Layout.fillWidth: true
-            clip: true
-            model: Sync.log
-            delegate: Label {
-                text: modelData
-                width: ListView.view.width
-                wrapMode: Text.Wrap
-                font.pixelSize: 12
-                // 失败行 = 时间戳后紧跟"失败"/"注册失败"的消息（与 SyncManager::fail
-                // 的两类消息前缀同源；books 信息行可能含书名里的"失败"字）
-                color: page.isFailureLine(modelData) ? UITheme.danger : UITheme.textSecondary
+            RowLayout {
+                Label { text: qsTr("密码") }
+                TextField {
+                    id: passField
+                    Layout.fillWidth: true
+                    echoMode: TextInput.Password
+                    text: Settings.value("webdav/password").toString()
+                    onTextChanged: Settings.setValue("webdav/password", text)
+                }
             }
-            ScrollBar.vertical: ScrollBar {}
+            Label { text: qsTr("同步内容") }
+            Column {
+                spacing: 4
+                CheckBox {
+                    id: cbSettings
+                    text: qsTr("设置")
+                    checked: Settings.value("webdav/syncSettings") === true
+                    // L8（P1#11）：勾选即写
+                    onCheckedChanged: Settings.setValue("webdav/syncSettings", checked)
+                }
+                CheckBox {
+                    id: cbProgress
+                    text: qsTr("阅读进度")
+                    checked: Settings.value("webdav/syncProgress") === true
+                    onCheckedChanged: Settings.setValue("webdav/syncProgress", checked)
+                }
+                CheckBox {
+                    id: cbNotes
+                    text: qsTr("划线笔记")
+                    checked: Settings.value("webdav/syncHighlights") === true
+                    onCheckedChanged: Settings.setValue("webdav/syncHighlights", checked)
+                }
+                CheckBox {
+                    id: cbBooks
+                    text: qsTr("书籍文件")
+                    checked: Settings.value("webdav/syncBooks") === true
+                    onCheckedChanged: Settings.setValue("webdav/syncBooks", checked)
+                }
+                CheckBox {
+                    id: cbAuto
+                    text: qsTr("每 30 分钟自动同步")
+                    // autoSync 持久化（webdav/autoSync，默认 false）：重启后恢复上次选择，
+                    // main.cpp 启动时据此调 Sync.setAutoSync。L8：勾选即写并即时启停定时器
+                    checked: Settings.value("webdav/autoSync") === true
+                    onCheckedChanged: {
+                        Settings.setValue("webdav/autoSync", checked)
+                        Sync.setAutoSync(checked)
+                    }
+                }
+            }
+            RowLayout {
+                Button {
+                    // L8（P1#11）：配置已即改即写，按钮只触发同步
+                    text: qsTr("立即同步")
+                    onClicked: page.syncNow()
+                }
+                BusyIndicator { running: Sync.running }
+                Label {
+                    id: statusLabel
+                    text: ""
+                    color: UITheme.success
+                }
+            }
+            Label { text: qsTr("同步日志"); font.bold: true }
+            ListView {
+                id: logView
+                Layout.fillWidth: true
+                // 任务 1：日志区保留明确高度（小窗口下不被视口压缩成 0），
+                // 页面级滚动负责表单整体，日志内部仍独立滚动
+                Layout.preferredHeight: 180
+                clip: true
+                model: Sync.log
+                delegate: Label {
+                    text: modelData
+                    width: ListView.view.width
+                    wrapMode: Text.Wrap
+                    font.pixelSize: 12
+                    // 失败行 = 时间戳后紧跟"失败"/"注册失败"的消息（与 SyncManager::fail
+                    // 的两类消息前缀同源；books 信息行可能含书名里的"失败"字）
+                    color: page.isFailureLine(modelData) ? UITheme.danger : UITheme.textSecondary
+                }
+                ScrollBar.vertical: ScrollBar {}
+            }
         }
     }
 

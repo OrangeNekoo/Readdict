@@ -98,11 +98,16 @@ Item {
         color: UITheme.bgPrimary
 
         ScrollView {
+            id: sheetScroll
             anchors.fill: parent
             anchors.margins: 16
             clip: true
             ColumnLayout {
-                width: parent.width
+                // 任务 1：宽度基于实际 viewport 单向计算——不绑 availableWidth
+                //（内容尺寸计算前可能为 0）也不绑 parent.width（ScrollView 内容
+                // 初期宽度可能为 0），保证三个列表 delegate 宽度非零
+                width: Math.max(0, sheetScroll.width
+                                    - sheetScroll.leftPadding - sheetScroll.rightPadding)
                 spacing: 8
 
                 Label {
@@ -121,6 +126,9 @@ Item {
                         width: catList.width
                         height: 48
                         text: modelData
+                        // 任务 1：checkable 关——选中态完全由 checked 绑定驱动
+                        //（否则点击会打断绑定并破坏排他互斥，产生残留勾选）
+                        checkable: false
                         checked: sheet.currentCategory === (index === 0 ? "" : modelData)
                         onClicked: sheet.chooseCategory(index)
                     }
@@ -139,6 +147,7 @@ Item {
                 }
                 ListView {
                     id: sortList
+                    Layout.fillWidth: true
                     Layout.preferredHeight: count * 48
                     interactive: false
                     cacheBuffer: 1000
@@ -146,6 +155,7 @@ Item {
                     delegate: RadioButton {
                         width: sortList.width
                         text: modelData
+                        checkable: false
                         checked: index === sheet.currentSort
                         height: 48
                         onClicked: sheet.chooseSort(index)
@@ -163,6 +173,7 @@ Item {
                 }
                 ListView {
                     id: scopeList
+                    Layout.fillWidth: true
                     Layout.preferredHeight: count * 48
                     interactive: false
                     cacheBuffer: 1000
@@ -170,6 +181,7 @@ Item {
                     delegate: RadioButton {
                         width: scopeList.width
                         text: modelData
+                        checkable: false
                         checked: index === sheet.currentScope
                         height: 48
                         onClicked: sheet.chooseScope(index)

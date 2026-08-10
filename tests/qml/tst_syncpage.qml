@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtTest
 import Readdict.Backend
 
@@ -81,6 +82,52 @@ Item {
             compare(Settings.value("webdav/syncBooks"), false, "未勾选项应保持默认 false")
             verify(!Sync.running, "同步结束后 running 应为 false")
             loader.destroy()
+        }
+    }
+
+    // 任务 1：小窗口下整页表单必须可滚动——页面级 ScrollView 存在且内容超出视口
+    //（真实可滚动范围）；日志区域保留明确可用高度与内部垂直滚动句柄，不被压缩成 0。
+    // 布局时序用 tryVerify 轮询，不用固定 sleep。
+    TestCase {
+        name: "SyncPageScrollSmoke"
+
+        function test_smallWindowFormScrollsAndLogKeepsHeight() {
+            var host = Qt.createQmlObject(
+                "import QtQuick; Item { width: 480; height: 420 }",
+                root, "syncSmallHost")
+            var loader = syncPageComp.createObject(host)
+            loader.width = host.width
+            loader.height = host.height
+            var page = loader.item
+            verify(page !== null, "SyncPage 应能加载")
+            // 页面级滚动容器 + 日志句柄必须存在并完成布局（宽度非零）
+            tryVerify(function () {
+                return page.syncScroll !== undefined
+                       && page.syncScroll.width > 0
+                       && page.syncLogView !== undefined
+            }, 3000, "SyncPage 应暴露页面级滚动容器与日志句柄")
+            // 实际滚动范围：小窗口下整页表单内容高度 > 视口高度
+            tryVerify(function () {
+                return page.syncScroll.contentHeight > page.syncScroll.height
+            }, 3000, "小窗口下表单内容应超出视口，页面滚动范围有效")
+            // 日志区域保留明确可用高度（不被压缩到 0）
+            verify(page.syncLogView.height > 0,
+                   "日志区域应有可用高度，实际 " + page.syncLogView.height)
+            // 日志列表保留内部垂直滚动句柄
+            verify(page.syncLogView.ScrollBar.vertical !== null,
+                   "日志列表应保留内部垂直滚动条")
+            // 800x600（验收窗口）下同样无零宽度内容、日志区可用
+            host.width = 800
+            host.height = 600
+            loader.width = 800
+            loader.height = 600
+            tryVerify(function () {
+                return page.syncScroll.width > 0
+                       && page.syncForm !== undefined && page.syncForm.width > 0
+                       && page.syncLogView.width > 0 && page.syncLogView.height > 0
+            }, 3000, "800x600 下内容宽度与日志区高度应非零")
+            loader.destroy()
+            host.destroy()
         }
     }
 }
