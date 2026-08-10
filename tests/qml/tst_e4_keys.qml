@@ -7,9 +7,10 @@ import Readdict.Test 1.0
 // E4：方向键翻页 + 横向翻页模式冒烟。
 // 方向键：scroll 模式 ↑↓/PageUp/PageDown 滚动一视口页、←/→ 翻章（边界不越）；
 // paged 模式四向 + PageUp/PageDown 按视口高度整页翻动（←/→ 翻页而非翻章）。
-// 键盘注入：直接调用 contentView.handleKey（Keys.onPressed 委托同一函数——
-// quicktest harness 无法可靠合成键盘事件，同 C7 选择注入取舍；Keys 接线是
-// 一行委托，由评审核对）。
+// 键盘注入：多数用例直接调用 contentView.handleKey（Keys.onPressed 委托同一函数，
+// 状态机单元级驱动）；任务2 起 test_activeFocusAndProductionKeys 用 QtTest keyClick
+// 真实按键走生产 Keys.onPressed → handleKey 链路（先断言 content 持有 activeFocus），
+// 两者互补，交互证据不依赖单一函数调用。
 // 动画收敛：翻页动画 300ms，每次按键后 wait(450) 等动画完全结束再断言/再按
 //（tryVerify 会在动画中途通过，紧接着的按键会基于中途位置计算页号 → 误判，
 // 故统一用 wait 收敛而非 tryVerify 中途值）。
@@ -100,7 +101,80 @@ Item {
             h.stack.destroy()
         }
 
-        // scroll 模式：→ 翻下一章、← 翻上一章；边界（首章 ← / 末章 →）不越
+        // 任务2（生产键盘焦点链路）：不调 handleKey 注入，真实按键经 QtTest keyClick
+        // 走生产 Keys.onPressed → handleKey 路径。前提是 push 后 ReaderContent 持有
+        // activeFocus（页面 focus:true + Flickable focus:true + StackView 激活后
+        // forceActiveFocus）——先断言焦点再断言按键行为。
+        function test_activeFocusAndProductionKeys() {
+            var book = findBook("longbook")
+            verify(book !== null, "longbook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            tryVerify(function () { return cv.activeFocus === true }, 3000,
+                      "push 后 ReaderContent 应持有 activeFocus")
+            tryVerify(function () { return cv.contentHeight > cv.height * 2 }, 3000,
+                      "longbook 内容应远超视口")
+            cv.contentY = 0
+            var pageH = cv.height
+            // 真实 ↓ 键 → 滚动一视口页（生产 Keys 路径）
+            keyClick(Qt.Key_Down)
+            wait(450)
+            verify(Math.abs(cv.contentY - pageH) < 4,
+                   "真实 ↓ 键应滚动一视口页，实际 contentY=" + cv.contentY + "（期望 " + pageH + "）")
+            // 真实 ↑ 键 → 回退到顶部
+            keyClick(Qt.Key_Up)
+            wait(450)
+            verify(Math.abs(cv.contentY) < 4,
+                   "真实 ↑ 键应回退到顶部，实际 contentY=" + cv.contentY)
+            h.stack.destroy()
+
+            // 生产 Keys 路径翻章：multibook ←/→
+            var mb = findBook("multibook")
+            verify(mb !== null, "multibook 应已导入")
+            var h2 = openPage(mb)
+            var titles = Books.chapterTitles(mb.id)
+            verify(titles.length >= 3, "multibook 应有 3 章，实际 " + titles.length)
+            Books.currentChapter = 0
+            h2.page.loadChapter(0)
+            wait(100)
+            tryVerify(function () { return h2.page.contentView.activeFocus === true }, 3000,
+                      "第二次 push 的 content 也应持有 activeFocus")
+            keyClick(Qt.Key_Right)
+            tryVerify(function () { return Books.currentChapter === 1 }, 3000,
+                      "真实 → 键应翻到下一章，实际 currentChapter=" + Books.currentChapter)
+            keyClick(Qt.Key_Left)
+            tryVerify(function () { return Books.currentChapter === 0 }, 3000,
+                      "真实 ← 键应翻回上一章，实际 currentChapter=" + Books.currentChapter)
+            h2.stack.destroy()
+        }
+
+        // 任务2（拖动阈值）：正文真实拖拽滚动（按下+位移超阈值+松开）不应误触发
+        // 唤出（TapHandler DragThreshold 手势策略）；同时锁定正文拖动本身可用。
+        function test_realDragScrollDoesNotSummon() {
+            var book = findBook("longbook")
+            verify(book !== null, "longbook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.controlsHideDelay = 100000
+            page.controlsVisible = false
+            page.sheetOpen = false
+            wait(50)
+            tryVerify(function () { return cv.contentHeight > cv.height * 2 }, 3000,
+                      "longbook 内容应远超视口")
+            cv.contentY = 0
+            // 正文列左侧留白（x=5）向上拖 160px：位移远超 DragThreshold → Flickable 拖动。
+            // mouseDrag 分步移动（每步超过拖拽阈值），合成拖动比手写 mouseMove 稳定。
+            mouseDrag(cv, 5, 250, 0, -160, Qt.LeftButton, Qt.NoModifier, 50)
+            tryVerify(function () { return cv.contentY > 100 }, 3000,
+                      "正文拖动应滚动（拖动未被点击桥接拦截），实际 contentY=" + cv.contentY)
+            verify(!page.sheetOpen, "拖动超过阈值不应误触发唤出")
+            h.stack.destroy()
+        }
+
+        // 任务2：不把"调用函数"作为唯一交互证据——上方真实点击/按键用例已锁定
+        // 生产链路；此处仅作为翻章语义对照（→ 翻章、← 回章、边界钳制）保留注入版。
         function test_arrowSwitchesChapters() {
             var book = findBook("multibook")
             verify(book !== null, "multibook 应已导入")

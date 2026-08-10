@@ -46,7 +46,6 @@ Page {
     property alias topToolbar: topToolbar
     property alias backButton: topToolbar.backBtn
     property alias menuButton: topToolbar.menuBtn
-    property alias contentTapHandler: contentTapHandler
     property alias infoDialog: infoDialog
     // U4：Kindle 底部 Sheet 工具栏。
     property bool sheetOpen: false
@@ -132,6 +131,12 @@ Page {
         pageMode: page.pageMode
         onRequestNextChapter: page.autoNextChapter()
         onRequestPrevChapter: page.autoPrevChapter()
+        // 任务2：正文宿主真实点击桥接——TapHandler 在 ReaderContent 内（见
+        // ReaderContent.contentTapped 注释），视口坐标 y 换算回页面坐标后进
+        // handleContentTap 状态机（隐藏态 content.y=0，换算为恒等；Sheet 打开
+        // 时 content 下移 topToolbar 高，仍需换算）。content 为本组件 id（词法
+        // 解析），不可写 page.content（id 非父对象属性）。
+        onContentTapped: (y) => page.handleContentTap(content.y + y)
     }
 
     // L4（P0#5）：解析失败错误占位——loadError 非空时盖住内容区：居中错误文案
@@ -790,17 +795,17 @@ Page {
         }
     }
 
-    // C3：点击唤出热区——TapHandler 观察页面内全部轻点（DragThreshold 手势策略：
-    // 按下后位移超过阈值即取消，正文拖拽选择/滚动不受影响；观察模式不拦截任何
-    // 按钮的 hover 与点击，D7b 区域限定修复不回归。同 PdfReaderPage 双击检测模式）。
-    // 语义（U4 整合，决策见 task-U4-report）：
+    // C3：点击唤出状态机（U4 整合，决策见 task-U4-report）：
     //   · Sheet 打开时任意轻点关闭（Kindle"点面板外关闭"）；菜单打开时轻点关闭
     //   · 控件隐藏且轻点正文底部 1/4（content.y + 0.75*高至控制栏顶，含隐藏时
     //     控制栏空位带）→ 唤出快捷控制栏（C3 保留为快捷条）
     //   · 其余轻点（屏幕中部/边缘）→ 弹出 KdBottomSheet（Kindle 主操作面）
     // TtsBar 显隐由 C2 门控独立决定，本框架不作用于朗读条。
-    // 状态机收敛在 handleContentTap（页面坐标 y）——TapHandler 手势桥接 + 冒烟
-    // 注入共用同一入口（quicktest harness 无法可靠合成鼠标事件，见 C7 同款取舍）。
+    // 任务2：状态机收敛在 handleContentTap（页面坐标 y）——真实点击由正文宿主
+    //（ReaderContent）的 TapHandler 桥接（contentTapped → onContentTapped → 本函数，
+    // 见 ReaderContent.contentTapped 注释：旧实现 TapHandler 挂本页层，被正文
+    // Flickable 的按压 grab 吞掉，生产点击无效）；冒烟测试既可直接调用本函数
+    // 也经真实鼠标事件走桥接（tst_readerpage test_realClick*）。
     // 注意：Timer.restart() 对停止态的计时器会重新启动（Qt 语义），隐藏态禁止
     // 调用——否则违反"隐藏后计时停止"；重置只发生在显示态。
     function handleContentTap(y) {
@@ -820,12 +825,6 @@ Page {
     onSheetOpenChanged: {
         if (page.sheetOpen) hideControlsTimer.stop()
         else if (page.controlsVisible) hideControlsTimer.restart()
-    }
-    TapHandler {
-        id: contentTapHandler
-        acceptedButtons: Qt.LeftButton
-        gesturePolicy: TapHandler.DragThreshold
-        onTapped: page.handleContentTap(point.position.y)
     }
 
     // ---- U4：Kindle 底部 Sheet 工具栏（点屏幕中部弹出）----
@@ -1051,6 +1050,10 @@ Page {
         // L10 复审：删除回退同样重读存储 token（页面属性作响应层，镜像 onCompleted）
         page.fontFamily = String(Settings.value("typography/fontFamily") || "思源宋体 VF")
         page.backgroundFromSettings()
+        // 任务2：StackView 激活（首次 push 与从管理主题页等 pop 返回）后确保正文
+        // 持有 activeFocus——方向键经生产 Keys.onPressed → handleKey 立即可用
+        //（onCompleted 的 forceActiveFocus 只在首次创建时执行，返回路径需在此补）
+        content.forceActiveFocus()
         const panel = bottomSheet.contentLoader.item
         if (panel && panel.refresh) panel.refresh()
     }

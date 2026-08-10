@@ -43,6 +43,13 @@ Flickable {
     // E4：键盘翻页——上一章请求（scroll 模式 ←，ReaderPage 接 loadChapter(current-1)；
     // loadChapter 内部钳制到 [0, len-1]，边界不越）
     signal requestPrevChapter()
+    // 任务2：真实点击桥接——单击正文宿主（本 Flickable 表面）上报页面坐标 y
+    //（TapHandler 挂在正文宿主而非 ReaderPage 层：旧实现挂在 Page 末尾，被正文
+    // Flickable 的按压 grab 吞掉，生产点击永远到不了 handleContentTap 状态机）。
+    // DragThreshold 手势策略：位移超阈值即取消（正文拖动/文本选择不受影响，
+    // Flickable 拖动照常），观察模式不抢 grab（Sheet 遮罩/顶栏/TtsBar/按钮点击
+    // 照常，本桥接只覆盖正文区）。ReaderPage 接 onContentTapped → handleContentTap。
+    signal contentTapped(real y)
     // B10：滚动位置恢复——ReaderPage 打开时赋保存的 scrollY（>=0），内容高度就绪后应用；
     // 默认 -1 表示"本次打开无需恢复"，避免内容高度变化时反复设置。
     // 应用时机：内容高度**收敛**（200ms 无变化）后——含图片段章节的首趟高度在图片
@@ -114,6 +121,15 @@ Flickable {
     Keys.onPressed: (event) => {
         if (flick.handleKey(event.key, event.modifiers, event.isAutoRepeat))
             event.accepted = true
+    }
+    // 任务2：点击桥接宿主（见 contentTapped 注释）——与 PdfReaderPage 双击检测
+    // 同模式：TapHandler 直接挂 Flickable，DragThreshold 下轻点触发、拖动让给
+    // Flickable；point.position 为视口坐标（handler 非视觉项，不随内容滚动）。
+    TapHandler {
+        id: contentTapHandler
+        acceptedButtons: Qt.LeftButton
+        gesturePolicy: TapHandler.DragThreshold
+        onTapped: flick.contentTapped(point.position.y)
     }
 
     // 翻章回到顶部：不继承上一章的滚动偏移（否则新章内容矮时被 Flickable 钳制到中间）；

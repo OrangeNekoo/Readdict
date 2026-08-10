@@ -116,8 +116,10 @@ Item {
         // C3：阅读控件唤出交互冒烟——点击正文底部唤出 + 无操作自动隐藏 +
         // 交互重置计时 + TtsBar 门控协同。结构约定与 ReaderNavSmoke 一致：
         // StackView push 生产路径；5s 语义经 controlsHideDelay 注入短间隔收敛。
-        // 手势注入：经 page.handleContentTap(y)（TapHandler 桥接共用同一状态机——
-        // quicktest harness 无法可靠合成真实鼠标事件，与 C7 选择注入同取舍，见报告）。
+        // 手势注入：本用例多数断言直接调 page.handleContentTap(y)（状态机单元级
+        // 驱动，TapHandler 桥接共用同一状态机入口）；任务2 起另增 test_realClick*
+        // 真实鼠标点击用例（QtTest.mouseClick 走 TapHandler → contentTapped →
+        // handleContentTap 生产链路），两者互补。
         function initTestCase() {
             Books.doSearch("")
             Books.setFilter("")
@@ -216,6 +218,62 @@ Item {
             // hover 区计时重置入口不可直接调用（MouseArea 内部），语义由
             // hideControlsTimer.restart 无副作用保证；此处断言显隐状态不变
             verify(!page.controlsVisible, "隐藏态下无点击时控制栏应保持隐藏")
+            h.stack.destroy()
+        }
+
+        // 任务2（生产点击链路）：不调用 handleContentTap，而是用 QtTest.mouseClick
+        // 在正文宿主（ReaderContent/Flickable 表面）真实点击——验证 TapHandler 桥接
+        // 真实存在。旧实现 TapHandler 挂在 ReaderPage 层，被正文 Flickable 的按压
+        // grab 吞掉，生产点击永远到不了 handleContentTap 状态机。
+        // 坐标选正文列左侧留白（x=5，正文列居中从 x≈200 起）→ 点击命中 Flickable 表面。
+        function test_realClickTopContentSummons() {
+            var h = openPage()
+            var page = h.page
+            page.controlsHideDelay = 100000
+            page.controlsVisible = false
+            page.sheetOpen = false
+            wait(50)
+            // 顶部正文区域真实点击（页面坐标 y=50，正文区顶部）
+            mouseClick(page.contentView, 5, 50, Qt.LeftButton)
+            tryVerify(function () { return page.sheetOpen && page.topToolbar.visible }, 3000,
+                      "真实点击顶部正文区应唤出 Sheet 与顶栏")
+            h.stack.destroy()
+        }
+
+        // 隐藏态底部热区原位置（页面底部 y=700）真实点击 → 唤出。
+        // 与 test_clickOnHiddenBarStripSummons 的 handleContentTap 注入版互补：
+        // 本用例经真实鼠标事件走 TapHandler → contentTapped → handleContentTap 链路。
+        function test_realClickHiddenBarStripSummons() {
+            var h = openPage()
+            var page = h.page
+            page.controlsHideDelay = 100000
+            page.controlsVisible = false
+            page.sheetOpen = false
+            wait(50)
+            mouseClick(page.contentView, 5, 700, Qt.LeftButton)
+            tryVerify(function () { return page.sheetOpen && page.topToolbar.visible }, 3000,
+                      "真实点击隐藏底部热区应唤出 Sheet 与顶栏")
+            h.stack.destroy()
+        }
+
+        // 正文文本上的真实拖选不应被点击桥接吞掉：拖选后选择工具条照常弹出。
+        //（文本选择路径 TextEdit selectByMouse 优先于点击桥接——选择语义保留）
+        function test_realTextSelectionStillWorks() {
+            var h = openPage()
+            var page = h.page
+            page.controlsHideDelay = 100000
+            page.controlsVisible = false
+            page.sheetOpen = false
+            wait(50)
+            var cv = page.contentView
+            // 正文列内文本行（x=550 在列内，y=25 首行）：按下 + 横向拖过若干字符
+            mousePress(cv, 550, 25, Qt.LeftButton)
+            mouseMove(cv, 700, 25, 50, Qt.LeftButton)
+            mouseMove(cv, 800, 25, 50, Qt.LeftButton)
+            mouseRelease(cv, 800, 25, Qt.LeftButton)
+            tryVerify(function () { return cv.selectionToolbar.visible }, 3000,
+                      "正文真实拖选应弹出选择工具条（点击桥接不应吞掉选择）")
+            verify(!page.sheetOpen, "文本拖选不应误触发唤出 Sheet")
             h.stack.destroy()
         }
 
