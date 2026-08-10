@@ -127,56 +127,112 @@ Item {
 
     // 任务 1：筛选面板真实行为——排序选择改变 booksModel 顺序、分类选择过滤
     // booksModel 内容、排序/范围选项 delegate 宽度非零（布局修复的实证）。
+    // 任务 1 复审修复：用例级 init/cleanup 显式复位 Books/Settings 状态（排序/
+    // 分类用例不再依赖全量套件的执行顺序）；排序/分类选择经真实 delegate 点击
+    // 触发（覆盖用户点击路径而非直接赋 currentIndex）。
     TestCase {
         name: "FilterSheetBehavior"
 
         function titles() {
             return Books.booksModel.map(function (b) { return b.title })
         }
-        // 判别顺序用两本书：alpha 与 delme。
-        // - alpha：隔离运行需导入；全量套件中 tst_e2e 已导入且无测试删除（存活）。
-        // - delme：全量套件中 DeleteSmoke 已随文件删除（库内副本消失，可重导入）；
-        //   隔离运行直接导入。mike/zeta 不可靠——tst_e2e 删除 mike 后其库内文件副本
-        //   残留，BookImporter 按"同名文件已存在于书库"拒绝重导入。
-        function ensureBooks() {
-            var want = ["alpha", "delme"]
-            for (var w = 0; w < want.length; w++) {
-                if (titles().indexOf(want[w]) >= 0) continue
-                var src = want[w] === "alpha" ? TestEnv.sourceFiles[1] : TestEnv.deleteSource
-                Importer.doImport(src)
-                var t0 = new Date().getTime()
-                while (titles().indexOf(want[w]) < 0 && new Date().getTime() - t0 < 5000)
-                    wait(50)
-            }
+
+        // 每个用例前显式复位：搜索残留（FulltextSmoke 的顶部搜索会把 booksModel
+        // 过滤为空）、分类筛选、排序，以及 Settings 的 shelf 分区（筛选面板
+        // onCompleted 按 Settings 恢复并写回 Books）。
+        function init() {
+            Books.doSearch("")
+            Books.setFilter("")
+            Books.setSort(0)
+            Settings.setValue("shelf/category", "")
+            Settings.setValue("shelf/sort", 0)
+            Settings.setValue("shelf/scope", 0)
         }
 
-        // 选择排序后 booksModel 顺序真实改变：默认最近添加在前（后导入的 delme 在
-        // alpha 之前），切到“作者”（按标题升序）→ alpha 排到最前。
+        // 每个用例后复原（断言失败也会执行）：先清搜索/筛选，再清本用例可能
+        // 残留的测试分类，最后复位排序与 Settings。
+        function cleanup() {
+            Books.doSearch("")
+            Books.setFilter("")
+            for (let b of Books.booksModel)
+                if (b.category === "筛选行为测试分类")
+                    Books.setCategory(b.id, "")
+            Books.setSort(0)
+            Settings.setValue("shelf/category", "")
+            Settings.setValue("shelf/sort", 0)
+            Settings.setValue("shelf/scope", 0)
+        }
+
+        // 判别书 alpha 与 delme：
+        // - alpha：任何测试都不删除（行+书库文件均存活）；缺失时补导入，已有则跳过。
+        // - delme：可能被 DeleteSmoke 删行+删文件（可直接重导入），也可能因外部
+        //   测试执行顺序而残留（先 removeBookWithFiles 删行+删文件再重导入）。
+        //   两种情况下 delme 都是本用例内最新导入的书 → “最近添加”序的首位由
+        //   本用例自控，不依赖外部测试的执行顺序。
+        // mike 不可用：tst_e2e 删行后书库文件副本残留，BookImporter 按
+        // “同名文件已存在于书库”拒绝重导入。
+        function ensureDiscriminantBooks() {
+            Books.doSearch("")
+            Books.setFilter("")
+            if (titles().indexOf("alpha") < 0) {
+                Importer.doImport(TestEnv.sourceFiles[1])
+                var t0 = new Date().getTime()
+                while (titles().indexOf("alpha") < 0 && new Date().getTime() - t0 < 5000)
+                    wait(50)
+            }
+            var delme = null
+            for (let b of Books.booksModel)
+                if (b.title === "delme") { delme = b; break }
+            if (delme) Books.removeBookWithFiles(delme.id, true)
+            Importer.doImport(TestEnv.deleteSource)
+            var t1 = new Date().getTime()
+            while (titles().indexOf("delme") < 0 && new Date().getTime() - t1 < 5000)
+                wait(50)
+        }
+
+        // 选择排序后 booksModel 顺序真实改变：delme 由 ensureDiscriminantBooks 在
+        // 本用例内重导入，必为“最近添加”序首位（alpha 在其后，由本用例自控，
+        // 不依赖外部执行顺序）；经真实 delegate 点击“作者”（author 全空 →
+        // ORDER BY author,title 升序）→ alpha 排到 delme 之前。
         function test_sortSelectionReordersBooksModel() {
-            ensureBooks()
+            ensureDiscriminantBooks()
             var t0 = titles()
             verify(t0.indexOf("alpha") >= 0 && t0.indexOf("delme") >= 0,
                    "判别书应就绪，实际 " + t0.join(","))
             verify(t0.indexOf("delme") < t0.indexOf("alpha"),
-                   "默认应为最近添加在前（delme 在 alpha 之前），实际 " + t0.join(","))
+                   "本用例重导入的 delme 应为最近添加（在 alpha 之前），实际 " + t0.join(","))
             var loader = shelfComp.createObject(root)
             loader.width = root.width
             loader.height = root.height
             var shelf = loader.item
             verify(shelf !== null, "ShelfPage 应能加载")
             shelf.filterSheet.open()
-            shelf.filterSheet.sortList.currentIndex = 1 // 作者
+            // ListView.contentItem.children 含一个内部 QQuickItem（位置不固定）
+            // 且 delegate 渐进实例化，不能按下标映射；按文本轮询定位“作者”
+            // delegate，再经 clicked() 真实触发选择（覆盖用户点击路径）。
+            var authorDelegate = null
+            tryVerify(function () {
+                var ch = shelf.filterSheet.sortList.contentItem.children
+                for (var i = 0; i < ch.length; i++)
+                    if (ch[i].text === "作者") { authorDelegate = ch[i]; return true }
+                return false
+            }, 3000, "排序列表应含“作者”delegate")
+            authorDelegate.clicked()
             tryVerify(function () {
                 var t = titles()
-                return t.indexOf("alpha") < t.indexOf("delme") && t[0] === "alpha"
-            }, 3000, "选择作者排序后 booksModel 应按标题升序（alpha 最前），实际 " + titles().join(","))
+                return t.indexOf("alpha") < t.indexOf("delme")
+            }, 3000, "选择作者排序后 alpha 应排在 delme 之前，实际 " + titles().join(","))
             compare(Number(Settings.value("shelf/sort")), 1, "排序选择应持久化")
             loader.destroy()
         }
 
         // 选择分类后 booksModel 只含该分类的书（Books.setFilter 真实过滤）。
+        // 先清空搜索/筛选残留（防 titles() 被外部残留过滤），并经真实 delegate
+        // 的 clicked() 触发选择（覆盖用户点击路径），再断言 booksModel。
         function test_categorySelectionFiltersBooksModel() {
-            ensureBooks()
+            Books.doSearch("")
+            Books.setFilter("")
+            ensureDiscriminantBooks()
             var alpha = null
             for (let b of Books.booksModel)
                 if (b.title === "alpha") { alpha = b; break }
@@ -190,12 +246,22 @@ Item {
             shelf.filterSheet.open()
             var catIdx = Books.categoriesModel.indexOf("筛选行为测试分类") + 1
             verify(catIdx > 0, "分类应出现在 categoriesModel")
-            shelf.filterSheet.catList.currentIndex = catIdx
+            // 同排序列表：children 含内部 QQuickItem 且 delegate 渐进实例化，
+            // 按文本轮询定位“筛选行为测试分类”delegate 再经 clicked() 触发选择。
+            var categoryDelegate = null
+            tryVerify(function () {
+                var ch = shelf.filterSheet.catList.contentItem.children
+                for (var i = 0; i < ch.length; i++)
+                    if (ch[i].text === "筛选行为测试分类") { categoryDelegate = ch[i]; return true }
+                return false
+            }, 3000, "分类列表应含“筛选行为测试分类”delegate")
+            categoryDelegate.clicked()
             tryVerify(function () {
                 var t = titles()
                 return t.length === 1 && t[0] === "alpha"
             }, 3000, "选择分类后 booksModel 应只含该分类的书，实际 " + titles().join(","))
             Books.setCategory(alpha.id, "")
+            Books.setFilter("")
             loader.destroy()
         }
 
