@@ -62,6 +62,7 @@ static QString makeCoverEpub(const QString &path) {
                        "<package xmlns=\"http://www.idpf.org/2007/opf\" unique-identifier=\"id\" version=\"2.0\">"
                        "<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">"
                        "<dc:title>封面测试书</dc:title><dc:creator>测试作者</dc:creator>"
+                       "<dc:publisher>测试出版社</dc:publisher>"
                        "<meta name=\"cover\" content=\"cover-img\"/>"
                        "</metadata>"
                        "<manifest>"
@@ -243,10 +244,66 @@ private slots:
         const QString err = imp.importFile(bad.fileName());
         QVERIFY(err.isEmpty()); // 解析失败不影响入库
         QCOMPARE(imp.books().size(), 1);
+        // 解析失败：标题回退文件名，作者/出版社保持空（不伪造）
+        QCOMPARE(imp.books()[0].title, QStringLiteral("bad"));
+        QCOMPARE(imp.books()[0].author, QString());
+        QCOMPARE(imp.books()[0].publisher, QString());
         const QString cover = imp.books()[0].cover;
         QVERIFY(QFile::exists(cover));
         QVERIFY(!QFileInfo(cover).fileName().startsWith(QStringLiteral("cover_"))); // 仍是占位
         QVERIFY(!imp.lastError().isEmpty()); // 失败原因记入 lastError
+    }
+    // 任务4：EPUB 导入写出 OPF 元数据（标题/作者/出版社），元数据优先于文件名；
+    // 并用独立 BookManager 连接回读——publisher 确实持久化到 books 表。
+    void epubImportWritesAuthorAndPublisher() {
+        QTemporaryDir libDir;
+        QTemporaryDir srcDir;
+        const QString epubPath = makeCoverEpub(srcDir.path() + "/coverbook.epub");
+        QVERIFY(!epubPath.isEmpty());
+        const QString dbPath = libDir.path() + "/lib.db";
+        BookImporter imp(libDir.path(), dbPath);
+        QVERIFY(imp.importFile(epubPath).isEmpty());
+        QCOMPARE(imp.books().size(), 1);
+        // 元数据优先：OPF dc:title 覆盖文件名 coverbook
+        const Book imported = imp.books()[0];
+        QCOMPARE(imported.title, QStringLiteral("封面测试书"));
+        QCOMPARE(imported.author, QStringLiteral("测试作者"));
+        QCOMPARE(imported.publisher, QStringLiteral("测试出版社"));
+        // 数据库持久化：独立连接按 id 回读同一行
+        BookManager mgr(dbPath, "readdict_meta_test");
+        const Book b = mgr.bookById(imported.id);
+        QCOMPARE(b.title, QStringLiteral("封面测试书"));
+        QCOMPARE(b.author, QStringLiteral("测试作者"));
+        QCOMPARE(b.publisher, QStringLiteral("测试出版社"));
+    }
+    // 任务4：元数据缺失时不伪造——TXT 无元数据（标题=文件名，作者/出版社空）；
+    // 无作者/出版社声明的 EPUB 仅标题来自 OPF，其余字段保持空。
+    void metadataMissingKeepsFieldsEmpty() {
+        QTemporaryDir libDir;
+        QTemporaryDir srcDir;
+        // TXT：无元数据来源，标题=文件名
+        QFile txt(srcDir.path() + "/无作者书.txt");
+        QVERIFY(txt.open(QIODevice::WriteOnly)); txt.write("正文"); txt.close();
+        BookImporter imp(libDir.path(), ":memory:");
+        QVERIFY(imp.importFile(txt.fileName()).isEmpty());
+        QCOMPARE(imp.books()[0].title, QStringLiteral("无作者书"));
+        QCOMPARE(imp.books()[0].author, QString());
+        QCOMPARE(imp.books()[0].publisher, QString());
+        // EPUB 只有 dc:title（无 creator/publisher）：标题进库，其余为空
+        const QString epubPath = makeNoCoverMetaEpub(srcDir.path() + "/nometa.epub");
+        QVERIFY(!epubPath.isEmpty());
+        QVERIFY(imp.importFile(epubPath).isEmpty());
+        QCOMPARE(imp.books().size(), 2);
+        // books() 按 added_at DESC 排序：EPUB 为最新导入，按格式定位不依赖顺序
+        // （局部向量保证指针生命周期覆盖断言，避免悬垂）
+        const QVector<Book> all = imp.books();
+        const Book *epub = nullptr;
+        for (const Book &b : all)
+            if (b.format == QLatin1String("EPUB")) { epub = &b; break; }
+        QVERIFY(epub);
+        QCOMPARE(epub->title, QStringLiteral("无封面声明书"));
+        QCOMPARE(epub->author, QString());
+        QCOMPARE(epub->publisher, QString());
     }
     void epubFirstImageFallback() {
         // 无 OPF 封面声明：回退「解析首图」，须取第一章首图（红），

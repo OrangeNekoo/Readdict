@@ -150,10 +150,13 @@ DocumentModel MobiParser::parse(const QString &mobiPath) {
 
     char *titleC = mobi_meta_get_title(m);
     char *authorC = mobi_meta_get_author(m);
+    char *publisherC = mobi_meta_get_publisher(m);
     model.title = titleC ? QString::fromUtf8(titleC) : QString();
     model.author = authorC ? QString::fromUtf8(authorC) : QString();
+    model.publisher = publisherC ? QString::fromUtf8(publisherC) : QString();
     free(titleC);
     free(authorC);
+    free(publisherC);
     if (model.title.isEmpty())
         model.title = QFileInfo(mobiPath).completeBaseName();
 
@@ -331,5 +334,51 @@ DocumentModel MobiParser::parse(const QString &mobiPath) {
     for (Chapter &c : model.chapters)
         for (Paragraph &p : c.paragraphs)
             p.sentences = SentenceSplitter::split(p.text);
+    return model;
+}
+
+// 轻量元数据读取（任务4）：只 mobi_init/load + EXTH 读取，不跑 rawml 重建与
+// 正文分章——BookImporter 注册时以最小开销取 title/author/publisher。
+// 元数据语义与 parse() 一致（mobi_meta_get_title/author/publisher）；加载失败
+// 返回空模型，调用方按"元数据缺失"处理，不阻断入库。
+DocumentModel MobiParser::readMetadataOnly(const QString &mobiPath) {
+    DocumentModel model;
+    m_error.clear();
+    if (!QFileInfo::exists(mobiPath)) {
+        m_error = QStringLiteral("文件不存在: %1").arg(mobiPath);
+        return model;
+    }
+
+    MOBIData *m = mobi_init();
+    if (m == nullptr) {
+        m_error = QStringLiteral("内存分配失败");
+        return model;
+    }
+    const MOBI_RET loadRet = mobi_load_filename(m, mobiPath.toUtf8().constData());
+    if (loadRet != MOBI_SUCCESS || mobi_is_encrypted(m)) {
+        m_error = mobi_is_encrypted(m)
+            ? QStringLiteral("该文件受 DRM 保护（已加密），无法解析")
+            : mobiErrorMessage(loadRet);
+        mobi_free(m);
+        return model;
+    }
+    if (!mobi_is_mobipocket(m)) {
+        m_error = QStringLiteral("不是受支持的 MOBI/AZW3 文件");
+        mobi_free(m);
+        return model;
+    }
+
+    char *titleC = mobi_meta_get_title(m);
+    char *authorC = mobi_meta_get_author(m);
+    char *publisherC = mobi_meta_get_publisher(m);
+    model.title = titleC ? QString::fromUtf8(titleC) : QString();
+    model.author = authorC ? QString::fromUtf8(authorC) : QString();
+    model.publisher = publisherC ? QString::fromUtf8(publisherC) : QString();
+    free(titleC);
+    free(authorC);
+    free(publisherC);
+    if (model.title.isEmpty())
+        model.title = QFileInfo(mobiPath).completeBaseName();
+    mobi_free(m);
     return model;
 }

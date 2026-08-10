@@ -835,15 +835,31 @@ Item {
             compare(card.authorLabel.visible, false, "无作者时作者行应隐藏")
             loader.destroy()
         }
+        // 任务4：出版社行——有出版社显示、无出版社隐藏；作者为空时出版社紧跟标题不悬空
+        function test_publisherLine() {
+            var loader = cardComp.createObject(root)
+            var card = loader.item
+            verify(card !== null, "BookCard 应能加载")
+            verify(card.publisherLabel !== undefined, "出版社行应暴露句柄 publisherLabel")
+            // 有出版社：显示且文本即出版社
+            card.book = { id: 105, title: "测试书", author: "测试作者", publisher: "测试出版社", cover: "", progress: 0 }
+            compare(card.publisherLabel.visible, true, "有出版社时出版社行应显示")
+            compare(card.publisherLabel.text, "测试出版社", "出版社行文本应为出版社，实际 " + card.publisherLabel.text)
+            // 无出版社：隐藏
+            card.book = { id: 106, title: "无出版社书", cover: "", progress: 0 }
+            compare(card.publisherLabel.visible, false, "无出版社时出版社行应隐藏")
+            loader.destroy()
+        }
     }
     TestCase {
         name: "RefreshCoversSmoke"
         // B2：封面刷新数据流——设置页按钮 → Importer.refreshCovers() →
         // coversRefreshed → Books.booksChanged → booksModel 恢复真实封面。
-        // fixture：TestEnv 合成带封面 EPUB（标题 coverepub，OPF 声明红图）。
+        // fixture：TestEnv 合成带封面 EPUB（OPF 声明红图）。任务4 起标题取 OPF
+        // dc:title（"封面刷新书"），不再回退文件名 coverepub。
         function findCoverBook() {
             for (let b of Books.booksModel)
-                if (b.title === "coverepub") return b
+                if (b.title === "封面刷新书") return b
             return null
         }
         function test_refreshCoversDataFlow() {

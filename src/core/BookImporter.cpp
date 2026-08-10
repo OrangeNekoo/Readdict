@@ -252,7 +252,12 @@ QString BookImporter::adoptFile(const QString &pathInLibrary) {
 QString BookImporter::registerBook(const QString &destPath, const QString &format,
                                    qint64 *importedId) {
     const QString coverDir = m_libraryDir + "/covers/";
-    const QString title = QFileInfo(destPath).completeBaseName();
+    // 任务4：注册前以最小开销解析一次元数据（EPUB 只扫 OPF、FB2 只扫 description、
+    // MOBI 只 init/load+EXTH，避免整书二次解析）。标题元数据优先、文件名兜底；
+    // 解析失败不阻断入库（标题回退文件名，作者/出版社留空不伪造）。
+    const DocumentModel meta = ParserFactory::readMetadata(destPath, format);
+    const QString title = meta.title.isEmpty()
+        ? QFileInfo(destPath).completeBaseName() : meta.title;
     // 封面由 MD5(标题) 前 6 位命名，同标题书籍共享同一封面文件：
     // 记录生成前是否已存在，回滚时不得删除仍被健康记录引用的封面。
     const QString placeholderPath = coverPathFor(title, coverDir);
@@ -287,6 +292,8 @@ QString BookImporter::registerBook(const QString &destPath, const QString &forma
     }
     Book b;
     b.title = title;
+    b.author = meta.author;
+    b.publisher = meta.publisher;
     b.format = format; b.path = destPath; b.cover = cover;
     // addBook 返回 -1 表示写入失败（如 path 唯一约束冲突、FTS 索引写入失败），此时回滚文件副作用。
     const qint64 id = m_books->addBook(b);

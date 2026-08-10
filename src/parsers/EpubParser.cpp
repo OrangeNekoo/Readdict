@@ -87,9 +87,9 @@ QString containerRootfile(const QByteArray &xml) {
     return fallback;
 }
 
-// OPF 解析结果：书名/作者、manifest id→(href, media-type)、spine idref 顺序
+// OPF 解析结果：书名/作者/出版社、manifest id→(href, media-type)、spine idref 顺序
 struct OpfInfo {
-    QString title, author;
+    QString title, author, publisher;
     QHash<QString, QPair<QString, QString>> itemById; // id → (href, media-type)
     QStringList spineIds;
 };
@@ -108,6 +108,8 @@ bool parseOpf(const QByteArray &xml, OpfInfo *out) {
             out->title = r.readElementText().trimmed();
         } else if (tag == QLatin1String("creator") && out->author.isEmpty()) {
             out->author = r.readElementText().trimmed();
+        } else if (tag == QLatin1String("publisher") && out->publisher.isEmpty()) {
+            out->publisher = r.readElementText().trimmed();
         } else if (tag == QLatin1String("item")) {
             const QString id = r.attributes().value("id").toString();
             const QString href = r.attributes().value("href").toString();
@@ -514,6 +516,7 @@ DocumentModel EpubParser::parse(const QString &epubPath) {
     }
     m.title = info.title;
     m.author = info.author;
+    m.publisher = info.publisher;
     if (m.title.isEmpty()) m.title = QFileInfo(epubPath).completeBaseName();
     // 3) 按 spine 顺序逐章解析；图片缓存目录按书唯一（epub 路径 md5）
     const QDir imgDir(QDir::temp().filePath(QStringLiteral("Readdict-") + QString::fromLatin1(
@@ -554,5 +557,34 @@ DocumentModel EpubParser::parse(const QString &epubPath) {
     for (Chapter &c : m.chapters)
         for (Paragraph &p : c.paragraphs)
             p.sentences = SentenceSplitter::split(p.text);
+    return m;
+}
+
+// 轻量元数据读取（任务4）：只走 container.xml → OPF 扫描，不解压/解析任何章节，
+// 供 BookImporter 注册时以最小开销取 title/author/publisher（避免整书二次解析）。
+// 与 parse() 共用 parseOpf，元数据语义一致；OPF 缺失/损坏时返回空模型不设错误
+// （调用方按"元数据缺失"处理：标题回退文件名，作者/出版社留空，不阻断入库）。
+DocumentModel EpubParser::readMetadata(const QString &epubPath) {
+    DocumentModel m;
+    m_error.clear();
+    if (!QFileInfo::exists(epubPath)) {
+        m_error = QStringLiteral("文件不存在: %1").arg(epubPath);
+        return m;
+    }
+    const QByteArray container = readZipEntry(epubPath, "META-INF/container.xml");
+    if (container.isEmpty())
+        return m;
+    const QString opfEntry = containerRootfile(container);
+    if (opfEntry.isEmpty())
+        return m;
+    const QByteArray opf = readZipEntry(epubPath, opfEntry);
+    if (opf.isEmpty())
+        return m;
+    OpfInfo info;
+    parseOpf(opf, &info);
+    m.title = info.title;
+    m.author = info.author;
+    m.publisher = info.publisher;
+    if (m.title.isEmpty()) m.title = QFileInfo(epubPath).completeBaseName();
     return m;
 }

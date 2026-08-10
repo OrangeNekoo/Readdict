@@ -32,3 +32,20 @@ DocumentModel ParserFactory::parse(const QString &filePath, const QString &forma
     if (error) *error = QStringLiteral("不支持的文件格式: %1").arg(format);
     return {};
 }
+
+DocumentModel ParserFactory::readMetadata(const QString &filePath, const QString &format) {
+    if (format == "EPUB") {
+        EpubParser p;
+        return p.readMetadata(filePath);
+    }
+    if (format == "FB2") {
+        Fb2Parser p;
+        return p.readMetadataOnly(filePath);
+    }
+    if (format == "MOBI" || format == "AZW3") {
+        MobiParser p;
+        return p.readMetadataOnly(filePath);
+    }
+    // TXT/MD/PDF/未知：无元数据来源，返回空模型（标题回退文件名、作者/出版社空）
+    return {};
+}

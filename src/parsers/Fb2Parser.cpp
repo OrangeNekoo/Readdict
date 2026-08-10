@@ -122,6 +122,40 @@ DocumentModel Fb2Parser::parse(const QString &fb2Path) {
     return m;
 }
 
+// 轻量元数据读取（任务4）：只做第一遍的 <description> 扫描（不含 binary 收集与
+// 正文分章），供 BookImporter 注册时以最小开销取 title/author/publisher。
+// 元数据语义与 parse() 完全一致（共用 readMetadata）；XML 损坏返回空模型，
+// 调用方按"元数据缺失"处理，不阻断入库。
+DocumentModel Fb2Parser::readMetadataOnly(const QString &fb2Path) {
+    DocumentModel m;
+    m_error.clear();
+    QFile f(fb2Path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        m_error = QStringLiteral("文件无法打开: %1").arg(fb2Path);
+        return m;
+    }
+    const QByteArray data = f.readAll();
+    if (data.isEmpty()) return m;
+
+    QXmlStreamReader meta(data);
+    while (!meta.atEnd() && !meta.hasError()) {
+        meta.readNext();
+        if (!meta.isStartElement()) continue;
+        if (meta.name() == QLatin1String("description")) {
+            readMetadata(meta, &m);
+            break; // 只要 description；body/binary 不扫
+        }
+    }
+    if (meta.hasError()) {
+        qWarning("Fb2Parser: %s 的 XML 解析失败：%s",
+                 qUtf8Printable(fb2Path), qUtf8Printable(meta.errorString()));
+        m_error = QStringLiteral("FB2 XML 解析失败：%1").arg(meta.errorString());
+        return DocumentModel{};
+    }
+    if (m.title.isEmpty()) m.title = QFileInfo(fb2Path).completeBaseName();
+    return m;
+}
+
 void Fb2Parser::readMetadata(QXmlStreamReader &r, DocumentModel *m) {
     // 位于 <description> 起始；消费到 </description>
     while (!r.atEnd() && (r.readNext() != QXmlStreamReader::EndElement
@@ -137,6 +171,8 @@ void Fb2Parser::readMetadata(QXmlStreamReader &r, DocumentModel *m) {
                     m->title = r.readElementText().trimmed();
                 else if (t == QLatin1String("author") && m->author.isEmpty())
                     m->author = readAuthor(r);
+                else if (t == QLatin1String("publisher") && m->publisher.isEmpty())
+                    m->publisher = r.readElementText().trimmed();
                 else
                     skipElement(r);
             }

@@ -32,7 +32,7 @@
 
 // B2：合成带真实封面的最小 EPUB（OPF <meta name="cover"> 指向纯红图 850x1214，
 // 与 tst_bookimporter 的 makeCoverEpub 同构）——封面刷新冒烟 fixture。
-// 标题即文件名 coverepub（completeBaseName 语义与导入流程一致）。
+// 任务4 起标题取 OPF dc:title（"封面刷新书"），不再回退文件名 coverepub。
 static bool writeCoverEpub(const QString &zipPath) {
     const QByteArray container =
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
@@ -113,7 +113,7 @@ class TestEnv : public QObject {
     // B1：删除冒烟专属书源（标题 delme）——不与共享的 zeta/alpha/mike 混用，
     // 删除用例可安全删书+删文件而不影响其他用例
     Q_PROPERTY(QString deleteSource READ deleteSource CONSTANT)
-    // B2：带真实封面的 EPUB（标题 coverepub，OPF cover 声明指向红图）——
+    // B2：带真实封面的 EPUB（标题取 OPF 元数据"封面刷新书"）——
     // 封面刷新冒烟：导入 → cover 改回占位 → refreshCovers 恢复真实封面
     Q_PROPERTY(QString coverEpubSource READ coverEpubSource CONSTANT)
 public:

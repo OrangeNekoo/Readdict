@@ -390,12 +390,20 @@ Page {
         standardButtons: Dialog.Ok
         width: 380
         contentItem: Label {
-            text: qsTr("书名：%1\n作者：%2\n出版社：%3\n格式：%4\n进度：%5%")
-                .arg(page.book && page.book.title ? page.book.title : "")
-                .arg(page.book && page.book.author ? page.book.author : "")
-                .arg(page.book && page.book.publisher ? page.book.publisher : "")
-                .arg(page.book && page.book.format ? page.book.format : "")
-                .arg(Math.round((page.book && page.book.progress ? page.book.progress : 0) * 100))
+            // 任务4：作者/出版社等空字段隐藏对应行（不显示空占位）；进度恒显示
+            text: {
+                let lines = []
+                if (page.book && page.book.title)
+                    lines.push(qsTr("书名：%1").arg(page.book.title))
+                if (page.book && page.book.author)
+                    lines.push(qsTr("作者：%1").arg(page.book.author))
+                if (page.book && page.book.publisher)
+                    lines.push(qsTr("出版社：%1").arg(page.book.publisher))
+                if (page.book && page.book.format)
+                    lines.push(qsTr("格式：%1").arg(page.book.format))
+                lines.push(qsTr("进度：%1%").arg(Math.round((page.book && page.book.progress ? page.book.progress : 0) * 100)))
+                return lines.join("\n")
+            }
             wrapMode: Text.Wrap
             color: UITheme.textPrimary
         }

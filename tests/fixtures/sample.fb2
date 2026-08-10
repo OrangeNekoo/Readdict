@@ -2,6 +2,7 @@
 <FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">
   <description><title-info>
     <book-title>测试书</book-title><author><first-name>作者</first-name><last-name>甲</last-name></author>
+    <publisher>测试出版社</publisher>
   </title-info></description>
   <body><section><title><p>第一章</p></title>
     <p>第一段。</p><p>第二<b>段</b>。</p>

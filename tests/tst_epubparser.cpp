@@ -19,6 +19,7 @@ private slots:
         DocumentModel m = p.parse(QStringLiteral(EPUB_FIXTURES_DIR) + "/sample.epub");
         QCOMPARE(m.title, QStringLiteral("测试书"));
         QCOMPARE(m.author, QStringLiteral("作者甲"));
+        QCOMPARE(m.publisher, QStringLiteral("出版社甲"));
         QCOMPARE(m.chapters.size(), 2);
         QCOMPARE(m.chapters[0].title, QStringLiteral("第一章"));
         // 段落按 <p>/<h*> 切分：h1 + 4 个 p（含实体段）

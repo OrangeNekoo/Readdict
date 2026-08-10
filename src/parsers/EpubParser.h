@@ -15,6 +15,9 @@
 class EpubParser {
 public:
     DocumentModel parse(const QString &epubPath);
+    // 任务4：轻量元数据读取（仅 container/OPF 扫描，不解析章节）——BookImporter
+    // 注册时以最小开销取 title/author/publisher；缺失/损坏返回空模型不设错误
+    DocumentModel readMetadata(const QString &epubPath);
     QString lastError() const { return m_error; }
 private:
     QByteArray readZipEntry(const QString &zipPath, const QString &entry,

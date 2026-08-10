@@ -17,6 +17,9 @@
 class Fb2Parser {
 public:
     DocumentModel parse(const QString &fb2Path);
+    // 任务4：轻量元数据读取（只扫 <description>，不做 binary/正文遍）——
+    // BookImporter 注册时以最小开销取 title/author/publisher
+    DocumentModel readMetadataOnly(const QString &fb2Path);
     QString lastError() const { return m_error; }
 private:
     // 递归遍历 section（含嵌套小节）：标题/段落/子 section 填进同一章

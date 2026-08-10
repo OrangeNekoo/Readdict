@@ -42,6 +42,8 @@ Item {
     height: compact ? 168 : 296
     // C5：作者行句柄（冒烟断言有作者显示/无作者隐藏）
     property alias authorLabel: authorLabel
+    // 任务4：出版社行句柄（冒烟断言有出版社显示/无出版社隐藏）
+    property alias publisherLabel: publisherLabel
 
     // D7：悬停上浮——scale 1.03 + Behavior 缓动（Material 卡片悬停反馈）
     scale: cardMouse.hovered ? 1.03 : 1.0
@@ -169,6 +171,22 @@ Item {
             anchors.topMargin: 2
             text: card.book.author ?? ""
             visible: !card.compact && (card.book.author ?? "").length > 0
+            elide: Text.ElideRight
+            font.pixelSize: 12
+            color: UITheme.textSecondary
+        }
+
+        // 任务4：出版社行——紧跟作者行（作者为空时紧跟标题，不悬空）；空值隐藏
+        Text {
+            id: publisherLabel
+            anchors.top: (card.book.author ?? "").length > 0 ? authorLabel.bottom : titleText.bottom
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.leftMargin: 8
+            anchors.rightMargin: 8
+            anchors.topMargin: 2
+            text: card.book.publisher ?? ""
+            visible: !card.compact && (card.book.publisher ?? "").length > 0
             elide: Text.ElideRight
             font.pixelSize: 12
             color: UITheme.textSecondary

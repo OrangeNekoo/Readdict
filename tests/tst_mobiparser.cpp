@@ -32,12 +32,21 @@ void putBE32(QByteArray &b, int off, quint32 v) {
 // 构造最小 PalmDB（MOBI）文件字节。
 //  - html 为空且 encryptionType != 0 时：仅 record0（16 字节 PalmDOC 头），
 //    用于伪造"加密"文件（libmobi 加载成功后 mobi_is_encrypted 判定为真）。
-//  - 否则：record0 = PalmDOC 头(16) + MOBI 头(24, UTF-8/version 6)，
+//  - 否则：record0 = PalmDOC 头(16) + MOBI 头(24, UTF-8/version 6) [+ EXTH]，
 //    record1 = 未压缩 html 文本记录。
-QByteArray buildMobiPdb(const QByteArray &html, quint16 encryptionType) {
+//  - exth（可选）：EXTH 记录列表（tag → 原始字节，如作者 100 / 出版社 101），
+//    按 libmobi mobi_parse_extheader 的布局（magic+length+count+records）写入。
+QByteArray buildMobiPdb(const QByteArray &html, quint16 encryptionType,
+                        const QList<QPair<quint32, QByteArray>> &exth = {}) {
     const bool withMobiHeader = !html.isEmpty();
     const int recCount = withMobiHeader ? 2 : 1;
-    const int rec0Size = withMobiHeader ? 40 : 16;
+    int exthSize = 0;
+    if (withMobiHeader) {
+        exthSize = 12; // "EXTH" + length + count
+        for (const auto &e : exth)
+            exthSize += 8 + e.second.size();
+    }
+    const int rec0Size = withMobiHeader ? 40 + exthSize : 16;
     const int rec1Size = html.size() + (html.size() % 2); // PDB 记录按 2 字节对齐
 
     QByteArray pdb;
@@ -73,6 +82,20 @@ QByteArray buildMobiPdb(const QByteArray &html, quint16 encryptionType) {
         putBE32(pdb, rec0Off + 28, 65001);  // text_encoding = UTF-8
         putBE32(pdb, rec0Off + 32, 1);      // uid
         putBE32(pdb, rec0Off + 36, 6);      // version = MOBI6（KF7）
+        // EXTH：紧跟 MOBI 头（libmobi 在 MOBI 头解析成功后无条件尝试解析）
+        if (exthSize > 0) {
+            int off = rec0Off + 40;
+            pdb.replace(off, 4, "EXTH");
+            putBE32(pdb, off + 4, quint32(exthSize));
+            putBE32(pdb, off + 8, quint32(exth.size()));
+            off += 12;
+            for (const auto &e : exth) {
+                putBE32(pdb, off, e.first);
+                putBE32(pdb, off + 4, quint32(8 + e.second.size()));
+                pdb.replace(off + 8, e.second.size(), e.second);
+                off += 8 + e.second.size();
+            }
+        }
         pdb.replace(rec1Off, html.size(), html);
     }
     return pdb;
@@ -132,6 +155,8 @@ private slots:
         const DocumentModel model = p.parse(f.fileName());
         QVERIFY2(p.lastError().isEmpty(), qUtf8Printable(p.lastError()));
         QCOMPARE(model.title, QString("Test Book"));
+        QCOMPARE(model.author, QString());      // 无 EXTH：作者缺失保持空
+        QCOMPARE(model.publisher, QString());   // 无 EXTH：出版社缺失保持空
         QCOMPARE(model.chapters.size(), 2);
 
         const Chapter &c1 = model.chapters[0];
@@ -154,6 +179,30 @@ private slots:
         QCOMPARE(c2.paragraphs[2].text, QString("第四段\n换行后。"));
         QVERIFY(c2.paragraphs[2].html.contains("<br>"));
         QCOMPARE(c2.paragraphs[2].sentences.size(), 1);
+    }
+    // EXTH 元数据：作者(100) + 出版社(101) 记录 → DocumentModel.author/publisher
+    // 经 mobi_meta_get_author / mobi_meta_get_publisher 读取（标题仍取 PDB 名）
+    void parsesExthMetadata() {
+        const QByteArray html =
+            "<html><head><title>Test Book</title></head><body>"
+            "<h1>第一章</h1><p>正文。</p></body></html>";
+        const QList<QPair<quint32, QByteArray>> exth = {
+            {100, QByteArray("测试作者")},
+            {101, QByteArray("测试出版社")},
+        };
+        MobiParser p;
+        QTemporaryDir dir;
+        QFile f(dir.path() + "/meta.mobi");
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(buildMobiPdb(html, 0, exth));
+        f.close();
+
+        const DocumentModel model = p.parse(f.fileName());
+        QVERIFY2(p.lastError().isEmpty(), qUtf8Printable(p.lastError()));
+        QCOMPARE(model.title, QString("Test Book"));
+        QCOMPARE(model.author, QString("测试作者"));
+        QCOMPARE(model.publisher, QString("测试出版社"));
+        QCOMPARE(model.chapters.size(), 1);
     }
 };
 

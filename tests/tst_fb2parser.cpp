@@ -19,6 +19,7 @@ private slots:
         DocumentModel m = p.parse(QStringLiteral(FB2_FIXTURES_DIR) + "/sample.fb2");
         QCOMPARE(m.title, QStringLiteral("测试书"));
         QCOMPARE(m.author, QStringLiteral("作者甲"));
+        QCOMPARE(m.publisher, QStringLiteral("测试出版社"));
         QCOMPARE(m.chapters.size(), 1);
         QCOMPARE(m.chapters[0].title, QStringLiteral("第一章"));
         // 章标题只进 Chapter.title，不入段落列表；段落 0=第一段，1=第二段（含 <b>）

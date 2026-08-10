@@ -18,7 +18,7 @@ struct Chapter {
 };
 
 struct DocumentModel {
-    QString title, author;
+    QString title, author, publisher;
     QVector<Chapter> chapters;
     bool empty() const { return chapters.isEmpty(); }
 };

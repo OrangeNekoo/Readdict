@@ -13,6 +13,9 @@
 class MobiParser {
 public:
     DocumentModel parse(const QString &mobiPath);
+    // 任务4：轻量元数据读取（只 init/load + EXTH，不重建 rawml）——
+    // BookImporter 注册时以最小开销取 title/author/publisher
+    DocumentModel readMetadataOnly(const QString &mobiPath);
     QString lastError() const { return m_error; }
 private:
     QString m_error;
