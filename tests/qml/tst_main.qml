@@ -443,9 +443,16 @@ Item {
             return null
         }
         // 打开阅读页（模拟生产 StackView.push(…, {book})）：setSource 初始属性在
-        // onCompleted 前应用，保证章节加载/滚动恢复/计时都在 book 就绪后执行
+        // onCompleted 前应用，保证章节加载/滚动恢复/计时都在 book 就绪后执行。
+        // 任务3 审查回归修复：ReaderPage 的锚定布局在无头测试环境高度不可靠
+        //（同 test_scrollAutoNextSignal 注释）——Loader 不设尺寸则 ReaderPage 为
+        // 0×0，正文列宽公式收敛到 0，scroll 模式 contentHeight（=列隐式高）塌陷为
+        // 0，恢复/搜索跳转断言全部失效。显式给 Loader 真实视口（800×600，同
+        // ContentSmoke/test_scrollAutoNextSignal 约定），恢复/跳转才有真实内容高度。
         function openReader(book) {
             var loader = readerComp.createObject(root)
+            loader.width = 800
+            loader.height = 600
             loader.setSource("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: book })
             var page = loader.item
             verify(page !== null, "ReaderPage 应能加载")
@@ -489,6 +496,9 @@ Item {
             if (!book) skip("未导入长文本书")
             var loader = openReader(book)
             var page = loader.item
+            // 任务3 审查回归：阅读页必须有真实视口——无头环境 Loader 不设尺寸时
+            // ReaderPage 为 0×0，正文列宽收敛为 0、contentHeight 塌陷（历史回归源）
+            verify(page.contentView.width > 100, "阅读页应有真实视口宽度，实际 " + page.contentView.width)
             tryVerify(function () { return page.contentView.contentHeight > 2000 }, 5000,
                       "长文本书内容高度应远大于视口")
             page.contentView.contentY = 400
