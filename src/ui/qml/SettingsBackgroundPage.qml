@@ -255,7 +255,8 @@ Page {
                     horizontalAlignment: Text.AlignRight
                 }
             }
-            // E4：翻页方式——竖滚连续（scroll，默认）/ 整页翻动（paged，按视口高度切页）。
+            // E4：翻页方式——竖向连续滚动（scroll，默认）/ 横向分页（paged，任务3：
+            // 页面沿 x 轴排列，左右/上下键按页宽整页翻动）。
             // 持久化 reading/pageMode；ReaderPage 打开时读取。
             Label {
                 text: qsTr("翻页方式")
@@ -267,8 +268,8 @@ Page {
                 Layout.fillWidth: true
                 columns: 2
                 options: [
-                    { text: qsTr("连续滚动"), value: "scroll" },
-                    { text: qsTr("整页翻动"), value: "paged" }
+                    { text: qsTr("竖向连续滚动"), value: "scroll" },
+                    { text: qsTr("横向分页"), value: "paged" }
                 ]
                 onSelected: (v) => Settings.setValue("reading/pageMode", v)
             }

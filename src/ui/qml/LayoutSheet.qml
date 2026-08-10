@@ -21,9 +21,11 @@ Item {
     signal setAlign(string align)
 
     // value 为存储 token/数值，glyph 为 KdIconCard 的示意图形。
+    // 任务3：文案与语义对齐——scroll = 竖向连续滚动（单列竖流），paged = 横向分页
+    //（页面沿 x 轴排列，左右/上下键整页翻动）。
     property var modeModel: [
-        { text: qsTr("连续滚动"), value: "scroll", glyph: "v" },
-        { text: qsTr("整页翻动"), value: "paged", glyph: "h" }
+        { text: qsTr("竖向连续滚动"), value: "scroll", glyph: "v" },
+        { text: qsTr("横向分页"), value: "paged", glyph: "h" }
     ]
     property var marginModel: [
         { text: qsTr("窄"), value: "narrow", glyph: "narrow" },

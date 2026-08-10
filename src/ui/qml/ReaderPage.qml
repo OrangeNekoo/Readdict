@@ -147,7 +147,8 @@ Page {
         // handleContentTap 状态机（隐藏态 content.y=0，换算为恒等；Sheet 打开
         // 时 content 下移 topToolbar 高，仍需换算）。content 为本组件 id（词法
         // 解析），不可写 page.content（id 非父对象属性）。
-        onContentTapped: (y) => page.handleContentTap(content.y + y)
+        // 任务3：x 视口坐标直传（content.x 恒 0），paged 模式左右半屏点击翻页。
+        onContentTapped: (x, y) => page.handleContentTap(content.y + y, x)
     }
 
     // L4（P0#5）：解析失败错误占位——loadError 非空时盖住内容区：居中错误文案
@@ -824,17 +825,24 @@ Page {
     //     控制栏空位带）→ 唤出快捷控制栏（C3 保留为快捷条）
     //   · 其余轻点（屏幕中部/边缘）→ 弹出 KdBottomSheet（Kindle 主操作面）
     // TtsBar 显隐由 C2 门控独立决定，本框架不作用于朗读条。
-    // 任务2：状态机收敛在 handleContentTap（页面坐标 y）——真实点击由正文宿主
-    //（ReaderContent）的 TapHandler 桥接（contentTapped → onContentTapped → 本函数，
-    // 见 ReaderContent.contentTapped 注释：旧实现 TapHandler 挂本页层，被正文
-    // Flickable 的按压 grab 吞掉，生产点击无效）；冒烟测试既可直接调用本函数
-    // 也经真实鼠标事件走桥接（tst_readerpage test_realClick*）。
+    // 任务2：状态机收敛在 handleContentTap（页面坐标 y，x 为视口坐标）——真实点击
+    // 由正文宿主（ReaderContent）的 TapHandler 桥接（contentTapped → onContentTapped
+    // → 本函数，见 ReaderContent.contentTapped 注释）；冒烟测试既可直接调用本函数
+    //（x 缺省）也经真实鼠标事件走桥接（tst_readerpage test_realClick*）。
+    // 任务3：paged 模式点击即翻页——右半屏下一页、左半屏上一页（首末页边界换章
+    // 由 pageNext/pagePrev → autoNext/autoPrevChapter 处理）；x 缺省（旧直调路径）
+    // 保持唤出语义不翻页。scroll 模式行为不变（忽略 x）。
     // 注意：Timer.restart() 对停止态的计时器会重新启动（Qt 语义），隐藏态禁止
     // 调用——否则违反"隐藏后计时停止"；重置只发生在显示态。
-    function handleContentTap(y) {
+    function handleContentTap(y, x) {
         content.forceActiveFocus()
         if (page.sheetOpen) { page.sheetOpen = false; return }
         if (page.menuOpen) { page.menuOpen = false; return }
+        if (page.pageMode === "paged" && x !== undefined && x >= 0) {
+            if (x >= content.width / 2) content.pageNext(false)
+            else content.pagePrev(false)
+            return
+        }
         // 保留隐藏态底部唤出语义；其余位置切换 Kindle Sheet。
         const summonBottom = content.y + content.height * 0.75
         if (!page.controlsVisible && y >= summonBottom) {

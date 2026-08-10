@@ -36,20 +36,30 @@ Flickable {
     // U1：默认取 Kindle 暖白系主文字 Token（lightTextPrimary #1A1A1A）；ReaderPage
     // 总是显式传入 bgMode 对应色（dark → darkTextPrimary），本默认仅独立使用兜底。
     property color textColor: UITheme.lightTextPrimary
-    // E4：翻页方式——"scroll"（竖滚连续，默认）/ "paged"（横翻整页，按视口高度切页）。
+    // E4：翻页方式——"scroll"（竖滚连续，默认）/ "paged"（真正横向分页，任务3）。
     // 由 ReaderPage 从 Settings 的 reading/pageMode 读取注入；键盘方向键按此分流：
     // scroll 模式 ↑↓ 滚动一视口页、←→ 翻章；paged 模式四个方向键都整页翻动。
+    // 任务3：paged 不再把 contentY 当页边界（旧假分页）——章节段落按字符/段落边界
+    // 切分成 pageModel（rebuildPageModel 稳定单向估算，只依赖字符串长度与视口几何，
+    // 绝不读取 delegate 异步高度 → 无振荡、无隐藏测量列、无双重 Repeater），每页是
+    // 独立 Item（页宽 = 视口宽），页面沿 Row 横向排列；contentX 承担分页职责，
+    // contentY 恒 0。scroll 模式代码路径保持原样（单列竖向连续滚动）。
     property string pageMode: "scroll"
+    // 任务3：分页页模型——每项是该页包含的段落全局索引数组；pageCount 为页数
+    //（测试断言稳定无振荡的依据）。由 rebuildPageModel 在章节/排版/视口变化时重建。
+    property var pageModel: []
+    property int pageCount: 0
     // E4：键盘翻页——上一章请求（scroll 模式 ←，ReaderPage 接 loadChapter(current-1)；
-    // loadChapter 内部钳制到 [0, len-1]，边界不越）
+    // loadChapter 内部钳制到 [0, len-1]，边界不越；paged 首页 ← 同样走此信号换章）
     signal requestPrevChapter()
-    // 任务2：真实点击桥接——单击正文宿主（本 Flickable 表面）上报页面坐标 y
+    // 任务2：真实点击桥接——单击正文宿主（本 Flickable 表面）上报视口坐标 x/y
     //（TapHandler 挂在正文宿主而非 ReaderPage 层：旧实现挂在 Page 末尾，被正文
     // Flickable 的按压 grab 吞掉，生产点击永远到不了 handleContentTap 状态机）。
     // DragThreshold 手势策略：位移超阈值即取消（正文拖动/文本选择不受影响，
     // Flickable 拖动照常），观察模式不抢 grab（Sheet 遮罩/顶栏/TtsBar/按钮点击
-    // 照常，本桥接只覆盖正文区）。ReaderPage 接 onContentTapped → handleContentTap。
-    signal contentTapped(real y)
+    // 照常，本桥接只覆盖正文区）。ReaderPage 接 onContentTapped → handleContentTap；
+    // 任务3：x 供 paged 模式左右半屏点击翻页（scroll 模式忽略 x）。
+    signal contentTapped(real x, real y)
     // B10：滚动位置恢复——ReaderPage 打开时赋保存的 scrollY（>=0），内容高度就绪后应用；
     // 默认 -1 表示"本次打开无需恢复"，避免内容高度变化时反复设置。
     // 应用时机：内容高度**收敛**（200ms 无变化）后——含图片段章节的首趟高度在图片
@@ -77,6 +87,10 @@ Flickable {
     property int totalSentences: 0
     property color highlightColor: "#FFD54F"   // 当前句高亮底色（黄，TTS 朗读游标）
     property alias paragraphRepeater: rep
+    // 任务3：paged 页面 Repeater 与横向翻页动画句柄（冒烟测试经此断言页模型同步
+    // 与动画互斥——pageAnimX 启动前 followAnim 已停，两动画驱动同一 contentX 方向）
+    property alias pageRepeater: pageRep
+    property alias pageAnimationX: pageAnimX
     // E4 复审：动画句柄（冒烟测试经此断言互斥——pageAnim 启动前 followAnim 已停，
     // 两动画驱动同一 contentY，并发会让目标互相覆盖）
     property alias pageAnimation: pageAnim
@@ -110,8 +124,15 @@ Flickable {
     property alias noteDialog: noteDlg
     property alias noteTextArea: noteArea
     clip: true
-    contentWidth: width
-    contentHeight: col.implicitHeight
+    // 任务3：scroll 单列竖向流（contentWidth = 视口宽、contentHeight = 内容高）；
+    // paged 横向页序列（contentWidth = 页数×页宽 > 视口宽、contentHeight = 视口高，
+    // 且 HorizontalOnly 锁死纵向——contentY 恒 0，分页职责完全由 contentX 承担）。
+    contentWidth: flick.pageMode === "paged" ? flick.pageCount * flick.width : flick.width
+    contentHeight: flick.pageMode === "paged" ? flick.height : col.implicitHeight
+    flickableDirection: flick.pageMode === "paged" ? 1 : 0
+    // ↑ FlickableDirection 枚举：0=Auto（scroll 双向）、1=HorizontalOnly（paged 锁死纵向）。
+    // 不用 Flickable.HorizontalOnly 类型名枚举——本 Qt 6.11 环境实测该枚举经类型名
+    // 不可解析（返回 undefined），数值为 Qt 稳定 ABI（QQuickFlickable 自 Qt5 起不变）。
     // E4：阅读页获得键盘焦点时方向键翻页——Flickable focus:true（点击段落 TextEdit
     // 的 activeFocusOnPress:false 不抢焦点，焦点常驻正文区）；Keys 委托 handleKey
     //（冒烟测试经同一函数注入按键，避免 quicktest harness 合成键盘事件不可靠）。
@@ -154,7 +175,7 @@ Flickable {
         onTapped: {
             if (contentTapHandler.toolbarHitTest(point.position.x, point.position.y))
                 return
-            flick.contentTapped(point.position.y)
+            flick.contentTapped(point.position.x, point.position.y)
         }
     }
 
@@ -164,12 +185,14 @@ Flickable {
     // loadChapter 之后才赋 restoreScrollY，届时本 handler 已把 pending 清空）
     onChapterChanged: {
         flick.contentY = 0
+        flick.contentX = 0   // 任务3：换章回到第 1 页
         restoreTimer.stop()
         flick.restorePending = false
         flick.restoreApplied = false
         flick.restoreAppliedY = -1
         flick.nextChapterRequested = false   // 规格 §7：新章可再次触发自动续章
         flick.computeSentenceStarts()
+        flick.rebuildPageModel()   // 任务3：新章段落 → 重算横向页模型（同步单向估算）
         // C7：章节变了，旧选择/跳转提示作废
         flick.flashIndex = -1
         flick.hideSelectionToolbar()
@@ -183,15 +206,128 @@ Flickable {
         }
     }
     onContentHeightChanged: flick.scheduleRestore()
+    // 任务3：页宽/字体/行高/窗口尺寸/章节/模式变化 → 重算页模型并钳制当前页
+    //（rebuildPageModel 纯同步估算，无 delegate 高度反馈回路 → 无 pageCount 振荡）
+    onPageModeChanged: {
+        flick.contentX = 0
+        flick.contentY = 0
+        flick.rebuildPageModel()
+    }
+    onTypographyChanged: flick.rebuildPageModel()
+    onWidthChanged: flick.rebuildPageModel()
+    onHeightChanged: flick.rebuildPageModel()
+    // 任务3：paged 横向滚动收敛吸附——contentX 变化（拖拽/滚轮/程序化设置）后
+    // 200ms 无变化即 snapToPage 补齐页边界；键盘翻页动画（pageAnimX）目标本就
+    // 在页边界，吸附为幂等 no-op。ttsActive/恢复窗口内跳过（同 scroll 纵吸附门控）。
+    onContentXChanged: {
+        if (flick.pageMode === "paged" && !flick.ttsActive && !flick.restorePending)
+            snapTimer.restart()
+    }
+
+    // ---- 任务3：稳定单向横向分页模型 ----
+    // rebuildPageModel 只依赖稳定输入（段落字符串长度/边界、viewport 几何、
+    // typography 字号/行高/页宽档），一次同步算出页序列；绝不读取 delegate 的
+    // 异步 implicitHeight 作分页反馈（此前两次方案因动态测量振荡回滚），
+    // 也没有隐藏测量列/双重 Repeater——同一段落只在一个 Repeater 中渲染一次。
+    // 分页按段落边界切分（超长段落独占一页、页内自然换行，不空白）；图片段独占
+    // 一页；富文本标题/<br> 按行加权，估算偏保守避免页内容溢出视口被裁剪。
+    function rebuildPageModel() {
+        var paras = flick.chapter.paragraphs ?? []
+        if (flick.pageMode !== "paged" || paras.length === 0) {
+            flick.pageModel = []
+            flick.pageCount = 0
+            return
+        }
+        var w = Math.max(1, flick.width)
+        var h = Math.max(1, flick.height)
+        var fontPx = Number(flick.typography.fontSize) || 18
+        var lh = Number(flick.typography.lineHeight) || 1.6
+        var colW = Math.min(w * flick.pageWidthFactor(), w - 48, flick.pageWidthCap())
+        // 每行字符数：全角字符宽 ≈ 字号，打 0.8 折保守估算（富文本/标点实际更窄）
+        var charsPerLine = Math.max(8, Math.floor(colW / (fontPx * 0.8)))
+        var linePx = Math.max(10, fontPx * lh)
+        var linesPerPage = Math.max(1, Math.floor((h - 16) / linePx))
+        var charsPerPage = Math.max(charsPerLine * linesPerPage, 100)
+        var pages = []
+        var cur = []
+        var curChars = 0
+        for (var i = 0; i < paras.length; i++) {
+            var p = paras[i]
+            var html = p.html ?? ""
+            var isImage = !!p.imagePath
+                && html.replace(/<img[^>]*>/gi, "").trim().length === 0
+            // 估算该段字符当量：图片段独占一页（宽高比未知，整页最稳）
+            var len = isImage ? charsPerPage + 1 : Math.max(1, (p.text ?? "").length)
+            if (!isImage) {
+                // 富文本行高加权：h1-h6 行高更大、<br> 显式多行
+                var heads = (html.match(/<h[1-6]\b/gi) || []).length
+                len += heads * 2 * charsPerLine
+                var brs = (html.match(/<br\b/gi) || []).length
+                len += brs * charsPerLine
+            }
+            if (cur.length > 0 && curChars + len > charsPerPage) {
+                pages.push(cur)
+                cur = []
+                curChars = 0
+            }
+            cur.push(i)
+            curChars += len
+        }
+        if (cur.length > 0) pages.push(cur)
+        flick.pageModel = pages
+        flick.pageCount = pages.length
+        // 钳制当前页：页数变化后 contentX 不得超过末页
+        var maxX = Math.max(0, (pages.length - 1) * flick.pageWidth())
+        if (flick.contentX > maxX) flick.contentX = maxX
+    }
+
+    // 页宽 = 视口宽（paged 页沿 x 轴每页占满一屏）
+    function pageWidth() {
+        return Math.max(1, flick.width)
+    }
+
+    // 段落全局索引 → 所在页号（-1 = 未找到）
+    function pageForParagraph(pi) {
+        for (var p = 0; p < flick.pageCount; p++)
+            if (flick.pageModel[p].indexOf(pi) >= 0) return p
+        return -1
+    }
+
+    // 段落全局索引 → 段落渲染 Item（scroll：主 Repeater；paged：页内 Repeater）。
+    // 供选择工具条定位/取消选择/朗读跟随/搜索跳转共用（paged 下主 Repeater 未挂载）。
+    function paragraphItemAt(pi) {
+        if (pi < 0) return null
+        if (flick.pageMode !== "paged") return rep.itemAt(pi)
+        for (var p = 0; p < flick.pageCount; p++) {
+            var wi = flick.pageModel[p].indexOf(pi)
+            if (wi >= 0) {
+                var pageItem = pageRep.itemAt(p)
+                return pageItem ? pageItem.paraRepeater.itemAt(wi) : null
+            }
+        }
+        return null
+    }
+
+    // 定位到指定页（钳制到 [0, pageCount-1]，页边界 = 页号×页宽，动画驱动 contentX）
+    function goToPage(p) {
+        if (flick.pageCount <= 0) return
+        p = Math.max(0, Math.min(p, flick.pageCount - 1))
+        var target = p * flick.pageWidth()
+        if (Math.abs(target - flick.contentX) < 1) return
+        followAnim.stop()   // 互斥：两动画驱动同一 contentX 方向，启动前停掉对方
+        pageAnim.stop()
+        pageAnimX.stop()
+        pageAnimX.to = target
+        pageAnimX.start()
+    }
 
     // 规格 §7：章末自动续章——距底部 autoNextThreshold 内（且用户已实际滚动，contentY>0）
     // 触发 requestNextChapter。恢复窗口内不触发（恢复把用户拽到保存位置，非主动滚动）；
     // TTS 会话活动（播放/暂停）与动画滚动（搜索跳转/朗读跟随）中同样不触发——
     // 朗读续章走 chapterCompleted 路径，暂停会话不应被滚动换章打断丢弃。
-    // E4 复审：paged 模式滚轮滚动吸附——滚轮滚动改变 contentY 但不触发
-    // movementEnded（仅手势/惯性触发），靠 contentY 变化收敛（200ms 无变化）
-    // 后 snapToPage 补齐滚轮吸附；snapToPage 内部有 ttsActive/恢复窗口门控，
-    // 键盘翻页动画（pageAnim）目标本就是页边界，吸附为幂等 no-op。
+    // 任务3：paged 横向滚动收敛吸附计时器（拖拽/滚轮经 onContentXChanged 重启）；
+    // snapToPage 内部有 ttsActive/恢复窗口门控，键盘翻页动画（pageAnimX）目标本就
+    // 在页边界，吸附为幂等 no-op。
     Timer {
         id: snapTimer
         interval: 200
@@ -203,9 +339,8 @@ Flickable {
                 && Math.abs(flick.contentY - flick.restoreAppliedY) > 1)
             flick.restoreApplied = false   // 用户接管滚动：恢复窗口结束
         flick.checkAutoNext()
-        // E4：paged 模式滚动停止后吸附页边界（滚轮/拖拽都经此收敛）
-        if (flick.pageMode === "paged" && !flick.ttsActive && !flick.restorePending)
-            snapTimer.restart()
+        // 任务3：paged 模式 contentY 恒 0（HorizontalOnly + contentHeight=视口高），
+        // 横向吸附统一走 onContentXChanged；此处仅 scroll 模式生效。
     }
 
     function checkAutoNext() {
@@ -253,6 +388,12 @@ Flickable {
 
     function applyRestore() {
         if (!flick.restorePending || flick.restoreApplied || flick.contentHeight <= 0) return
+        // 任务3：paged 模式无纵向偏移可恢复（contentY 恒 0，分页职责在 contentX），
+        // 直接消费 pending——否则 restoreApplied 置位会永久关闭 snapToPage 门控。
+        if (flick.pageMode === "paged") {
+            flick.restorePending = false
+            return
+        }
         flick.restoreApplied = true
         flick.restorePending = false
         // 章节高度可能因排版参数/图片加载变化，钳制到实际最大滚动值
@@ -284,10 +425,16 @@ Flickable {
         return -1
     }
 
-    // C8：全文搜索跳转——滚动到指定段落（定位到视口上 1/3 处，同 followSentence）。
-    // 段落后于句子粒度，经 rep.itemAt 直接取段落 y，不依赖句子映射。
+    // C8：全文搜索跳转——定位到指定段落。scroll：滚动到视口上 1/3 处（同
+    // followSentence）；paged：直接翻到该段所在页（页内位置固定为整页，无页内偏移）。
     function scrollToParagraph(pi) {
-        if (flick.restorePending || flick.contentHeight <= 0) return
+        if (flick.restorePending) return
+        if (flick.pageMode === "paged") {
+            var pg = flick.pageForParagraph(pi)
+            if (pg >= 0) flick.goToPage(pg)
+            return
+        }
+        if (flick.contentHeight <= 0) return
         var item = rep.itemAt(pi)
         if (!item) return
         var targetY = item.y - flick.height / 3
@@ -297,11 +444,18 @@ Flickable {
         followAnim.start()
     }
 
-    // 滚动跟随：当前句所在段落定位到视口上 1/3 处（平滑动画）
+    // 滚动跟随：当前句所在段落定位到视口上 1/3 处（平滑动画）；paged 模式
+    // 翻到该段所在页（pageAnimX 横向，页内整页呈现无需再定位）。
     function followSentence(index) {
-        if (flick.restorePending || flick.contentHeight <= 0) return
+        if (flick.restorePending) return
         var pi = flick.paragraphForIndex(index)
         if (pi < 0) return
+        if (flick.pageMode === "paged") {
+            var pg = flick.pageForParagraph(pi)
+            if (pg >= 0) flick.goToPage(pg)
+            return
+        }
+        if (flick.contentHeight <= 0) return
         var item = rep.itemAt(pi)
         if (!item) return
         var targetY = item.y - flick.height / 3
@@ -358,69 +512,52 @@ Flickable {
         pageAnim.start()
     }
 
-    // paged 模式：上一页——按视口高度整页回退（页边界定位：目标 = (当前页-1)*页高）。
-    // 章首（contentY=0，目标==当前）时翻页语义变为翻上一章（requestPrevChapter →
+    // paged 模式：上一页——按页宽横向整页回退（contentX 页边界 = 页号×页宽）。
+    // 首页（contentX=0，目标==当前）时翻页语义变为翻上一章（requestPrevChapter →
     // ReaderPage.autoPrevChapter 兜底首章不换），与 pageNext 章末翻章对称；
     // 短章（一页放得下）同样触发。
     function pagePrev(isAutoRepeat) {
-        if (flick.contentHeight <= 0 || flick.height <= 0) return
-        var pageH = Math.max(1, flick.height)
-        var pageIdx = Math.floor(flick.contentY / pageH)
+        if (flick.pageCount <= 0 || flick.width <= 0) return
+        var w = flick.pageWidth()
+        var pageIdx = Math.round(flick.contentX / w)
         if (pageIdx <= 0) {
             if (!isAutoRepeat) flick.requestPrevChapter()
             return
         }
-        var target = Math.max(0, (pageIdx - 1) * pageH)
-        if (Math.abs(target - flick.contentY) < 1) return
-        followAnim.stop()
-        pageAnim.stop()
-        pageAnim.to = target
-        pageAnim.start()
+        flick.goToPage(pageIdx - 1)
     }
 
-    // paged 模式：下一页——整页前进；已到最后一页（目标 == 当前）时翻页语义
-    // 变为翻章（requestNextChapter → ReaderPage.autoNextChapter 兜底末章不换），
+    // paged 模式：下一页——按页宽横向整页前进；已到末页（目标 == 当前）时翻页
+    // 语义变为翻章（requestNextChapter → ReaderPage.autoNextChapter 兜底末章不换），
     // 与"翻过章末进入下一章"的真实书籍语义一致；短章（一页放得下）同样触发。
     function pageNext(isAutoRepeat) {
-        if (flick.contentHeight <= 0 || flick.height <= 0) return
-        var maxY = Math.max(0, flick.contentHeight - flick.height)
-        var pageH = Math.max(1, flick.height)
-        var pageIdx = Math.floor(flick.contentY / pageH)
-        var target = Math.min((pageIdx + 1) * pageH, maxY)
-        if (Math.abs(target - flick.contentY) < 1) {
+        if (flick.pageCount <= 0 || flick.width <= 0) return
+        var w = flick.pageWidth()
+        var pageIdx = Math.round(flick.contentX / w)
+        if (pageIdx >= flick.pageCount - 1) {
             if (!isAutoRepeat) flick.requestNextChapter()
             return
         }
-        followAnim.stop()
-        pageAnim.stop()
-        flick.checkNextOnStop = true
-        pageAnim.to = target
-        pageAnim.start()
+        flick.goToPage(pageIdx + 1)
     }
 
-    // paged 模式：拖拽/惯性滚动结束后吸附到最近页边界（视口高度粒度）。
-    // 键盘翻页走 pagePrev/pageNext 已按边界定位，无需吸附；滚动恢复/搜索跳转
-    // 程序化设 contentY 不触发 movementEnded，不会在恢复窗口内被吸附拽走。
-    // E4 复审：滚轮滚动不触发 movementEnded（仅手势），经 onContentYChanged
-    // 的 snapTimer 收敛后同样吸附；TTS 跟随/恢复窗口内跳过（ttsActive 门控）。
+    // paged 模式：拖拽/滚轮滚动收敛后吸附到最近页边界（页宽粒度，contentX）。
+    // 键盘翻页走 pagePrev/pageNext 已按边界定位，无需吸附；TTS 跟随/恢复窗口内
+    // 跳过（ttsActive 门控）。触发源：onMovementEnded（拖拽/惯性）与
+    // onContentXChanged → snapTimer（滚轮/程序化设置，200ms 收敛）。
     function snapToPage() {
         if (flick.pageMode !== "paged") return
         if (flick.restorePending || flick.restoreApplied || flick.ttsActive) return
-        if (flick.contentHeight <= 0 || flick.height <= 0) return
-        var maxY = Math.max(0, flick.contentHeight - flick.height)
-        var pageH = Math.max(1, flick.height)
-        var nearest = Math.max(0, Math.min(Math.round(flick.contentY / pageH) * pageH, maxY))
-        // U6：末页不完整（maxY 非 pageH 整数倍）时 maxY 本身是合法停靠位——
-        // 网格吸附会把停在章末的 contentY 拽回上一整页边界，pageNext 从此
-        // 永远无法在章末触发翻章（键盘与真实读者都卡死在末页）。maxY 更近时
-        // 以其为吸附目标（其余页面 maxY 远在视口外，行为不变）。
-        if (Math.abs(maxY - flick.contentY) < Math.abs(nearest - flick.contentY))
-            nearest = maxY
-        if (Math.abs(nearest - flick.contentY) < 1) return
-        followAnim.stop()
-        pageAnim.stop()
-        pageAnim.to = nearest
-        pageAnim.start()
+        if (flick.pageCount <= 0 || flick.width <= 0) return
+        var w = flick.pageWidth()
+        var maxX = Math.max(0, (flick.pageCount - 1) * w)
+        var nearest = Math.max(0, Math.min(Math.round(flick.contentX / w) * w, maxX))
+        // 末页可能被拖到非页边界：maxX 更近时以其为吸附目标（其余页面 maxX 远在
+        // 视口外，行为不变）——与 scroll 纵吸附的 U6 末页停靠位同语义。
+        if (Math.abs(maxX - flick.contentX) < Math.abs(nearest - flick.contentX))
+            nearest = maxX
+        if (Math.abs(nearest - flick.contentX) < 1) return
+        flick.goToPage(Math.round(nearest / w))
     }
     onMovementEnded: if (flick.pageMode === "paged") flick.snapToPage()
 
@@ -502,7 +639,7 @@ Flickable {
     }
 
     function clearSelection() {
-        var it = rep.itemAt(flick.selParaIndex)
+        var it = flick.paragraphItemAt(flick.selParaIndex)
         if (it && it.children[0] && it.children[0].deselect)
             it.children[0].deselect()
         flick.hideSelectionToolbar()
@@ -553,7 +690,7 @@ Flickable {
     function simulateSelection(globalIdx, text) {
         var pi = flick.paragraphForIndex(globalIdx)
         if (pi < 0) return
-        var it = rep.itemAt(pi)
+        var it = flick.paragraphItemAt(pi)
         if (!it) return
         flick.showSelectionToolbar(it.children[0], globalIdx, text)
     }
@@ -597,199 +734,271 @@ Flickable {
             }
         }
     }
+    // 任务3：paged 横向翻页/TTS 跟随/搜索跳转共用动画（驱动 contentX）。
+    // 与 followAnim（contentY）互斥：goToPage 启动前显式停 followAnim/pageAnim，
+    // 避免两个动画同向驱动互相覆盖（scroll 模式 pageAnim 驱动 contentY 不变）。
+    NumberAnimation {
+        id: pageAnimX
+        target: flick
+        property: "contentX"
+        duration: 300
+        easing.type: Easing.OutCubic
+    }
+
+    // ---- 任务3：段落渲染共享组件 ----
+    // scroll 主 Repeater（rep）与 paged 页内 Repeater（pageComp → pageParaRep）
+    // 共用同一 paraComp，保证两模式 text/html/image 渲染语义完全一致；同一段落
+    // 只会挂在一个 Repeater 上（另一侧 model 置空），无双重渲染。
+    // paraData/globalIndex 按上下文判别：scroll 的 modelData 是段落对象（index 为
+    // 全局段落号）；paged 页内 Repeater 的 modelData 是段落全局索引数字。两者统一
+    // 收敛到 paraData（段落对象）/ globalIndex（全局段落号）两个属性上。
+    Component {
+        id: paraComp
+        Item {
+            id: para
+            property var paraData: (modelData !== null && typeof modelData === "object")
+                ? modelData : ((flick.chapter.paragraphs ?? [])[modelData] ?? {})
+            property int globalIndex: (modelData !== null && typeof modelData === "object")
+                ? index : (modelData === undefined ? index : (modelData ?? 0))
+            width: para.parent ? para.parent.width : 0
+            // 纯图片段（html 去掉 img 标签后无其他内容）走 Image 分支等比缩放；
+            // 混合段（如 "文本 <img> 文本"，EpubParser 对段内行内图同时填 html 与 imagePath）
+            // 走 Text(RichText)——html 内 img src 为本地绝对路径，Qt 富文本可直接渲染。
+            readonly property bool pureImage: !!para.paraData.imagePath
+                && (para.paraData.html ?? "").replace(/<img[^>]*>/gi, "").trim().length === 0
+            // 解析器输出的行内图 src 为无 scheme 的本地绝对路径；QQuickText 会按文档 URL
+            // （qrc 模块地址）解析导致加载失败，统一补 file:// 前缀（已有 scheme 的保持原样）
+            readonly property string mixedHtml: para.pureImage ? "" : (para.paraData.html ?? "")
+                .replace(/src="([^"]*)"/g, function (m, p) {
+                    return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(p) ? m : 'src="file://' + p + '"'
+                })
+            // C5 逐句高亮：本段句子与全局起始索引
+            readonly property var sentences: para.paraData.sentences ?? []
+            readonly property int sentenceStart: (flick.sentenceStarts.length > para.globalIndex)
+                ? flick.sentenceStarts[para.globalIndex] : 0
+            readonly property int sentenceCount: para.sentences.length
+            readonly property int hlInPara: Tts.currentIndex - para.sentenceStart
+            readonly property bool inHighlightRange: para.hlInPara >= 0
+                && para.hlInPara < para.sentenceCount
+            implicitHeight: para.pureImage ? imgPara.height : txt.implicitHeight
+            // C7：段落用只读 TextEdit 渲染（富文本渲染与 Text 一致）。
+            // 注意：Qt 6.7 起 Text 移除了 selectByMouse/selectedText/selectionStart/
+            // positionToRectangle 等选择 API（deprecated 后删除），TextEdit 才是
+            // 支持鼠标选择的富文本项——readOnly + selectByMouse 即"可选中不可编辑"。
+            TextEdit {
+                id: txt
+                visible: !para.pureImage
+                width: parent.width
+                textFormat: TextEdit.RichText
+                text: para.buildText()
+                // B3：默认前景色随 flick.textColor（富文本 h1-h6 等无显式色的文本继承）
+                color: flick.textColor
+                // C5：Kindle 默认衬线感——未指定字体时回退思源宋体（衬线），
+                // 与 SettingsStore 的 typography/fontFamily 新默认一致
+                font.family: flick.typography.fontFamily ?? "思源宋体 VF"
+                font.pixelSize: flick.typography.fontSize ?? 18
+                horizontalAlignment: flick.typography.align === "center" ? Text.AlignHCenter
+                                    : (flick.typography.align === "right" ? Text.AlignRight : Text.AlignLeft)
+                wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
+                readOnly: true
+                selectByMouse: true
+                cursorVisible: false
+                activeFocusOnPress: false
+                // C7：行距经 ReaderText 助手施加到富文本文档（TextEdit 无 lineHeight 属性；
+                // 文本/字号/行距变化时重施加，与 Text.lineHeight 语义一致）
+                readonly property real lineSpacing: flick.typography.lineHeight ?? 1.6
+                // 重入守卫：mergeBlockFormat 会触发文档 contentsChanged → textChanged
+                // 再次进入本函数（无守卫会递归直至栈溢出）；首次应用后格式相同不再变化
+                property bool applyingSpacing: false
+                function applyLineSpacing() {
+                    if (txt.applyingSpacing) return
+                    txt.applyingSpacing = true
+                    ReaderText.applyLineSpacing(txt, txt.lineSpacing)
+                    txt.applyingSpacing = false
+                }
+                Component.onCompleted: txt.applyLineSpacing()
+                onTextChanged: txt.applyLineSpacing()
+                onFontChanged: txt.applyLineSpacing()
+                onLineSpacingChanged: txt.applyLineSpacing()
+                // C7：松开鼠标 selectedText 非空 → 弹工具条
+                onSelectedTextChanged: {
+                    if (txt.selectedText.length > 0)
+                        para.handleSelection()
+                    else
+                        flick.hideSelectionToolbar()
+                }
+            }
+            Image {
+                id: imgPara
+                visible: para.pureImage
+                width: parent.width
+                // 按源图宽高比换算高度（implicit 尺寸即源尺寸）
+                height: imgPara.implicitWidth > 0 ? parent.width * imgPara.implicitHeight / imgPara.implicitWidth : 0
+                fillMode: Image.PreserveAspectFit
+                source: para.paraData.imagePath ? "file://" + para.paraData.imagePath : ""
+            }
+
+            // 段内是否含真实行内标记（b/i/em/strong/hN/img/br——解析器实际输出集）：
+            // 纯文本段才做逐句 span；含标记段走富文本整段高亮，避免静默丢格式
+            function hasMarkup(html) {
+                return /<(b|i|em|strong|h[1-6]|img|br)\b/i.test(html)
+            }
+            function escapeHtml(s) {
+                return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            }
+
+            // C7：全局句索引 → 划线 map 命中（无划线返回 null）
+            function markerFor(k) {
+                var g = para.sentenceStart + k
+                return flick.highlightMap[(flick.chapter.title || "") + "|" + g] || null
+            }
+            // C7：富文本段取段内首个划线色（整段背景近似）
+            function paraMarkerColor() {
+                for (var m = 0; m < para.sentenceCount; m++) {
+                    var mk = para.markerFor(m)
+                    if (mk && mk.color) return mk.color
+                }
+                return ""
+            }
+            // C7：单句 span——划线色优先（朗读游标叠加时划线色为底 + 下划线），
+            // 未划线且是朗读当前句 → TTS 黄底；跳转提示额外下划线。
+            // B3 复审：高亮底恒为浅色板（TTS 黄/划线黄绿粉），追加显式深色前景
+            // color:#212121——否则 dark 模式文档默认前景 #E0E0E0 浅字浅底，
+            // 对比度仅约 1.1-1.6:1；深字不随背景模式变化（浅底场景下与默认
+            // 深字一致，无视觉回归）。
+            function sentenceSpan(k, s) {
+                var mk = para.markerFor(k)
+                // D2：朗读游标（黄底 / 划线句的下划线叠加）仅朗读会话激活时生效——
+                // Tts.currentIndex 在 setSentences 时复位为 0 且 state=0，若不门控，
+                // 未朗读也会把首段首句误标为"当前句"；划线句底色不受影响（划线是
+                // 用户主动操作保留，见 C7），仅不再叠加"朗读游标"下划线
+                var isCur = para.inHighlightRange && k === para.hlInPara && flick.ttsActive
+                var isFlash = (para.sentenceStart + k) === flick.flashIndex
+                var styles = []
+                if (mk && mk.color) {
+                    styles.push("background-color:" + mk.color)
+                    styles.push("color:#212121")
+                    if (isCur) styles.push("text-decoration:underline")
+                } else if (isCur) {
+                    styles.push("background-color:" + flick.highlightColor)
+                    styles.push("color:#212121")
+                }
+                if (isFlash && styles.indexOf("text-decoration:underline") < 0)
+                    styles.push("text-decoration:underline")
+                if (styles.length === 0) return s
+                return "<span style='" + styles.join(";") + "'>" + s + "</span>"
+            }
+
+            // 显示用富文本：纯文本段每句独立 span（划线色 / 当前句高亮）；富文本段整段高亮
+            function buildText() {
+                if (para.pureImage) return ""
+                var htmlSrc = para.mixedHtml
+                var plain = htmlSrc.length === 0 || !para.hasMarkup(htmlSrc)
+                if (plain) {
+                    var parts = []
+                    for (var k = 0; k < para.sentenceCount; k++) {
+                        var s = para.escapeHtml(para.sentences[k])
+                        parts.push(para.sentenceSpan(k, s))
+                    }
+                    if (parts.length > 0) return parts.join("")
+                    // 无句子（如解析器未分句）→ 回退原文（纯文本按字面转义）
+                    return para.escapeHtml(para.paraData.text ?? "")
+                }
+                // 富文本段：无法逐句定位 → 段内任一划线句整段背景（近似，取首个划线色）；
+                // 与朗读整段高亮叠加时以划线色为底（取舍：富文本段不做逐句，见 C7 报告）。
+                // 注意：外层必须用 <div>（块级）而非 <span>——Qt 富文本会丢弃包裹块级
+                // 元素的 span 背景（C5 富文本段高亮因此从未实际渲染，C7 顺带修复）。
+                // B3 复审：高亮底恒为浅色板，追加 color:#212121 避免 dark 模式浅字浅底
+                //（div 上的默认前景色，段内显式色 span 仍优先覆盖，同 C7 划线色保留）。
+                var mc = para.paraMarkerColor()
+                if (mc.length > 0)
+                    return "<div style='background-color:" + mc + ";color:#212121'>" + htmlSrc + "</div>"
+                // D2：富文本段整段黄标同样仅朗读会话激活（未朗读 currentIndex=0
+                // 不误标首段；划线色 div 分支在上方已优先返回，不受影响）
+                if (para.inHighlightRange && flick.ttsActive && htmlSrc.length > 0)
+                    return "<div style='background-color:" + flick.highlightColor + ";color:#212121'>" + htmlSrc + "</div>"
+                return htmlSrc
+            }
+
+            // C7：选择起点（Text.selectionStart，文档字符流坐标）→ 段内句子序号。
+            // 纯文本段文档流 = 各句拼接（span 标记不占字符），逐句长度累加定位
+            function sentenceIndexAt(docPos) {
+                var acc = 0
+                for (var k = 0; k < para.sentenceCount; k++) {
+                    acc += para.sentences[k].length
+                    if (docPos < acc) return k
+                }
+                return para.sentenceCount - 1 // 段尾选择（含全选）钳制到末句
+            }
+            function handleSelection() {
+                if (txt.selectedText.length > 0)
+                    flick.showSelectionToolbar(txt, para.sentenceStart + para.sentenceIndexAt(txt.selectionStart),
+                                               txt.selectedText)
+                else
+                    flick.hideSelectionToolbar()
+            }
+        }
+    }
+
+    // ---- 任务3：paged 页面组件 ----
+    // 每页 = 页宽（= 视口宽）× 页高（= 视口高）的独立 Item，页内 Column 复用与
+    // scroll 相同的正文列宽公式（保留 text/html/image 渲染语义），段落经
+    // pageParaRep（模型 = 该页段落全局索引数组）实例化 paraComp。
+    Component {
+        id: pageComp
+        Item {
+            id: pageItem
+            // 页模型元素 = 该页包含的段落全局索引数组（外层 pageRepeater 注入）
+            property var pageData: modelData
+            width: flick.width
+            height: flick.height
+            Column {
+                id: pageCol
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: Math.min(flick.width * flick.pageWidthFactor(), flick.width - 48, flick.pageWidthCap())
+                spacing: 8
+                Repeater {
+                    id: pageParaRep
+                    model: pageItem.pageData
+                    delegate: paraComp
+                }
+            }
+            // 任务3：页内段落 Repeater 句柄（paragraphItemAt 按页定位段落 Item）
+            property alias paraRepeater: pageParaRep
+        }
+    }
 
     // C5：正文列 Kindle 化——页宽系数外再设**档位相关**上限：宽窗口下正文列不再无限
     // 拉宽，保持"书本栏"比例（Kindle 桌面版同样固定阅读列宽，居中于窗口）。
     // 档位上限随页宽档递增（narrow 520 / normal 700 / wide 880），宽窗下三档仍保持
     // 可区分（页宽切换在任意窗宽都生效；窄窗由系数主导，上限只约束宽窗）。
+    // 任务3：scroll 模式唯一渲染路径；paged 时 model 置空（页面走 pageRow，
+    // 同一段落不双重渲染）且隐藏本列。
     Column {
         id: col
+        visible: flick.pageMode !== "paged"
         anchors.horizontalCenter: parent.horizontalCenter
         width: Math.min(flick.width * flick.pageWidthFactor(), flick.width - 48, flick.pageWidthCap())
         spacing: 8
         Repeater {
             id: rep
-            model: flick.chapter.paragraphs ?? []
-            delegate: Item {
-                id: para
-                width: col.width
-                // 纯图片段（html 去掉 img 标签后无其他内容）走 Image 分支等比缩放；
-                // 混合段（如 "文本 <img> 文本"，EpubParser 对段内行内图同时填 html 与 imagePath）
-                // 走 Text(RichText)——html 内 img src 为本地绝对路径，Qt 富文本可直接渲染。
-                readonly property bool pureImage: !!modelData.imagePath
-                    && (modelData.html ?? "").replace(/<img[^>]*>/gi, "").trim().length === 0
-                // 解析器输出的行内图 src 为无 scheme 的本地绝对路径；QQuickText 会按文档 URL
-                // （qrc 模块地址）解析导致加载失败，统一补 file:// 前缀（已有 scheme 的保持原样）
-                readonly property string mixedHtml: para.pureImage ? "" : (modelData.html ?? "")
-                    .replace(/src="([^"]*)"/g, function (m, p) {
-                        return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(p) ? m : 'src="file://' + p + '"'
-                    })
-                // C5 逐句高亮：本段句子与全局起始索引
-                readonly property var sentences: modelData.sentences ?? []
-                readonly property int sentenceStart: (flick.sentenceStarts.length > index)
-                    ? flick.sentenceStarts[index] : 0
-                readonly property int sentenceCount: para.sentences.length
-                readonly property int hlInPara: Tts.currentIndex - para.sentenceStart
-                readonly property bool inHighlightRange: para.hlInPara >= 0
-                    && para.hlInPara < para.sentenceCount
-                implicitHeight: para.pureImage ? imgPara.height : txt.implicitHeight
-                // C7：段落用只读 TextEdit 渲染（富文本渲染与 Text 一致）。
-                // 注意：Qt 6.7 起 Text 移除了 selectByMouse/selectedText/selectionStart/
-                // positionToRectangle 等选择 API（deprecated 后删除），TextEdit 才是
-                // 支持鼠标选择的富文本项——readOnly + selectByMouse 即"可选中不可编辑"。
-                TextEdit {
-                    id: txt
-                    visible: !para.pureImage
-                    width: parent.width
-                    textFormat: TextEdit.RichText
-                    text: para.buildText()
-                    // B3：默认前景色随 flick.textColor（富文本 h1-h6 等无显式色的文本继承）
-                    color: flick.textColor
-                    // C5：Kindle 默认衬线感——未指定字体时回退思源宋体（衬线），
-                    // 与 SettingsStore 的 typography/fontFamily 新默认一致
-                    font.family: flick.typography.fontFamily ?? "思源宋体 VF"
-                    font.pixelSize: flick.typography.fontSize ?? 18
-                    horizontalAlignment: flick.typography.align === "center" ? Text.AlignHCenter
-                                        : (flick.typography.align === "right" ? Text.AlignRight : Text.AlignLeft)
-                    wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
-                    readOnly: true
-                    selectByMouse: true
-                    cursorVisible: false
-                    activeFocusOnPress: false
-                    // C7：行距经 ReaderText 助手施加到富文本文档（TextEdit 无 lineHeight 属性；
-                    // 文本/字号/行距变化时重施加，与 Text.lineHeight 语义一致）
-                    readonly property real lineSpacing: flick.typography.lineHeight ?? 1.6
-                    // 重入守卫：mergeBlockFormat 会触发文档 contentsChanged → textChanged
-                    // 再次进入本函数（无守卫会递归直至栈溢出）；首次应用后格式相同不再变化
-                    property bool applyingSpacing: false
-                    function applyLineSpacing() {
-                        if (txt.applyingSpacing) return
-                        txt.applyingSpacing = true
-                        ReaderText.applyLineSpacing(txt, txt.lineSpacing)
-                        txt.applyingSpacing = false
-                    }
-                    Component.onCompleted: txt.applyLineSpacing()
-                    onTextChanged: txt.applyLineSpacing()
-                    onFontChanged: txt.applyLineSpacing()
-                    onLineSpacingChanged: txt.applyLineSpacing()
-                    // C7：松开鼠标 selectedText 非空 → 弹工具条
-                    onSelectedTextChanged: {
-                        if (txt.selectedText.length > 0)
-                            para.handleSelection()
-                        else
-                            flick.hideSelectionToolbar()
-                    }
-                }
-                Image {
-                    id: imgPara
-                    visible: para.pureImage
-                    width: parent.width
-                    // 按源图宽高比换算高度（implicit 尺寸即源尺寸）
-                    height: imgPara.implicitWidth > 0 ? parent.width * imgPara.implicitHeight / imgPara.implicitWidth : 0
-                    fillMode: Image.PreserveAspectFit
-                    source: modelData.imagePath ? "file://" + modelData.imagePath : ""
-                }
+            model: flick.pageMode === "paged" ? [] : (flick.chapter.paragraphs ?? [])
+            delegate: paraComp
+        }
+    }
 
-                // 段内是否含真实行内标记（b/i/em/strong/hN/img/br——解析器实际输出集）：
-                // 纯文本段才做逐句 span；含标记段走富文本整段高亮，避免静默丢格式
-                function hasMarkup(html) {
-                    return /<(b|i|em|strong|h[1-6]|img|br)\b/i.test(html)
-                }
-                function escapeHtml(s) {
-                    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-                }
-
-                // C7：全局句索引 → 划线 map 命中（无划线返回 null）
-                function markerFor(k) {
-                    var g = para.sentenceStart + k
-                    return flick.highlightMap[(flick.chapter.title || "") + "|" + g] || null
-                }
-                // C7：富文本段取段内首个划线色（整段背景近似）
-                function paraMarkerColor() {
-                    for (var m = 0; m < para.sentenceCount; m++) {
-                        var mk = para.markerFor(m)
-                        if (mk && mk.color) return mk.color
-                    }
-                    return ""
-                }
-                // C7：单句 span——划线色优先（朗读游标叠加时划线色为底 + 下划线），
-                // 未划线且是朗读当前句 → TTS 黄底；跳转提示额外下划线。
-                // B3 复审：高亮底恒为浅色板（TTS 黄/划线黄绿粉），追加显式深色前景
-                // color:#212121——否则 dark 模式文档默认前景 #E0E0E0 浅字浅底，
-                // 对比度仅约 1.1-1.6:1；深字不随背景模式变化（浅底场景下与默认
-                // 深字一致，无视觉回归）。
-                function sentenceSpan(k, s) {
-                    var mk = para.markerFor(k)
-                    // D2：朗读游标（黄底 / 划线句的下划线叠加）仅朗读会话激活时生效——
-                    // Tts.currentIndex 在 setSentences 时复位为 0 且 state=0，若不门控，
-                    // 未朗读也会把首段首句误标为"当前句"；划线句底色不受影响（划线是
-                    // 用户主动操作保留，见 C7），仅不再叠加"朗读游标"下划线
-                    var isCur = para.inHighlightRange && k === para.hlInPara && flick.ttsActive
-                    var isFlash = (para.sentenceStart + k) === flick.flashIndex
-                    var styles = []
-                    if (mk && mk.color) {
-                        styles.push("background-color:" + mk.color)
-                        styles.push("color:#212121")
-                        if (isCur) styles.push("text-decoration:underline")
-                    } else if (isCur) {
-                        styles.push("background-color:" + flick.highlightColor)
-                        styles.push("color:#212121")
-                    }
-                    if (isFlash && styles.indexOf("text-decoration:underline") < 0)
-                        styles.push("text-decoration:underline")
-                    if (styles.length === 0) return s
-                    return "<span style='" + styles.join(";") + "'>" + s + "</span>"
-                }
-
-                // 显示用富文本：纯文本段每句独立 span（划线色 / 当前句高亮）；富文本段整段高亮
-                function buildText() {
-                    if (para.pureImage) return ""
-                    var htmlSrc = para.mixedHtml
-                    var plain = htmlSrc.length === 0 || !para.hasMarkup(htmlSrc)
-                    if (plain) {
-                        var parts = []
-                        for (var k = 0; k < para.sentenceCount; k++) {
-                            var s = para.escapeHtml(para.sentences[k])
-                            parts.push(para.sentenceSpan(k, s))
-                        }
-                        if (parts.length > 0) return parts.join("")
-                        // 无句子（如解析器未分句）→ 回退原文（纯文本按字面转义）
-                        return para.escapeHtml(modelData.text ?? "")
-                    }
-                    // 富文本段：无法逐句定位 → 段内任一划线句整段背景（近似，取首个划线色）；
-                    // 与朗读整段高亮叠加时以划线色为底（取舍：富文本段不做逐句，见 C7 报告）。
-                    // 注意：外层必须用 <div>（块级）而非 <span>——Qt 富文本会丢弃包裹块级
-                    // 元素的 span 背景（C5 富文本段高亮因此从未实际渲染，C7 顺带修复）。
-                    // B3 复审：高亮底恒为浅色板，追加 color:#212121 避免 dark 模式浅字浅底
-                    //（div 上的默认前景色，段内显式色 span 仍优先覆盖，同 C7 划线色保留）。
-                    var mc = para.paraMarkerColor()
-                    if (mc.length > 0)
-                        return "<div style='background-color:" + mc + ";color:#212121'>" + htmlSrc + "</div>"
-                    // D2：富文本段整段黄标同样仅朗读会话激活（未朗读 currentIndex=0
-                    // 不误标首段；划线色 div 分支在上方已优先返回，不受影响）
-                    if (para.inHighlightRange && flick.ttsActive && htmlSrc.length > 0)
-                        return "<div style='background-color:" + flick.highlightColor + ";color:#212121'>" + htmlSrc + "</div>"
-                    return htmlSrc
-                }
-
-                // C7：选择起点（Text.selectionStart，文档字符流坐标）→ 段内句子序号。
-                // 纯文本段文档流 = 各句拼接（span 标记不占字符），逐句长度累加定位
-                function sentenceIndexAt(docPos) {
-                    var acc = 0
-                    for (var k = 0; k < para.sentenceCount; k++) {
-                        acc += para.sentences[k].length
-                        if (docPos < acc) return k
-                    }
-                    return para.sentenceCount - 1 // 段尾选择（含全选）钳制到末句
-                }
-                function handleSelection() {
-                    if (txt.selectedText.length > 0)
-                        flick.showSelectionToolbar(txt, para.sentenceStart + para.sentenceIndexAt(txt.selectionStart),
-                                                   txt.selectedText)
-                    else
-                        flick.hideSelectionToolbar()
-                }
-            }
+    // ---- 任务3：paged 横向页序列（页面沿 x 轴排列，每页占满一屏宽）----
+    Row {
+        id: pageRow
+        visible: flick.pageMode === "paged"
+        x: 0
+        y: 0
+        width: flick.pageCount * flick.width
+        height: flick.height
+        Repeater {
+            id: pageRep
+            model: flick.pageModel
+            delegate: pageComp
         }
     }
 

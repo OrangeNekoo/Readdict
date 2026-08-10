@@ -50,8 +50,8 @@ void SettingsStore::applyDefaults() {
         m_root.insert("typography", QJsonObject{{"fontFamily", "思源宋体 VF"}, {"fontSize", 18},
                                                 {"lineHeight", 1.6}, {"align", "left"}, {"pageWidth", "normal"}});
     if (!m_root.contains("tts")) m_root.insert("tts", QJsonObject{{"engine", "system"}, {"rate", 1.0}});
-    // E4：阅读选项分区——翻页方式（scroll 竖滚连续 / paged 横翻整页）。
-    // ReaderPage 打开时读取；设置页"阅读背景"卡可切换（写 reading/pageMode）。
+    // E4：阅读选项分区——翻页方式（scroll 竖向连续滚动 / paged 横向分页）。
+    // ReaderPage 打开时读取；设置页/布局 Sheet 可切换（写 reading/pageMode）。
     if (!m_root.contains("reading"))
         m_root.insert("reading", QJsonObject{{"pageMode", "scroll"}});
     if (!m_root.contains("webdav"))
