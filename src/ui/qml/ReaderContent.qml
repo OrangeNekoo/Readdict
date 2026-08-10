@@ -794,6 +794,19 @@ Flickable {
     }
 
     // ---- C7：选择工具条（复制/划线/笔记），位于选中句上方 ----
+    // 复制经隐藏 TextEdit 的 copy() 走系统剪贴板——Qt 6 已无 QML Clipboard 单例
+    //（Qt.labs.platform 的 Clipboard 类型在 Qt 6 移除、Qt.clipboardText 亦移除），
+    // TextEdit.copy() 内部经 QGuiApplication::clipboard() 写入，是标准可用路径，
+    // 无额外依赖。text → selectAll → copy 顺序不可调换（改 text 会重置选区）。
+    TextEdit {
+        id: copyBridge
+        visible: false
+        function copyText(s) {
+            copyBridge.text = s
+            copyBridge.selectAll()
+            copyBridge.copy()
+        }
+    }
     Rectangle {
         id: selBar
         visible: false
@@ -829,7 +842,7 @@ Flickable {
                 lbl: qsTr("复制")
                 onClicked: {
                     if (flick.selText.length > 0)
-                        Clipboard.text = flick.selText
+                        copyBridge.copyText(flick.selText)
                     flick.clearSelection()
                 }
             }

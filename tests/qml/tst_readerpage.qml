@@ -338,6 +338,50 @@ Item {
             h.stack.destroy()
         }
 
+        // 复制按钮修复（最终审查发现）：旧实现引用未注册的 Clipboard——Qt 6 无 QML
+        // Clipboard 单例（Qt.labs.platform 的 Clipboard 已移除），点击即 ReferenceError，
+        // clearSelection 不执行、文本不进剪贴板。回归：真实点击复制按钮后剪贴板内容
+        // 可读回选中文本、selText 清空、工具条隐藏。ReferenceError 会中止 clearSelection
+        // 与剪贴板写入，故本断言组等价于"复制点击不再抛错"。
+        function test_copyButtonWritesClipboardAndClearsSelection() {
+            var h = openPage()
+            var page = h.page
+            var cv = page.contentView
+            page.controlsHideDelay = 100000
+            page.controlsVisible = false
+            page.sheetOpen = false
+            wait(50)
+            var firstSentence = (page.chapter.paragraphs[0].sentences
+                                 && page.chapter.paragraphs[0].sentences[0]) || "首句"
+            cv.simulateSelection(0, firstSentence)
+            tryVerify(function () { return cv.selectionToolbar.visible }, 3000,
+                      "选择后工具条应出现")
+            // 工具条结构：selBar(Rectangle) → Row → [复制, 划线, 笔记]（声明序）
+            var row = cv.selectionToolbar.children[0]
+            var copyBtn = row.children[0]   // 「复制」按钮
+            verify(copyBtn !== undefined && copyBtn.text.length > 0, "工具条应含复制按钮")
+            var bp = copyBtn.mapToItem(cv, copyBtn.width / 2, copyBtn.height / 2)
+            mouseClick(cv, bp.x, bp.y)
+            // clearSelection 执行：工具条隐藏 + selText 清空（旧缺陷 ReferenceError
+            // 中止于 Clipboard.text 赋值，此二者皆不会发生）
+            tryVerify(function () { return !cv.selectionToolbar.visible }, 3000,
+                      "点复制后工具条应隐藏（clearSelection 执行）")
+            verify(cv.selText === "", "点复制后 selText 应清空")
+            verify(!page.sheetOpen, "点复制按钮不应连带打开 Sheet")
+            // 剪贴板内容验证：独立隐藏 TextEdit paste() 读回系统剪贴板（Qt 6 无 QML
+            // Clipboard 单例，读写均走 TextEdit 剪贴板机制，与 copyBridge 同源）
+            var reader = Qt.createQmlObject(
+                "import QtQuick; TextEdit { visible: false }", cv, "clipReader")
+            verify(reader !== null, "剪贴板读取器应能创建")
+            reader.text = ""
+            reader.forceActiveFocus()
+            reader.paste()
+            verify(reader.text === firstSentence,
+                   "剪贴板内容应等于选中文本，实际=" + reader.text)
+            reader.destroy()
+            h.stack.destroy()
+        }
+
         // C2 协同：唤出/隐藏框架只作用于控制栏——朗读会话激活时 TtsBar 照常显示
         // （即使控制栏隐藏），唤出控制栏不带动 TtsBar（state=0 仍隐藏）
         function test_ttsBarGatingUnaffected() {
