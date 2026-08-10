@@ -49,6 +49,11 @@ Flickable {
     //（测试断言稳定无振荡的依据）。由 rebuildPageModel 在章节/排版/视口变化时重建。
     property var pageModel: []
     property int pageCount: 0
+    // 任务3 审查修复：逻辑当前页（动画目标即逻辑页）。pagePrev/pageNext 按它
+    // 而非 Math.round(contentX/页宽) 计算——动画中途 contentX 处于页间中间值，
+    // 四舍五入会把快速反向输入误判到错误页/提前触发换章。goToPage 写入目标页；
+    // 无动画运行时的 contentX 变化（拖拽/滚轮/程序化设置）按吸附页同步。
+    property int currentPage: 0
     // E4：键盘翻页——上一章请求（scroll 模式 ←，ReaderPage 接 loadChapter(current-1)；
     // loadChapter 内部钳制到 [0, len-1]，边界不越；paged 首页 ← 同样走此信号换章）
     signal requestPrevChapter()
@@ -184,8 +189,13 @@ Flickable {
     // 等待会把新章节拽到旧偏移，必须作废（重开恢复不受影响：ReaderPage.onCompleted 在
     // loadChapter 之后才赋 restoreScrollY，届时本 handler 已把 pending 清空）
     onChapterChanged: {
+        // 任务3 审查修复：先停全部动画再复位偏移——在途 pageAnimX/followAnim/
+        // pageAnim 的目标基于旧章旧几何，换章后继续运行会把 contentX/contentY
+        // 拽回旧目标（旧动画写新章竞态）。显式 stop 不依赖"写入即停"的隐式行为。
+        flick.stopPageAnimations()
         flick.contentY = 0
         flick.contentX = 0   // 任务3：换章回到第 1 页
+        flick.currentPage = 0
         restoreTimer.stop()
         flick.restorePending = false
         flick.restoreApplied = false
@@ -211,6 +221,7 @@ Flickable {
     onPageModeChanged: {
         flick.contentX = 0
         flick.contentY = 0
+        flick.currentPage = 0
         flick.rebuildPageModel()
     }
     onTypographyChanged: flick.rebuildPageModel()
@@ -222,6 +233,14 @@ Flickable {
     onContentXChanged: {
         if (flick.pageMode === "paged" && !flick.ttsActive && !flick.restorePending)
             snapTimer.restart()
+        // 任务3 审查修复：无动画运行（拖拽/滚轮/程序化设置/钳制）时按吸附页同步
+        // 逻辑当前页；pageAnimX 运行期间 contentX 是页间中间值，逻辑页由动画目标
+        //（goToPage 已写 currentPage）决定，中间值不参与计算。
+        if (flick.pageMode === "paged" && !flick.pageAnimationX.running) {
+            var w = flick.pageWidth()
+            flick.currentPage = Math.max(0,
+                Math.min(Math.round(flick.contentX / w), flick.pageCount - 1))
+        }
     }
 
     // ---- 任务3：稳定单向横向分页模型 ----
@@ -232,17 +251,22 @@ Flickable {
     // 分页按段落边界切分（超长段落独占一页、页内自然换行，不空白）；图片段独占
     // 一页；富文本标题/<br> 按行加权，估算偏保守避免页内容溢出视口被裁剪。
     function rebuildPageModel() {
+        // 任务3 审查修复：重算前停掉全部滚动/翻页动画——旧动画目标基于旧几何
+        //（旧字号/旧页宽/旧章），重算后继续运行会把 contentX/contentY 写回旧目标。
+        flick.stopPageAnimations()
         var paras = flick.chapter.paragraphs ?? []
         if (flick.pageMode !== "paged" || paras.length === 0) {
             flick.pageModel = []
             flick.pageCount = 0
+            flick.currentPage = 0
             return
         }
         var w = Math.max(1, flick.width)
         var h = Math.max(1, flick.height)
         var fontPx = Number(flick.typography.fontSize) || 18
         var lh = Number(flick.typography.lineHeight) || 1.6
-        var colW = Math.min(w * flick.pageWidthFactor(), w - 48, flick.pageWidthCap())
+        // 审查修复：w<48 时 w-48 为负宽——Math.max(1, …) 兜底（列宽同公式）
+        var colW = Math.min(w * flick.pageWidthFactor(), Math.max(1, w - 48), flick.pageWidthCap())
         // 每行字符数：全角字符宽 ≈ 字号，打 0.8 折保守估算（富文本/标点实际更窄）
         var charsPerLine = Math.max(8, Math.floor(colW / (fontPx * 0.8)))
         var linePx = Math.max(10, fontPx * lh)
@@ -252,7 +276,9 @@ Flickable {
         var cur = []
         var curChars = 0
         for (var i = 0; i < paras.length; i++) {
-            var p = paras[i]
+            // 审查修复：段落数组可能混入 null（解析器异常数据）——按空段落安全
+            // 值占位（len=1），段落全局索引对齐不破坏
+            var p = paras[i] ?? {}
             var html = p.html ?? ""
             var isImage = !!p.imagePath
                 && html.replace(/<img[^>]*>/gi, "").trim().length === 0
@@ -276,8 +302,9 @@ Flickable {
         if (cur.length > 0) pages.push(cur)
         flick.pageModel = pages
         flick.pageCount = pages.length
-        // 钳制当前页：页数变化后 contentX 不得超过末页
+        // 钳制当前页：页数变化后 contentX 不得超过末页，逻辑页同步钳制
         var maxX = Math.max(0, (pages.length - 1) * flick.pageWidth())
+        flick.currentPage = Math.max(0, Math.min(flick.currentPage, pages.length - 1))
         if (flick.contentX > maxX) flick.contentX = maxX
     }
 
@@ -309,16 +336,26 @@ Flickable {
     }
 
     // 定位到指定页（钳制到 [0, pageCount-1]，页边界 = 页号×页宽，动画驱动 contentX）
+    // 审查修复：currentPage 即逻辑当前页（动画目标）；目标与当前位置一致但仍有
+    // 在途动画（如快速反向输入取消上一动画）时必须先停掉，否则旧动画把 contentX
+    // 写回旧目标。
     function goToPage(p) {
         if (flick.pageCount <= 0) return
         p = Math.max(0, Math.min(p, flick.pageCount - 1))
+        flick.currentPage = p
         var target = p * flick.pageWidth()
+        if (Math.abs(target - flick.contentX) < 1 && !flick.pageAnimationX.running) return
+        flick.stopPageAnimations()   // 互斥：两动画驱动同一 contentX 方向，启动前停掉对方
         if (Math.abs(target - flick.contentX) < 1) return
-        followAnim.stop()   // 互斥：两动画驱动同一 contentX 方向，启动前停掉对方
-        pageAnim.stop()
-        pageAnimX.stop()
         pageAnimX.to = target
         pageAnimX.start()
+    }
+
+    // 停掉全部滚动/翻页动画（换章/尺寸重算/翻页互斥共用；stop 对停止态为 no-op）
+    function stopPageAnimations() {
+        followAnim.stop()
+        pageAnim.stop()
+        pageAnimX.stop()
     }
 
     // 规格 §7：章末自动续章——距底部 autoNextThreshold 内（且用户已实际滚动，contentY>0）
@@ -409,7 +446,9 @@ Flickable {
         var paras = flick.chapter.paragraphs ?? []
         for (var i = 0; i < paras.length; i++) {
             starts.push(acc)
-            acc += (paras[i].sentences ?? []).length
+            // 审查修复：段落可能为 null（解析器异常数据）——按空段落安全值
+            //（无句子）占位，句索引对齐不破坏
+            acc += ((paras[i] ?? {}).sentences ?? []).length
         }
         flick.sentenceStarts = starts
         flick.totalSentences = acc
@@ -518,13 +557,13 @@ Flickable {
     // 短章（一页放得下）同样触发。
     function pagePrev(isAutoRepeat) {
         if (flick.pageCount <= 0 || flick.width <= 0) return
-        var w = flick.pageWidth()
-        var pageIdx = Math.round(flick.contentX / w)
-        if (pageIdx <= 0) {
+        // 审查修复：按逻辑当前页（动画目标）而非动画中间值 Math.round(contentX/页宽)
+        // 计算——快速反向输入时中间值会把 ← 误判为首页提前翻上一章
+        if (flick.currentPage <= 0) {
             if (!isAutoRepeat) flick.requestPrevChapter()
             return
         }
-        flick.goToPage(pageIdx - 1)
+        flick.goToPage(flick.currentPage - 1)
     }
 
     // paged 模式：下一页——按页宽横向整页前进；已到末页（目标 == 当前）时翻页
@@ -532,13 +571,12 @@ Flickable {
     // 与"翻过章末进入下一章"的真实书籍语义一致；短章（一页放得下）同样触发。
     function pageNext(isAutoRepeat) {
         if (flick.pageCount <= 0 || flick.width <= 0) return
-        var w = flick.pageWidth()
-        var pageIdx = Math.round(flick.contentX / w)
-        if (pageIdx >= flick.pageCount - 1) {
+        // 审查修复：同 pagePrev——按逻辑当前页计算，动画中间值不得提前换章/丢页
+        if (flick.currentPage >= flick.pageCount - 1) {
             if (!isAutoRepeat) flick.requestNextChapter()
             return
         }
-        flick.goToPage(pageIdx + 1)
+        flick.goToPage(flick.currentPage + 1)
     }
 
     // paged 模式：拖拽/滚轮滚动收敛后吸附到最近页边界（页宽粒度，contentX）。
@@ -952,19 +990,42 @@ Flickable {
             property var pageData: modelData
             width: flick.width
             height: flick.height
-            Column {
-                id: pageCol
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: Math.min(flick.width * flick.pageWidthFactor(), flick.width - 48, flick.pageWidthCap())
-                spacing: 8
-                Repeater {
-                    id: pageParaRep
-                    model: pageItem.pageData
-                    delegate: paraComp
+            // 任务3 审查修复：页内稳定垂直滚动容器——段落整体归页后实际 TextEdit
+            // 高度可能超过页高（估算偏乐观、图片段按宽等比缩放），而 paged 模式
+            // contentY 恒 0，直接放 Column 会把超页高内容裁掉且不可达。页内
+            // Flickable（VerticalOnly，横向手势让给外层分页 Flickable）保证内容
+            // 超页高时可滚动到底、不丢失；页 Item 仍 = 视口高，外层 contentHeight
+            // 锁视口高、contentY 恒 0、分页/吸附/动画全部不受影响（无架构扩大）。
+            // 稳定：contentHeight 只随 Column 隐式高度（delegate 布局）变化，
+            // 不参与 rebuildPageModel 反馈回路，无 pageCount 振荡。
+            Flickable {
+                id: pageScroll
+                anchors.fill: parent
+                clip: true
+                // 数值枚举同外层技巧（本 Qt 6.11 类型名枚举不可解析、字面量被编译器
+                // 静态枚举校验拒绝）——三元表达式恒取 2=VerticalOnly；boundsBehavior
+                // 默认即 StopAtBounds，无需显式赋值
+                flickableDirection: true ? 2 : 1
+                contentWidth: pageScroll.width
+                contentHeight: pageCol.implicitHeight
+                Column {
+                    id: pageCol
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    // 审查修复：w<48 时 w-48 为负宽——Math.max(1, …) 兜底（同 rebuildPageModel 列宽公式）
+                    width: Math.min(flick.width * flick.pageWidthFactor(), Math.max(1, flick.width - 48), flick.pageWidthCap())
+                    spacing: 8
+                    Repeater {
+                        id: pageParaRep
+                        model: pageItem.pageData
+                        delegate: paraComp
+                    }
                 }
             }
             // 任务3：页内段落 Repeater 句柄（paragraphItemAt 按页定位段落 Item）
             property alias paraRepeater: pageParaRep
+            // 任务3 审查修复：页内滚动容器/正文列句柄（超页高内容可达性断言）
+            property alias pageScroller: pageScroll
+            property alias pageColumn: pageCol
         }
     }
 
@@ -978,7 +1039,8 @@ Flickable {
         id: col
         visible: flick.pageMode !== "paged"
         anchors.horizontalCenter: parent.horizontalCenter
-        width: Math.min(flick.width * flick.pageWidthFactor(), flick.width - 48, flick.pageWidthCap())
+        // 审查修复：w<48 时 w-48 为负宽——Math.max(1, …) 兜底（与页内列/估算公式一致）
+        width: Math.min(flick.width * flick.pageWidthFactor(), Math.max(1, flick.width - 48), flick.pageWidthCap())
         spacing: 8
         Repeater {
             id: rep

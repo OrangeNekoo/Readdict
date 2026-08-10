@@ -71,3 +71,32 @@
 ## 提交
 
 - commit：简体中文 message（见文末）
+
+---
+
+# 任务3 审查修复（横向分页关键问题）
+
+## 评审问题与修复
+
+1. **页内容超页高被裁剪（P0）**：paged 段落按估算整体归页，实际 TextEdit 高度可能超过页高（估算偏乐观：全角字符宽按 0.8 字号计 → 每行字符数高估；图片段按宽等比缩放，竖图必然超高），而 contentY 恒 0 → 超页高内容被视口裁掉且不可达。**修复**：`pageComp` 内为 `pageCol` 提供稳定内部垂直 Flickable（`pageScroll`，VerticalOnly、clip、contentHeight 绑定 Column 隐式高度）——超页高内容页内可滚动到底，不丢失；页 Item 仍 = 视口高，外层 contentHeight 锁视口高、contentY 恒 0、分页/吸附/动画全部不受影响；contentHeight 不参与 rebuildPageModel 反馈回路，无 pageCount 振荡。句柄 `pageScroller`/`pageColumn` 供断言。
+2. **换章/尺寸重算动画竞态（P0）**：`onChapterChanged`/`rebuildPageModel` 原来不停动画——在途 pageAnimX/followAnim/pageAnim 目标基于旧章旧几何，重算后继续运行把 contentX/contentY 拽回旧目标（旧动画写新章）。旧实现仅在换章时因 `contentX=0` 外部写入隐式停动画（resize 路径实测仍会继续运行，`test_resizeRebuildStopsPageAnimation` 红）。**修复**：新增 `stopPageAnimations()`，`onChapterChanged` 顶部与 `rebuildPageModel` 顶部显式停三动画，不依赖隐式行为。
+3. **快速反向输入提前换章/丢页（P0）**：pagePrev/pageNext 按 `Math.round(contentX/页宽)` 反推当前页——动画刚起步（contentX≈0）时 ← 被误判为首页 → 提前 `requestPrevChapter`；两连 → 第二按按中间值四舍五入只到第 1 页丢一页。**修复**：新增 `currentPage` 逻辑当前页（goToPage 写动画目标；无动画时 onContentXChanged 按吸附页同步），pagePrev/pageNext 按逻辑页计算；goToPage 目标与当前位置一致但仍有在途动画时先停动画（反向取消场景）。
+4. **null 段落安全**：`rebuildPageModel`/`computeSentenceStarts` 直接解引用段落——QML 引擎对 null 属性访问宽容（返回 undefined）故未崩，但依赖隐式语义；改为显式 `p ?? {}` / `(paras[i] ?? {}).sentences ?? []` 空段落安全值，段落全局索引对齐不破坏。
+5. **w<48 负宽**：`flick.width - 48` 在 w<48 时产出负列宽（估算公式、页内列、scroll 列三处同公式）。**修复**：三处统一 `Math.max(1, w - 48)` 兜底。
+
+## 改动文件
+
+- `src/ui/qml/ReaderContent.qml`：currentPage 属性与同步（goToPage/onContentXChanged/onChapterChanged/onPageModeChanged/rebuildPageModel 钳制）；stopPageAnimations + 两处调用；pagePrev/pageNext 改逻辑页；pageComp 内嵌 pageScroll（句柄 pageScroller/pageColumn）；三处列宽公式 Math.max(1, w-48)；rebuildPageModel/computeSentenceStarts null 兜底。scroll 路径与既有接口（pageRepeater/pageAnimationX 等句柄、handleKey、contentTapped 信号）全部保留。
+- `tests/qml/tst_e4_keys.qml`：PagedModeSmoke 新增 6 用例——`test_pageContentOverflowIsReachable`、`test_chapterChangeStopsPageAnimation`、`test_resizeRebuildStopsPageAnimation`、`test_fastReverseInputUsesLogicalTargetPage`、`test_nullParagraphSafeFallback`、`test_narrowWidthNoNegativeColumn`。
+
+## TDD 证据
+
+- 红：旧实现上 4 用例失败——overflow（页内无 pageScroller 句柄）、resize（尺寸重算后 pageAnimX 仍 running）、fastReverse（currentPage 不存在 + 动画中途 ← 提前翻章）、narrowWidth（pageColumn 负宽 -18）；chapterChange/null 两用例在旧实现上因「contentX=0 写入隐式停动画」「QML null 属性访问宽容」自愈通过，保留为回归守卫，修复使其行为显式化。
+- 绿：实现后 tst_e4_keys **22/22**（含 6 新用例）。
+
+## 验证
+
+- 构建：`cmake --build build/Qt_6_11_1_for_macOS_Debug --target tst_qml Readdict -j8` 成功（0 error）。
+- 必需套件：tst_e4_keys **22**、tst_readerpage **20**、tst_highlightsui **24**、tst_background **13**、tst_u4 **18** 全绿（0 failed）。
+- 补充套件（段落渲染/滚动跟随触点）：tst_c4_scroll 8、tst_sheets 10、tst_textcolor 8、tst_ttsbar 9 全绿。
+- 内嵌 Flickable 未破坏选择/TTS/点击：tst_readerpage 真实点击/拖动用例、tst_highlightsui 选择工具条用例、tst_c4_scroll TTS 跟随用例全部通过。

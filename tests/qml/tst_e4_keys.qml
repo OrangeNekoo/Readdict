@@ -482,6 +482,186 @@ Item {
             h.stack.destroy()
         }
 
+        // 任务3 审查修复：超长段落整体归页后实际 TextEdit 高度可能超过页高，
+        // 被视口裁剪则内容不可达（contentY 恒 0）。修复为每页提供稳定内部
+        // 垂直滚动容器：内容超出页高时页内可滚动到底，内容不丢失。
+        function test_pageContentOverflowIsReachable() {
+            var book = findBook("longbook")
+            verify(book !== null, "longbook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.pageMode = "paged"
+            verify(waitPagesSettled(cv), "页面模型应就绪")
+            // 1500 全角字符超长段：字符估算即超一页（charsPerPage≈1152），
+            // 段落整体归页后实际渲染高度必然超过页高（720）
+            var longText = ""
+            for (var i = 0; i < 1500; i++) longText += "汉"
+            page.chapter = { title: "overflow", paragraphs: [{ text: longText }] }
+            verify(waitPagesSettled(cv), "超长段章节页面模型应就绪（pageCount=" + cv.pageCount + "）")
+            compare(cv.pageCount, 1, "超长段应独占一页")
+            var pi = cv.pageRepeater.itemAt(0)
+            verify(pi !== null, "应存在第 0 页")
+            verify(pi.pageScroller !== undefined, "页内应提供垂直滚动容器（未修复时无此句柄）")
+            tryVerify(function () {
+                return pi.pageScroller.contentHeight > pi.pageScroller.height + 50
+            }, 3000, "超长段页内容应超出页高（contentHeight=" + pi.pageScroller.contentHeight
+                    + "，页高=" + pi.pageScroller.height + "）——被裁剪则内容不可达")
+            pi.pageScroller.contentY = pi.pageScroller.contentHeight - pi.pageScroller.height
+            verify(pi.pageScroller.contentY > 50,
+                   "页内应可滚动到底（contentY=" + pi.pageScroller.contentY
+                   + "）——超页高内容不可丢失")
+            compare(cv.contentY, 0, "页内滚动不得改变外层 contentY")
+            verify(cv.contentHeight <= cv.height + 0.5,
+                   "外层 contentHeight 仍应锁视口高（实际 " + cv.contentHeight + "）")
+            pi.pageScroller.contentY = 0
+            h.stack.destroy()
+        }
+
+        // 任务3 审查修复：换章（onChapterChanged）必须停止全部动画——否则在途的
+        // pageAnimX/followAnim/pageAnim 会把 contentX/contentY 拽回旧章旧几何目标，
+        // 产生"旧动画写新章"竞态（contentX 不再停在 0）。
+        function test_chapterChangeStopsPageAnimation() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.pageMode = "paged"
+            Books.currentChapter = 0
+            page.loadChapter(0)
+            verify(waitPagesSettled(cv), "章 0 页面模型应就绪（pageCount=" + cv.pageCount + "）")
+            cv.contentX = 0
+            wait(50)
+            cv.handleKey(Qt.Key_Right, Qt.NoModifier)
+            verify(cv.pageAnimationX.running === true, "→ 应驱动横向翻页动画")
+            // 动画中途换章（直接注入多页目标章：与 loadChapter 同走 onChapterChanged）
+            var paras = []
+            for (var i = 0; i < 100; i++)
+                paras.push({ text: "这是换章动画竞态验证的第 " + i + " 段正文内容，用于构造多页章节。" })
+            page.chapter = { title: "多页章", paragraphs: paras }
+            verify(cv.pageAnimationX.running === false, "换章应停止横向翻页动画")
+            verify(cv.followAnimation.running === false, "换章应停止纵向跟随动画")
+            verify(cv.pageAnimation.running === false, "换章应停止翻页动画")
+            verify(cv.pageCount >= 2, "目标章应多页（pageCount=" + cv.pageCount + "）")
+            wait(450)
+            verify(Math.abs(cv.contentX) < 4,
+                   "换章后 contentX 应停在 0（旧动画不得写回旧目标），实际 " + cv.contentX)
+            h.stack.destroy()
+        }
+
+        // 任务3 审查修复：尺寸重算（排版/视口变化 → rebuildPageModel）同样必须
+        // 停止全部动画——旧动画目标基于旧几何，重算后继续运行会产生错位。
+        function test_resizeRebuildStopsPageAnimation() {
+            var book = findBook("longbook")
+            verify(book !== null, "longbook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.pageMode = "paged"
+            verify(waitPagesSettled(cv), "页面模型应就绪（pageCount=" + cv.pageCount + "）")
+            cv.contentX = 0
+            wait(50)
+            cv.handleKey(Qt.Key_Right, Qt.NoModifier)
+            verify(cv.pageAnimationX.running === true, "→ 应驱动横向翻页动画")
+            var orig = cv.typography
+            cv.typography = { fontSize: Number(orig.fontSize || 18) + 4 }
+            verify(cv.pageAnimationX.running === false, "尺寸重算应停止横向翻页动画")
+            cv.typography = orig
+            wait(450)
+            verify(Math.abs(cv.contentX) < 4,
+                   "尺寸重算后 contentX 应停在 0（旧动画不得写回旧目标），实际 " + cv.contentX)
+            h.stack.destroy()
+        }
+
+        // 任务3 审查修复：pagePrev/pageNext 按动画中间值 Math.round(contentX/页宽)
+        // 反推当前页——动画刚起步（contentX≈0）时 ← 被误判为"首页"提前翻上一章；
+        // 两连 → 第二按也按中间值 round 回第 1 页丢一页。修复维护 currentPage
+        //（动画目标即逻辑页，中间值不参与），快速反向输入按逻辑页计算。
+        function test_fastReverseInputUsesLogicalTargetPage() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.pageMode = "paged"
+            Books.currentChapter = 1
+            page.loadChapter(1)
+            verify(waitPagesSettled(cv), "章 1 页面模型应就绪")
+            // 章 1（60 短段）估算下 1 页，不足以测快速反向——替换为多页章
+            //（Books.currentChapter 保持 1：← 换章可经 autoPrevChapter 观察到）
+            var paras = []
+            for (var i = 0; i < 100; i++)
+                paras.push({ text: "这是快速反向输入验证的第 " + i + " 段正文内容，用于构造多页章节。" })
+            page.chapter = { title: "多页章", paragraphs: paras }
+            verify(waitPagesSettled(cv), "多页章页面模型应就绪（pageCount=" + cv.pageCount + "）")
+            verify(cv.pageCount >= 3, "应至少 3 页（pageCount=" + cv.pageCount + "）")
+            cv.contentX = 0
+            wait(50)
+            compare(cv.currentPage, 0, "初始逻辑页应为 0")
+            // 场景 1：→ 动画中途立即 ←（同事件循环，contentX 仍 0）——
+            // 旧实现按中间值 round(0)=0 误判首页 → 提前翻上一章
+            cv.handleKey(Qt.Key_Right, Qt.NoModifier)
+            verify(cv.pageAnimationX.running === true, "→ 应驱动横向翻页动画")
+            cv.handleKey(Qt.Key_Left, Qt.NoModifier)
+            wait(450)
+            compare(Books.currentChapter, 1, "动画中途 ← 不应提前翻上一章")
+            verify(Math.abs(cv.contentX) < 4,
+                   "反向取消应回到第 0 页，实际 contentX=" + cv.contentX)
+            compare(cv.currentPage, 0, "取消后逻辑页应回 0")
+            // 场景 2：两连 →（第二按仍在动画中途，contentX 仍 ≈0）——
+            // 按逻辑目标页推进到第 2 页；旧实现第二按 round(0)=0 只到第 1 页
+            cv.handleKey(Qt.Key_Right, Qt.NoModifier)
+            cv.handleKey(Qt.Key_Right, Qt.NoModifier)
+            wait(450)
+            verify(Math.abs(cv.contentX - 2 * cv.width) < 4,
+                   "两连 → 应推进到第 2 页（contentX=" + cv.contentX + "，期望 " + 2 * cv.width + "）")
+            compare(cv.currentPage, 2, "两连 → 后逻辑页应为 2")
+            compare(Books.currentChapter, 1, "非末页连按不应翻章")
+            h.stack.destroy()
+        }
+
+        // 任务3 审查修复：段落数组混入 null（解析器异常数据）时，分页/句索引
+        // 重建不得抛异常——null 按空段落安全值占位（len=1），段落全局索引对齐不破坏。
+        function test_nullParagraphSafeFallback() {
+            var book = findBook("longbook")
+            verify(book !== null, "longbook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.pageMode = "paged"
+            verify(waitPagesSettled(cv), "初始页面模型应就绪")
+            page.chapter = { title: "nullpara", paragraphs: [null, { text: "正常段落" }, null] }
+            verify(waitPagesSettled(cv), "含 null 段落章节页面模型应就绪（pageCount=" + cv.pageCount + "）")
+            compare(cv.pageCount, 1, "3 个占位段（null 按空段落 len=1）应合为一页")
+            compare(cv.pageRepeater.count, cv.pageCount, "页面委托应与 pageCount 同步")
+            verify(cv.paragraphItemAt(1) !== null, "非 null 段落应可按全局索引定位")
+            compare(cv.contentX, 0, "null 段落后 contentX 应保持 0")
+            h.stack.destroy()
+        }
+
+        // 任务3 审查修复：w<48 时列宽公式 flick.width-48 产出负宽——
+        // 页内列宽必须 Math.max(1, w-48) 兜底，不得出现负宽/负字符布局。
+        function test_narrowWidthNoNegativeColumn() {
+            var book = findBook("longbook")
+            verify(book !== null, "longbook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.pageMode = "paged"
+            verify(waitPagesSettled(cv), "页面模型应就绪")
+            var ow = cv.width
+            cv.width = 30   // w < 48
+            verify(waitPagesSettled(cv), "窄视口下页面模型应就绪（pageCount=" + cv.pageCount + "）")
+            var pi = cv.pageRepeater.itemAt(0)
+            verify(pi !== null, "应存在第 0 页")
+            verify(pi.pageColumn !== undefined, "页应暴露正文列句柄")
+            verify(pi.pageColumn.width > 0,
+                   "w<48 时正文列宽应 ≥ 1（未修复为负宽 " + pi.pageColumn.width + "）")
+            cv.width = ow
+            h.stack.destroy()
+        }
+
         // 模式持久化：设置页写 reading/pageMode → 重开 ReaderPage 生效
         function test_pagedModePersists() {
             Settings.setValue("reading/pageMode", "paged")
