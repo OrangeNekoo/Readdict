@@ -65,10 +65,14 @@ Page {
         anchors.topMargin: 12
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
         ColumnLayout {
-            width: ttsScroll.availableWidth
+            width: Math.max(0, ttsScroll.width
+                                - ttsScroll.leftPadding - ttsScroll.rightPadding)
             spacing: 14
+            // ScrollView.availableWidth 在内容计算初期可能为 0，使用视口宽度
+            // 建立单向尺寸约束，保证 TextField/Slider 行可见且可滚动。
 
             RowLayout {
+                Layout.fillWidth: true
                 Label { text: qsTr("引擎") }
                 ComboBox {
                     id: ttsEngineBox
@@ -91,6 +95,7 @@ Page {
             }
             // L7（P1#15）：系统引擎音色列表（Tts.voices 转发宿主系统语音），写 tts/systemVoice
             RowLayout {
+                Layout.fillWidth: true
                 visible: ttsEngineBox.currentIndex === 0
                 Label { text: qsTr("音色") }
                 ComboBox {
@@ -113,9 +118,11 @@ Page {
             }
             // OpenAI 引擎参数（引擎为 system 时折叠）
             ColumnLayout {
+                Layout.fillWidth: true
                 visible: ttsEngineBox.currentIndex === 1
                 spacing: 10
                 RowLayout {
+                    Layout.fillWidth: true
                     Label { text: qsTr("服务地址") }
                     TextField {
                         id: ttsUrlField
@@ -126,6 +133,7 @@ Page {
                     }
                 }
                 RowLayout {
+                    Layout.fillWidth: true
                     Label { text: qsTr("API Key") }
                     TextField {
                         id: ttsKeyField
@@ -136,6 +144,7 @@ Page {
                     }
                 }
                 RowLayout {
+                    Layout.fillWidth: true
                     Label { text: qsTr("模型") }
                     TextField {
                         id: ttsModelField
@@ -145,6 +154,7 @@ Page {
                     }
                 }
                 RowLayout {
+                    Layout.fillWidth: true
                     Label { text: qsTr("音色") }
                     TextField {
                         id: ttsVoiceField
@@ -154,6 +164,7 @@ Page {
                     }
                 }
                 RowLayout {
+                    Layout.fillWidth: true
                     Label { text: qsTr("语速（0.25–4.0）") }
                     TextField {
                         id: ttsSpeedField
@@ -191,6 +202,7 @@ Page {
             }
             // 保存/试音按钮常驻（不在 openai 折叠区内）：切回系统引擎也必须能保存应用
             RowLayout {
+                Layout.fillWidth: true
                 Button {
                     text: qsTr("保存并应用")
                     onClicked: page.saveTts()

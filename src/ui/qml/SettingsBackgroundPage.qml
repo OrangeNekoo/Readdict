@@ -72,8 +72,10 @@ Page {
         anchors.topMargin: 12
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
         ColumnLayout {
-            width: bgScroll.availableWidth
+            width: Math.max(0, bgScroll.width
+                                - bgScroll.leftPadding - bgScroll.rightPadding)
             spacing: 14
+            // 使用实际视口宽度，避免 availableWidth 初始为 0 导致内容坍缩。
 
             // 背景四态单选（浅/深/米白/自定义图片）——KdRadioGrid ○/● 网格
             Label {
@@ -95,6 +97,7 @@ Page {
             }
 
             RowLayout {
+                Layout.fillWidth: true
                 Label { text: qsTr("背景图片") }
                 Button {
                     text: qsTr("选择图片…")
@@ -166,8 +169,10 @@ Page {
                     Layout.preferredWidth: 40
                     horizontalAlignment: Text.AlignRight
                 }
+                Layout.fillWidth: true
             }
             RowLayout {
+                Layout.fillWidth: true
                 Label { text: qsTr("亮度") }
                 Slider {
                     id: bgBrightnessSlider

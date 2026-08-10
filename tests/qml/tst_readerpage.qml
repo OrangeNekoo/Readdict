@@ -263,6 +263,9 @@ Item {
             verify(book !== null, "测试书应已导入")
             var stack = Qt.createQmlObject(
                 "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            var marker = Qt.createQmlObject("import QtQuick; Item { objectName: 'shelfMarker' }",
+                                            root, "shelfMarker")
+            stack.push(marker)
             stack.push("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: book })
             var page = stack.currentItem
             tryVerify(function () { return page.chapter && page.chapter.paragraphs
@@ -291,6 +294,19 @@ Item {
             verify(!saved || saved.indexOf(Books.currentChapter) < 0, "取消书签应更新持久化列表")
             page.sheetOpen = false
             tryVerify(function () { return !page.topToolbar.visible }, 2000, "Sheet 关闭时顶栏应隐藏")
+            h.stack.destroy()
+        }
+        function test_hiddenControlsTapOpensToolbarAndBackPops() {
+            var h = openPage()
+            var page = h.page
+            page.controlsVisible = false
+            page.sheetOpen = false
+            page.handleContentTap(page.height - 10)
+            tryVerify(function () { return page.sheetOpen && page.topToolbar.visible }, 2000,
+                      "隐藏控件时底部点击应唤出顶栏")
+            page.backButton.clicked()
+            tryVerify(function () { return h.stack.currentItem.objectName === "shelfMarker" }, 2000,
+                      "唤出顶栏后点击返回应回到书架前页")
             h.stack.destroy()
         }
     }

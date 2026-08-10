@@ -79,6 +79,36 @@ Item {
                    "滚到底后版本标签应在视口内（y=" + yInView + "，视口=" + fl.height + "）")
             loader.destroy()
         }
+        function test_listRowsDoNotOverlap() {
+            var loader = settingsComp.createObject(root)
+            loader.width = 1100
+            loader.height = 720
+            var page = loader.item
+            verify(page !== null, "SettingsPage 应能加载")
+            tryVerify(function () {
+                return page.settingsLayout.children.length === 8
+                       && page.settingsLayout.width > 0
+                       && page.settingsLayout.children[0].width > 0
+                       && page.settingsLayout.children[0].children[1].children[1].children[0].height > 0
+            }, 3000, "设置列表应完成布局")
+            for (var i = 0; i < 7; ++i) {
+                var row = page.settingsLayout.children[i]
+                var rowLayout = row.children[1]
+                var icon = rowLayout.children[0]
+                var textColumn = rowLayout.children[1]
+                verify(row.width > 0 && rowLayout.width > 0 && textColumn.width > 0,
+                       "设置行及文本列应有可见宽度: " + i)
+                var title = textColumn.children[0]
+                var subtext = textColumn.children[1]
+                verify(title.height > 0, "设置行标题应有可见高度: " + i)
+                if (subtext.visible)
+                    verify(title.y + title.height <= subtext.y + 1,
+                           "设置行标题与副标题不得重叠: " + i)
+                verify(textColumn.x >= icon.x + icon.width,
+                       "设置行图标与标题不得水平重叠: " + i)
+            }
+            loader.destroy()
+        }
 
         // 默认窗口（1100x720）下内容未必超高，滚动条 AsNeeded 不强制出现；
         // 只要 ScrollView 存在且不超高时不报错即可（加载即编译检查）

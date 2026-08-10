@@ -46,6 +46,7 @@ Page {
     property alias topToolbar: topToolbar
     property alias backButton: topToolbar.backBtn
     property alias menuButton: topToolbar.menuBtn
+    property alias contentTapHandler: contentTapHandler
     property alias infoDialog: infoDialog
     // U4：Kindle 底部 Sheet 工具栏。
     property bool sheetOpen: false
@@ -821,6 +822,9 @@ Page {
         else if (page.controlsVisible) hideControlsTimer.restart()
     }
     TapHandler {
+        id: contentTapHandler
+        acceptedButtons: Qt.LeftButton
+        gesturePolicy: TapHandler.DragThreshold
         onTapped: page.handleContentTap(point.position.y)
     }
 

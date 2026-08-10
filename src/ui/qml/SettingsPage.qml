@@ -78,7 +78,11 @@ Page {
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
         ColumnLayout {
             id: settingsLayout
-            width: settingsScroll.availableWidth
+            // 不绑定 ScrollView.availableWidth：该属性在内容尺寸计算前可能为 0，
+            // 会使所有 KdListItem 宽度坍缩并导致图标/文字重叠。使用视口实际宽度
+            // 建立单向约束，滚动范围仍由 ColumnLayout 总高度决定。
+            width: Math.max(0, settingsScroll.width
+                                - settingsScroll.leftPadding - settingsScroll.rightPadding)
             spacing: 0
 
             // ---- 深色模式：三选一 radio（跟随系统/浅色/深色 → theme/mode）----
@@ -87,6 +91,7 @@ Page {
             // Main.applyTheme 同步 Material.theme 三态与 UITheme.isDark（既有机制不变）。
             KdListItem {
                 id: themeItem
+                Layout.fillWidth: true
                 icon: "theme"
                 text: qsTr("深色模式")
                 subtext: page.themeModeName()
@@ -121,6 +126,7 @@ Page {
             // ---- 语言：进入子页（KdRadioGrid 单选 zh_CN/zh_TW/en）----
             KdListItem {
                 id: languageItem
+                Layout.fillWidth: true
                 icon: "globe"
                 text: qsTr("语言")
                 subtext: page.languageName()
@@ -129,6 +135,7 @@ Page {
             // ---- 朗读（TTS）：进入子页（引擎/参数/语速档位/保存试音）----
             KdListItem {
                 id: ttsItem
+                Layout.fillWidth: true
                 icon: "read"
                 text: qsTr("朗读（TTS）")
                 subtext: page.ttsEngineName()
@@ -137,6 +144,7 @@ Page {
             // ---- 阅读背景：进入子页（四态单选/图片选择/缩略图/模糊亮度/翻页方式）----
             KdListItem {
                 id: bgItem
+                Layout.fillWidth: true
                 icon: "image"
                 text: qsTr("阅读背景")
                 subtext: page.bgModeName()
@@ -148,6 +156,7 @@ Page {
             // 更新经 Importer.coversRefreshed → Books.booksChanged 使书架封面即时生效。
             KdListItem {
                 id: refreshItem
+                Layout.fillWidth: true
                 icon: "shelf"
                 text: qsTr("刷新封面")
                 showChevron: false
@@ -170,6 +179,7 @@ Page {
             // ---- 同步：入口保留（KdListItem → push SyncPage，U2 导航可达）----
             KdListItem {
                 id: syncItem
+                Layout.fillWidth: true
                 icon: "sync"
                 text: qsTr("同步")
                 subtext: qsTr("WebDAV 同步设置")
@@ -178,6 +188,7 @@ Page {
             // ---- 统计：入口保留（KdListItem → push StatsPage）----
             KdListItem {
                 id: statsItem
+                Layout.fillWidth: true
                 icon: "stats"
                 text: qsTr("统计")
                 subtext: qsTr("阅读统计")
