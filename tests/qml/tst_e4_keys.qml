@@ -169,6 +169,9 @@ Item {
         // 循环期间高度骤降致 contentY 钳制、pageNext 提前翻章（全量套件 flake 实证：
         // 章 1 60 段 maxY=2316 被误判为章 0 100 段的 4231）。故要求 count 同步后
         // 高度相对首同步样本发生一次变动（新章布局落地）再稳定两次才算收敛。
+        // U6 证据修复：5s 超时兜底不得以「contentHeight > height」静默成功——那是在
+        // 未证明同步/稳定的旧高度上放行，反而掩盖竞态。超时一律 return false，
+        // 由调用方 verify 显式报告同步失败（含段落数/Repeater 诊断）。
         function waitContentSettled(cv) {
             var last = -1
             var stable = 0
@@ -195,7 +198,7 @@ Item {
                 last = h
                 wait(50)
             }
-            return cv.contentHeight > cv.height
+            return false
         }
         function openPage(book) {
             var stack = Qt.createQmlObject(
@@ -340,7 +343,11 @@ Item {
             page.pageMode = "paged"
             page.loadChapter(1)
             verify(waitContentSettled(cv),
-                   "章 1 内容高度应就绪并收敛（contentHeight=" + cv.contentHeight + "）")
+                   "章 1 内容高度应就绪并收敛：5s 内未证明同步/稳定（contentHeight="
+                   + cv.contentHeight + "，视口高=" + cv.height + "，Repeater="
+                   + cv.paragraphRepeater.count + "/"
+                   + (cv.chapter && cv.chapter.paragraphs
+                      ? cv.chapter.paragraphs.length : "无章节") + "）")
             var maxY = Math.max(0, cv.contentHeight - cv.height)
             var guard = 0
             while (guard++ < 10) {
