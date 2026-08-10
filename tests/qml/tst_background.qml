@@ -272,44 +272,111 @@ Item {
         }
 
         function test_07_settingsThumbnail() {
-            // E2：缩略图预览——未选图隐藏；选图后可见、图片就绪后效果层显示，
-            // MultiEffect 模糊/亮度随滑条与页面属性实时联动（与 ReaderBackground 同换算）
+            // 任务5：预览固定为小长方形卡片，始终可见（未选图时显示当前背景模式
+            // 底色 + 测试文本）；选图后叠加图片/模糊/亮度效果；测试文本颜色随
+            // 模式文字色（image 模式 = 所选字体颜色，非法回退浅色默认）。
             Settings.setValue("background/mode", "light")
             Settings.setValue("background/imagePath", "")
+            Settings.setValue("background/textColor", "")
             var loader = bgSettingsComp.createObject(root)
             loader.width = 1100; loader.height = 720
             var page = loader.item
             verify(page !== null, "SettingsBackgroundPage 应能加载")
             verify(page.bgThumb !== undefined, "缩略图容器句柄应存在")
-            verify(!page.bgThumb.visible, "未选图时缩略图应隐藏")
-            // 选图（真实图片）→ 缩略图可见、图片就绪后效果层显示
+            verify(page.bgThumb.visible, "预览卡片应始终可见（含未选图）")
+            verify(page.bgThumbText !== undefined, "预览应暴露测试文本句柄")
+            verify(page.bgThumbText.visible && page.bgThumbText.text.length > 0,
+                   "预览应显示测试文本")
+            compare(page.bgThumb.width, 220, "预览应为固定小卡片宽 220，实际 " + page.bgThumb.width)
+            compare(page.bgThumb.height, 120, "预览应为固定小卡片高 120，实际 " + page.bgThumb.height)
+            compare(String(page.bgThumbText.color), "#1a1a1a", "light 模式测试文本应为默认深字")
+            compare(String(page.thumbTextColor), "#1a1a1a", "light 模式 thumbTextColor 应为默认深字")
+            // 选图（真实图片）→ 图片就绪后效果层显示；滑条与页面属性实时联动
             page.importBackgroundImage(TestEnv.backgroundImage)
             verify(Settings.value("background/imagePath").length > 0, "导入成功应写 imagePath")
-            tryVerify(function () { return page.bgThumb.visible }, 5000, "选图后缩略图应可见")
             tryVerify(function () { return page.bgThumbImg.status === Image.Ready }, 5000,
                       "缩略图应加载为 Ready，实际 " + page.bgThumbImg.status)
             verify(page.bgThumbFx.visible, "图片就绪后效果层应显示")
-            // 滑条移动 → page 属性（响应层）+ MultiEffect 实时联动（blur 直通、亮度换算 -1..1）
             page.bgBlurSlider.value = 0.5
             compare(page.bgBlur, 0.5, "滑条应同步 page.bgBlur（缩略图绑定源）")
             compare(page.bgThumbFx.blur, 0.5, "缩略图 blur 应随滑条实时更新")
             page.bgBrightnessSlider.value = 1.4
             compare(page.bgBrightness, 1.4, "滑条应同步 page.bgBrightness")
             compare(page.bgThumbFx.brightness, 0.4, "brightness 1.4 应换算为 MultiEffect 0.4")
-            // 页面属性直改（导入/恢复路径同源）同样实时反映到效果层
             page.bgBlur = 0.8
             compare(page.bgThumbFx.blur, 0.8, "属性直改应实时反映到缩略图")
             page.bgBrightness = 0.5
             compare(page.bgThumbFx.brightness, -0.5, "brightness 0.5 应换算为 -0.5")
+            // 深色模式：卡片测试文本色随模式（自定义色不污染非 image 模式）
+            page.bgGrid.selectValue("dark")
+            compare(String(page.bgThumbText.color), "#e8e8e3", "dark 模式测试文本应为浅字")
             wait(50)   // 渲染若干帧（模糊效果在帧上执行），不崩即通过
-            // 清空路径后重启（启动恢复路径）→ 缩略图隐藏
+            // 清空路径后重启 → 卡片仍可见（显示模式底色 + 测试文本）
             Settings.setValue("background/imagePath", "")
             loader.destroy()
             loader = bgSettingsComp.createObject(root)
             loader.width = 1100; loader.height = 720
             page = loader.item
-            verify(!page.bgThumb.visible, "无图路径恢复后缩略图应隐藏")
+            verify(page.bgThumb.visible, "无图路径恢复后预览卡片仍应可见")
+            verify(page.bgThumbText.visible, "无图路径恢复后测试文本仍应可见")
             loader.destroy()
+            Settings.setValue("background/mode", "light")
+        }
+
+        // 任务5：字体颜色预设——仅 image 模式显示（≥3 个安全色），选择即时写
+        // background/textColor；恢复合法值选中对应预设，非法/缺失回退默认近黑。
+        function test_08_textColorPresets() {
+            Settings.setValue("background/mode", "light")
+            Settings.setValue("background/imagePath", "")
+            Settings.setValue("background/textColor", "")
+            var loader = bgSettingsComp.createObject(root)
+            loader.width = 1100; loader.height = 720
+            var page = loader.item
+            verify(page !== null, "SettingsBackgroundPage 应能加载")
+            verify(page.textColorGrid !== undefined, "应暴露字体颜色预设句柄")
+            verify(!page.textColorSection.visible, "非 image 模式应隐藏字体颜色选择")
+            verify(page.textColorGrid.options.length >= 3,
+                   "字体颜色预设应不少于 3 个，实际 " + page.textColorGrid.options.length)
+            // 选图（进入 image 模式）→ 字体颜色选择显示
+            page.importBackgroundImage(TestEnv.backgroundImage)
+            tryVerify(function () { return page.textColorSection.visible }, 2000,
+                      "image 模式应显示字体颜色选择")
+            // 选择预设 → 即时持久化 + 页面状态同步 + 预览测试文本色联动
+            page.textColorGrid.selectValue("#FFFFFF")
+            compare(String(Settings.value("background/textColor")), "#FFFFFF",
+                    "选择应即时写 background/textColor")
+            compare(page.bgTextColor, "#FFFFFF", "页面 bgTextColor 应同步")
+            compare(String(page.thumbTextColor), "#ffffff", "预览测试文本色应联动为所选色")
+            compare(String(page.bgThumbText.color), "#ffffff", "预览文本应使用所选颜色")
+            // 恢复合法值：重载页面 → bgTextColor 恢复、预设选中对应值
+            loader.destroy()
+            loader = bgSettingsComp.createObject(root)
+            loader.width = 1100; loader.height = 720
+            page = loader.item
+            compare(page.bgTextColor, "#FFFFFF", "恢复后 bgTextColor 应为合法自定义色")
+            compare(page.textColorGrid.currentValue, "#FFFFFF", "恢复后应选中对应预设")
+            loader.destroy()
+            // 非法值 → 回退默认近黑（bgTextColor 置空、预设选中默认）
+            Settings.setValue("background/textColor", "#ZZZZZZ")
+            loader = bgSettingsComp.createObject(root)
+            loader.width = 1100; loader.height = 720
+            page = loader.item
+            compare(page.bgTextColor, "", "非法值应回退（bgTextColor 置空）")
+            compare(page.textColorGrid.currentValue, "#1A1A1A", "非法值预设应回退默认近黑")
+            compare(String(page.thumbTextColor), "#1a1a1a", "非法值预览测试文本色应回退默认")
+            loader.destroy()
+            // 缺失值 → 回退默认近黑
+            Settings.setValue("background/textColor", "")
+            loader = bgSettingsComp.createObject(root)
+            loader.width = 1100; loader.height = 720
+            page = loader.item
+            compare(page.bgTextColor, "", "缺失值应回退（bgTextColor 置空）")
+            compare(page.textColorGrid.currentValue, "#1A1A1A", "缺失值预设应回退默认近黑")
+            loader.destroy()
+            // 清理
+            Settings.setValue("background/mode", "light")
+            Settings.setValue("background/imagePath", "")
+            Settings.setValue("background/textColor", "")
         }
     }
 }

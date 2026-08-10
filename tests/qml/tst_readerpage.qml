@@ -420,6 +420,41 @@ Item {
                       "唤出顶栏后点击返回应回到书架前页")
             h.stack.destroy()
         }
+        // 任务5：自定义图片模式文字色——ReaderPage 从 Settings 恢复
+        // background/textColor 并注入正文（纯文本与富文本一致）；自定义色
+        // 不污染 light/paper/dark 模式默认色。
+        function test_imageTextColorRestore() {
+            Settings.setValue("background/mode", "image")
+            var dest = Settings.copyToBackgrounds(TestEnv.backgroundImage)
+            verify(dest.length > 0, "背景图应导入成功")
+            Settings.setValue("background/imagePath", dest)
+            Settings.setValue("background/textColor", "#FFFFFF")
+            var h = openPage()
+            var page = h.page
+            var cv = page.contentView
+            compare(page.bgMode, "image", "应恢复 image 模式")
+            compare(page.bgTextColor, "#FFFFFF", "应恢复自定义文字色")
+            // 真实书端到端：正文 textColor 注入自定义色；段落 TextEdit.color 跟随
+            //（zeta.txt 两行无空行 → 单段纯文本；富/纯文本一致性另由 tst_textcolor
+            // test_05 覆盖，本用例聚焦真实书恢复链路）
+            tryVerify(function () { return String(cv.textColor) === "#ffffff" }, 2000,
+                      "image 模式正文 textColor 应注入自定义色，实际 " + String(cv.textColor))
+            tryVerify(function () {
+                var d = cv.paragraphRepeater.itemAt(0)
+                return d && d.children[0] && String(d.children[0].color) === "#ffffff"
+            }, 2000, "正文段落 TextEdit.color 应使用自定义色 #FFFFFF")
+            // 自定义色不污染其它模式默认色
+            page.bgMode = "light"
+            compare(String(cv.textColor), "#1a1a1a", "自定义色不应污染 light（默认深字）")
+            page.bgMode = "dark"
+            compare(String(cv.textColor), "#e8e8e3", "自定义色不应污染 dark（默认浅字）")
+            page.bgMode = "image"
+            compare(String(cv.textColor), "#ffffff", "回 image 应恢复自定义色")
+            h.stack.destroy()
+            // 清理 Settings（不影响同 TestCase 其它用例）
+            Settings.setValue("background/mode", "light")
+            Settings.setValue("background/textColor", "")
+        }
     }
 
 }

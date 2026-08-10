@@ -123,8 +123,81 @@ Item {
             loader.destroy()
         }
 
-        // ReaderPage 绑定：bgMode=dark → textColor #E8E8E3；light/paper/image → 深字
+        // 任务5：ReaderPage 从 Settings 恢复 background/textColor 并注入正文——
+        // 合法值使用（纯文本与富文本一致），非法/缺失回退浅色默认；light/paper/dark
+        // 模式不被自定义色污染。
+        function test_05_imageTextColorRestoreAndFallback() {
+            // 路径 A：image + 合法自定义色 → 恢复并注入
+            Settings.setValue("background/mode", "image")
+            Settings.setValue("background/textColor", "#FFFFFF")
+            var loader = readerComp.createObject(root)
+            loader.setSource("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: {} })
+            var page = loader.item
+            verify(page !== null, "ReaderPage 应能加载")
+            page.chapter = root.makeChapter()
+            var cv = page.contentView
+            tryVerify(function () { return root.paraEdit(cv, 0) !== null }, 2000,
+                      "ReaderPage 内段落委托应渲染完成")
+            compare(page.bgTextColor, "#FFFFFF", "应从 Settings 恢复自定义文字色")
+            compare(String(cv.textColor), "#ffffff", "image 模式 textColor 应使用自定义色")
+            tryVerify(function () {
+                return String(root.paraEdit(cv, 0).color) === "#ffffff"
+                    && String(root.paraEdit(cv, 1).color) === "#ffffff"
+            }, 2000, "纯文本与富文本段都应使用自定义色 #FFFFFF")
+            loader.destroy()
+            // 路径 B：非法值（非安全预设）→ 回退浅色默认
+            Settings.setValue("background/textColor", "#ZZZZZZ")
+            loader = readerComp.createObject(root)
+            loader.setSource("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: {} })
+            page = loader.item
+            cv = page.contentView
+            compare(page.bgTextColor, "", "非法文字色应回退（bgTextColor 置空）")
+            compare(String(cv.textColor), "#1a1a1a", "非法文字色应回退浅字 #1A1A1A")
+            loader.destroy()
+            // 路径 C：缺失值 → 回退浅色默认
+            Settings.setValue("background/textColor", "")
+            loader = readerComp.createObject(root)
+            loader.setSource("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: {} })
+            page = loader.item
+            cv = page.contentView
+            compare(page.bgTextColor, "", "缺失文字色应回退（bgTextColor 置空）")
+            compare(String(cv.textColor), "#1a1a1a", "缺失文字色应回退浅字 #1A1A1A")
+            loader.destroy()
+            // 路径 D：自定义色恢复但不污染其它模式
+            Settings.setValue("background/textColor", "#FFFFFF")
+            Settings.setValue("background/mode", "light")
+            loader = readerComp.createObject(root)
+            loader.setSource("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: {} })
+            page = loader.item
+            cv = page.contentView
+            compare(page.bgTextColor, "#FFFFFF", "light 模式仍恢复自定义色（仅存储）")
+            compare(String(cv.textColor), "#1a1a1a", "light 模式不被自定义色污染（默认深字）")
+            loader.destroy()
+            Settings.setValue("background/mode", "paper")
+            loader = readerComp.createObject(root)
+            loader.setSource("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: {} })
+            page = loader.item
+            compare(String(page.contentView.textColor), "#1a1a1a",
+                    "paper 模式不被自定义色污染（默认深字）")
+            loader.destroy()
+            Settings.setValue("background/mode", "dark")
+            loader = readerComp.createObject(root)
+            loader.setSource("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: {} })
+            page = loader.item
+            compare(String(page.contentView.textColor), "#e8e8e3",
+                    "dark 模式不被自定义色污染（默认浅字）")
+            loader.destroy()
+            // 清理
+            Settings.setValue("background/mode", "light")
+            Settings.setValue("background/textColor", "")
+        }
+
+        // ReaderPage 绑定：bgMode=dark → textColor #E8E8E3；light/paper → 深字；
+        // image → 自定义色（background/textColor 恢复值，bgTextColor 属性），
+        // 缺失/非法回退浅字；自定义色不污染其它模式（任务5）。
         function test_03_readerPageBgModeBinding() {
+            // 隔离：确保无残留自定义色（image 无自定义色 → 回退默认）
+            Settings.setValue("background/textColor", "")
             var loader = readerComp.createObject(root)
             loader.setSource("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: {} })
             var page = loader.item
@@ -145,12 +218,26 @@ Item {
             // paper（米白浅底）→ 深字
             page.bgMode = "paper"
             compare(String(cv.textColor), "#1a1a1a", "paper 背景 textColor 应为深字")
-            // image（自定义图片背景，内容区透明露出图片，按浅色处理）→ 深字
+            // image 且无自定义色 → 回退深字（浅色处理取舍）
             page.bgMode = "image"
-            compare(String(cv.textColor), "#1a1a1a", "image 背景 textColor 应为深字（浅色处理取舍）")
+            compare(String(cv.textColor), "#1a1a1a", "image 无自定义色时应回退深字 #1A1A1A")
             tryVerify(function () {
                 return String(root.paraEdit(cv, 0).color) === "#1a1a1a"
             }, 2000, "image 下纯文本段 TextEdit.color 应为 #1A1A1A")
+            // image + 合法自定义色（background/textColor 恢复值）→ 使用该色
+            page.bgTextColor = "#FFFFFF"
+            compare(String(cv.textColor), "#ffffff", "image 有自定义色时 textColor 应使用该色")
+            tryVerify(function () {
+                return String(root.paraEdit(cv, 0).color) === "#ffffff"
+                    && String(root.paraEdit(cv, 1).color) === "#ffffff"
+            }, 2000, "自定义色应同时注入纯文本与富文本段（TextEdit.color #FFFFFF）")
+            // 自定义色不污染其它模式：切 light/paper/dark 仍用各自默认色
+            page.bgMode = "light"
+            compare(String(cv.textColor), "#1a1a1a", "自定义色不应污染 light（默认深字）")
+            page.bgMode = "dark"
+            compare(String(cv.textColor), "#e8e8e3", "自定义色不应污染 dark（默认浅字）")
+            page.bgMode = "image"
+            compare(String(cv.textColor), "#ffffff", "回 image 应恢复自定义色")
             // E1：旧 eink 值在 ReaderPage 无分支 → 按浅底深字处理（textColor #1A1A1A）
             page.bgMode = "eink"
             compare(String(cv.textColor), "#1a1a1a", "旧 eink 值应回退浅底深字 #1A1A1A")

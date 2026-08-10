@@ -24,6 +24,10 @@ Page {
     property string bgImagePath: ""          // background/imagePath（图片背景）
     property real bgBlur: 0.0                // background/blur（0..1）
     property real bgBrightness: 1.0          // background/brightness（0.5..1.5）
+    // 任务5：自定义图片模式字体颜色（background/textColor 恢复值，白名单校验后的
+    // 规范串；非法/缺失为 ""）。仅 effectiveBg==="image" 时注入正文，其它模式沿用
+    // 各自默认文字色（不被自定义色污染）。
+    property string bgTextColor: ""
     // E4：翻页方式——"scroll"（竖滚连续，默认）/ "paged"（横翻整页）。
     // 由 Settings 的 reading/pageMode 读取（onCompleted），注入 ReaderContent
     // 驱动方向键分流与页边界吸附；设置页"阅读背景"卡可切换（写 reading/pageMode）。
@@ -124,7 +128,14 @@ Page {
         anchors.bottom: page.ttsBarVisible ? ttsBar.top : parent.bottom
         chapter: page.chapter
         typography: page.typography
-        textColor: page.effectiveBg === "dark" ? UITheme.darkTextPrimary : UITheme.lightTextPrimary
+        // 任务5：正文前景色——dark → Kindle 深色系浅字；image → 自定义字体颜色
+        //（background/textColor 恢复值，白名单校验后存于 page.bgTextColor，缺失/
+        // 非法为 "" 走浅色默认）；light/paper/eink 等 → 浅底深字。自定义色只在
+        // image 模式生效，不污染其它模式默认色。ReaderContent 的 TextEdit.color
+        // 作富文本文档默认前景，纯文本与富文本（无显式色 span）一致继承。
+        textColor: page.effectiveBg === "dark" ? UITheme.darkTextPrimary
+                 : (page.effectiveBg === "image" && page.bgTextColor
+                    ? page.bgTextColor : UITheme.lightTextPrimary)
         bookId: (page.book && page.book.id) || -1
         highlights: page.highlights
         chapterIndex: Books.currentChapter + 1
@@ -728,6 +739,10 @@ Page {
         page.bgBlur = Math.max(0, Math.min(1, blur))
         const bright = Number(Settings.value("background/brightness")) || 1.0
         page.bgBrightness = Math.max(0.5, Math.min(1.5, bright))
+        // 任务5：自定义图片模式字体颜色恢复——白名单校验（UITheme 安全色），
+        // 非法/缺失置空 → 注入绑定回退浅色默认；不回写存储值（仅显示/注入回退）
+        const tc = Settings.value("background/textColor")
+        page.bgTextColor = UITheme.isSafeImageTextColor(tc) ? UITheme.imageTextColorValue(tc) : ""
     }
 
     // B10：滚动偏移持久化（章节 + contentY 原子写入，恢复时先 loadChapter 再设 scrollY）

@@ -12,13 +12,17 @@ import Readdict.UI 1.0
 // 自定义图片经 FileDialog 选图 → Settings.copyToBackgrounds 复制到
 // AppData/backgrounds/ → background/imagePath + mode=image；模糊/亮度滑条即改即存
 // background/blur、background/brightness。E2：缩略图实时预览（bgThumb，MultiEffect
-// 同阅读页参数）。E4：翻页方式（竖滚连续 scroll / 整页翻动 paged）持久化
+// 同阅读页参数）。任务5：bgThumb 固定为小长方形卡片（220×120，始终可见），覆盖
+// 测试文本实时预览当前模式；仅 image 模式显示字体颜色预设（≥3 个安全色，白名单
+// 见 UITheme.imageTextColorPresets）→ 即时写 background/textColor，供 ReaderPage
+// 恢复注入正文。E4：翻页方式（竖滚连续 scroll / 整页翻动 paged）持久化
 // reading/pageMode。U5：单选改为 KdRadioGrid（○/● 网格，分析报告 §4）。
 // 返回：固定顶部"← 返回"（B4 模式）。
 // 测试/外部句柄：backButton、goBack()、bgGrid（背景四态 KdRadioGrid）、
-// bgBlurSlider/bgBrightnessSlider、bgThumb/bgThumbImg/bgThumbFx（缩略图预览）、
-// pageModeGrid（翻页方式）、bgImageHint、setBgMode/setBgBlur/setBgBrightness/
-// importBackgroundImage/restoreBackground。
+// bgBlurSlider/bgBrightnessSlider、bgThumb/bgThumbImg/bgThumbFx/bgThumbText
+// （缩略图预览 + 测试文本）、textColorSection/textColorGrid（字体颜色预设，
+// 仅 image 模式显示）、pageModeGrid（翻页方式）、bgImageHint、
+// setBgMode/setBgBlur/setBgBrightness/setTextColor/importBackgroundImage/restoreBackground。
 Page {
     id: page
     title: qsTr("阅读背景")
@@ -31,11 +35,21 @@ Page {
     property alias bgThumb: bgThumb
     property alias bgThumbImg: bgThumbImg
     property alias bgThumbFx: bgThumbFx
+    property alias bgThumbText: bgThumbText
+    property alias textColorSection: textColorSection
+    property alias textColorGrid: textColorGrid
     property alias bgImageHint: bgImageHint
     // 当前背景分区状态（onCompleted 从 Settings 恢复；导入后更新）
     property string bgImagePath: ""
     property real bgBlur: 0.0
     property real bgBrightness: 1.0
+    // 任务5：当前字体颜色（background/textColor 恢复值，白名单校验后的规范串；
+    // 非法/缺失为 ""）。thumbTextColor 为预览测试文本色——image 模式用所选色，
+    // 其它模式沿用各自默认文字色（不被自定义色污染，与 ReaderPage 注入语义一致）。
+    property string bgTextColor: ""
+    property color thumbTextColor: bgGrid.currentValue === "dark" ? UITheme.darkTextPrimary
+        : (bgGrid.currentValue === "image" ? UITheme.imageTextColorValue(page.bgTextColor)
+                                           : UITheme.lightTextPrimary)
 
     // 固定顶部：返回 + 页面标题（B4 返回导航位，同 SyncPage/StatsPage 模式）
     RowLayout {
@@ -118,21 +132,26 @@ Page {
                 nameFilters: ["图片 (*.png *.jpg *.jpeg *.webp *.bmp *.gif)"]
                 onAccepted: page.importBackgroundImage(bgFileDialog.selectedFiles[0])
             }
-            // E2：缩略图预览——选图后实时预览模糊/亮度效果，与 ReaderBackground 同
-            // MultiEffect 参数（blur 直通、brightness 换算 -1..1）。滑条移动经
-            // setBgBlur/setBgBrightness 同步 page.bgBlur/bgBrightness 作绑定源（实时联动）。
-            // 未选图整行隐藏；图片加载失败时效果层隐藏露出底色（不显示黑块，同阅读页兜底）。
+            // 任务5：自定义图片预览固定为小长方形卡片（220×120，始终可见）——
+            // 未选图时显示当前背景模式底色；image 模式叠加图片与 MultiEffect
+            // （blur 直通、brightness 换算 -1..1，与 ReaderBackground 同参数）。
+            // 卡片中央覆盖测试文本，颜色随当前模式文字色（image 模式 = 所选
+            // 字体颜色，非法/缺失回退浅色默认），实时预览阅读观感。
+            // 图片加载失败时效果层隐藏露出底色（不显示黑块，同阅读页兜底）。
             Rectangle {
                 id: bgThumb
-                visible: page.bgImagePath !== ""
-                Layout.fillWidth: true
-                Layout.preferredHeight: 135
+                Layout.alignment: Qt.AlignHCenter
+                Layout.preferredWidth: 220
+                Layout.preferredHeight: 120
                 radius: 6
-                color: UITheme.bgSecondary
+                color: bgGrid.currentValue === "dark" ? UITheme.darkBgPrimary
+                     : (bgGrid.currentValue === "paper" ? UITheme.lightBgPaper
+                                                        : UITheme.lightBgPrimary)
                 clip: true
                 Image {
                     id: bgThumbImg
                     anchors.fill: parent
+                    visible: bgGrid.currentValue === "image"
                     // 与 ReaderBackground 同源构造：本地绝对路径补 file://，防御重复前缀
                     source: page.bgImagePath
                             ? (page.bgImagePath.indexOf("file://") === 0
@@ -144,11 +163,43 @@ Page {
                 MultiEffect {
                     id: bgThumbFx
                     anchors.fill: parent
-                    visible: page.bgImagePath !== "" && bgThumbImg.status === Image.Ready
+                    visible: bgGrid.currentValue === "image"
+                             && bgThumbImg.status === Image.Ready
                     source: bgThumbImg
                     blurEnabled: true
                     blur: page.bgBlur
                     brightness: page.bgBrightness - 1.0   // MultiEffect 亮度范围 -1..1
+                }
+                Label {
+                    id: bgThumbText
+                    anchors.centerIn: parent
+                    text: qsTr("阅读测试文本 Aa 背景预览")
+                    color: page.thumbTextColor
+                    font.pixelSize: 16
+                }
+            }
+            // 任务5：字体颜色预设——仅 image 模式显示（≥3 个安全色，白名单
+            // UITheme.imageTextColorPresets）；选择即写 background/textColor 并
+            // 同步响应层（预览文本色随 thumbTextColor 实时联动）。
+            ColumnLayout {
+                id: textColorSection
+                visible: bgGrid.currentValue === "image"
+                spacing: 6
+                Label {
+                    text: qsTr("字体颜色")
+                    font.pixelSize: UITheme.fsCaption
+                    color: UITheme.textSecondary
+                }
+                KdRadioGrid {
+                    id: textColorGrid
+                    Layout.fillWidth: true
+                    columns: 4
+                    options: UITheme.imageTextColorPresets.map(p => ({ text: p.name, value: p.color }))
+                    // 恢复路径赋值 currentValue（不触发 selected → 不回写 Settings，
+                    // 同 bgGrid 恢复语义）；非法/缺失经 imageTextColorValue 归一为默认近黑
+                    currentValue: page.bgTextColor
+                                 ? page.bgTextColor : UITheme.imageTextColorValue("")
+                    onSelected: (v) => page.setTextColor(v)
                 }
             }
             RowLayout {
@@ -258,6 +309,13 @@ Page {
         Settings.setValue("background/mode", "image")
         Settings.setValue("background/imagePath", dest)
     }
+    // 任务5：字体颜色选择——白名单校验后即时持久化 background/textColor（仅
+    // image 模式可见的预设发出，双保险防手改属性绕过）并同步响应层（预览文本色联动）
+    function setTextColor(v) {
+        if (!UITheme.isSafeImageTextColor(v)) return
+        page.bgTextColor = UITheme.imageTextColorValue(v)
+        Settings.setValue("background/textColor", page.bgTextColor)
+    }
     // 启动恢复：从 Settings 读 background/ 分区应用到单选/滑条/路径（含钳制）
     function restoreBackground() {
         // L9（P2#33）：四态白名单归一抽至 BackgroundNorm（与 ReaderPage 共用）；
@@ -273,6 +331,12 @@ Page {
         page.bgBlur = Math.max(0, Math.min(1, blur))
         const bright = Number(Settings.value("background/brightness")) || 1.0
         page.bgBrightness = Math.max(0.5, Math.min(1.5, bright))
+        // 任务5：字体颜色恢复——白名单校验（非法/缺失置空 → 预设选中默认近黑、
+        // 预览文本色回退浅色默认；不回写存储值，非法值仅显示回退）
+        const tc = Settings.value("background/textColor")
+        page.bgTextColor = UITheme.isSafeImageTextColor(tc) ? UITheme.imageTextColorValue(tc) : ""
+        textColorGrid.currentValue = page.bgTextColor
+                                     ? page.bgTextColor : UITheme.imageTextColorValue("")
         // E4：翻页方式——reading/pageMode 白名单归一后选中对应单选
         //（程序化 currentValue 赋值不触发 selected，不会回写 Settings，同背景模式恢复）
         pageModeGrid.currentValue = Settings.value("reading/pageMode") === "paged" ? "paged" : "scroll"

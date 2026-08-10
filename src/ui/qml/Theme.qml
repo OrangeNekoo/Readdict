@@ -61,6 +61,42 @@ QtObject {
     readonly property color danger: "#C62828"       // 错误/失败文字（同步失败、TTS 错误、引擎不可用）
     readonly property color success: "#2E7D32"      // 成功文字（同步完成、引擎可用、试音成功）
 
+    // ============ 任务5：自定义图片背景的字体颜色预设（安全色白名单）============
+    // 自定义图片背景上正文前景色的可选项：仅 background/mode=image 时生效（其它
+    // 模式沿用各自默认文字色，不被本选择污染）；值经 Settings 的 background/textColor
+    // 持久化，ReaderPage/SettingsBackgroundPage 共用本白名单校验，非法/缺失回退
+    // 首个预设（近黑，即浅色默认 lightTextPrimary）。预设取黑白灰与米白等对常见
+    // 图片明暗均可达标的颜色；取值必须与 UITheme 既有 Token 同源（近黑=lightTextPrimary、
+    // 米白=lightBgPaper、浅灰=lightTextDisabled），避免同色不同值漂移。
+    readonly property var imageTextColorPresets: [
+        { name: qsTr("近黑"), color: "#1A1A1A" },
+        { name: qsTr("纯白"), color: "#FFFFFF" },
+        { name: qsTr("米白"), color: "#F5EFE0" },
+        { name: qsTr("浅灰"), color: "#BBBBBB" }
+    ]
+    // 是否合法（= 白名单内，大小写不敏感；undefined/null/空串/任意其它值非法）
+    function isSafeImageTextColor(value) {
+        if (value === undefined || value === null) return false
+        const s = String(value)
+        if (s.length === 0) return false
+        for (let i = 0; i < theme.imageTextColorPresets.length; ++i) {
+            if (String(theme.imageTextColorPresets[i].color).toLowerCase() === s.toLowerCase())
+                return true
+        }
+        return false
+    }
+    // 规范化：合法 → 返回白名单规范串（如 "#FFFFFF"）；非法/缺失 → 默认近黑
+    function imageTextColorValue(value) {
+        if (theme.isSafeImageTextColor(value)) {
+            const s = String(value).toLowerCase()
+            for (let i = 0; i < theme.imageTextColorPresets.length; ++i) {
+                if (String(theme.imageTextColorPresets[i].color).toLowerCase() === s)
+                    return theme.imageTextColorPresets[i].color
+            }
+        }
+        return theme.imageTextColorPresets[0].color
+    }
+
     // ================= 解析到当前深浅的 Token（页面引用这些）=================
     readonly property color bgPrimary: isDark ? darkBgPrimary : lightBgPrimary
     readonly property color bgSecondary: isDark ? darkBgSecondary : lightBgSecondary
