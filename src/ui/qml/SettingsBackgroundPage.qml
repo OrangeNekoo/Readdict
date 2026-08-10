@@ -36,6 +36,8 @@ Page {
     property alias bgThumbImg: bgThumbImg
     property alias bgThumbFx: bgThumbFx
     property alias bgThumbText: bgThumbText
+    // 审查修复：暴露滚动容器句柄（窄窗口水平可达性断言）
+    property alias bgScroll: bgScroll
     property alias textColorSection: textColorSection
     property alias textColorGrid: textColorGrid
     property alias bgImageHint: bgImageHint
@@ -85,11 +87,18 @@ Page {
         anchors.bottomMargin: 24
         anchors.topMargin: 12
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+        // 审查修复：窄窗口水平可达策略——内容超出视口时出现横向滚动条，
+        // 固定尺寸卡片不因裁剪而不可达（ScrollView 对 Layout 子项按隐式尺寸
+        // 计算 contentWidth，故列宽下限取 implicitWidth 保证可达）。
+        ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
         ColumnLayout {
             width: Math.max(0, bgScroll.width
-                                - bgScroll.leftPadding - bgScroll.rightPadding)
+                                - bgScroll.leftPadding - bgScroll.rightPadding,
+                            implicitWidth)
             spacing: 14
-            // 使用实际视口宽度，避免 availableWidth 初始为 0 导致内容坍缩。
+            // 使用实际视口宽度，避免 availableWidth 初始为 0 导致内容坍缩；
+            // 下限 implicitWidth 使窄窗口内容保持隐式宽度（≥ 固定卡片 220），
+            // 由横向滚动条水平可达。
 
             // 背景四态单选（浅/深/米白/自定义图片）——KdRadioGrid ○/● 网格
             Label {
@@ -141,8 +150,13 @@ Page {
             Rectangle {
                 id: bgThumb
                 Layout.alignment: Qt.AlignHCenter
-                Layout.preferredWidth: 220
-                Layout.preferredHeight: 120
+                // 审查修复：min/max 同值 = 硬固定 220×120，窄窗口不被压缩；
+                // 同时恒定贡献给 ColumnLayout 隐式宽度 → ScrollView
+                // contentWidth ≥ 220，卡片始终水平可达（不裁剪）。
+                Layout.minimumWidth: 220
+                Layout.maximumWidth: 220
+                Layout.minimumHeight: 120
+                Layout.maximumHeight: 120
                 radius: 6
                 color: bgGrid.currentValue === "dark" ? UITheme.darkBgPrimary
                      : (bgGrid.currentValue === "paper" ? UITheme.lightBgPaper

@@ -40,6 +40,14 @@ Item {
         id: testCase
         name: "TextColorSmoke"
 
+        // 审查修复：任务5 用例级 cleanup——失败路径也复位背景分区，避免污染
+        // Settings（background/mode、imagePath、textColor 为任务5读写键）。
+        function cleanup() {
+            Settings.setValue("background/mode", "light")
+            Settings.setValue("background/imagePath", "")
+            Settings.setValue("background/textColor", "")
+        }
+
         // 默认浅色：ReaderContent.textColor 默认深字（Token #1A1A1A），段落 TextEdit.color 跟随
         function test_01_defaultLight() {
             var loader = contentComp.createObject(root)

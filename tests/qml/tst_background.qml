@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtTest
 import Readdict.Backend
 import Readdict.Test 1.0
@@ -25,6 +26,15 @@ Item {
     TestCase {
         id: testCase
         name: "BackgroundSmoke"
+
+        // 审查修复：用例级 cleanup——测试失败路径也复位背景分区，避免污染
+        // Settings（background/mode、imagePath、textColor 为任务5读写键），
+        // 保证用例间/套件间隔离。
+        function cleanup() {
+            Settings.setValue("background/mode", "light")
+            Settings.setValue("background/imagePath", "")
+            Settings.setValue("background/textColor", "")
+        }
 
         // ReaderBackground 子项布局：children[0]=底色 Rectangle，[1]=Image，[2]=MultiEffect
         function test_01_copyImage() {
@@ -377,6 +387,45 @@ Item {
             Settings.setValue("background/mode", "light")
             Settings.setValue("background/imagePath", "")
             Settings.setValue("background/textColor", "")
+        }
+
+        // 审查修复：窄窗口下预览卡片保持固定 220×120（min/max 硬约束不被
+        // 压缩），且父 ScrollView 水平可达——contentWidth 覆盖卡片右缘、
+        // 内容宽于视口、横向滚动条策略非 AlwaysOff（内容不裁剪）。
+        function test_09_narrowWindowFixedThumb() {
+            // 路径 A：宽窗口创建后缩到窄窗口（审查复现场景）
+            var loader = bgSettingsComp.createObject(root)
+            loader.width = 1100; loader.height = 720
+            var page = loader.item
+            verify(page !== null, "SettingsBackgroundPage 应能加载")
+            wait(50)
+            loader.width = 240
+            wait(50)
+            compare(page.bgThumb.width, 220, "窄窗口下预览宽应保持固定 220，实际 "
+                   + page.bgThumb.width)
+            compare(page.bgThumb.height, 120, "窄窗口下预览高应保持固定 120，实际 "
+                   + page.bgThumb.height)
+            verify(page.bgThumb.visible, "窄窗口下预览卡片仍应可见")
+            verify(page.bgScroll.contentWidth >= page.bgThumb.x + page.bgThumb.width,
+                   "横向内容宽度应覆盖卡片右缘（水平可达）：contentWidth="
+                   + page.bgScroll.contentWidth + " 卡片右缘="
+                   + (page.bgThumb.x + page.bgThumb.width))
+            verify(page.bgScroll.contentWidth > page.bgScroll.width,
+                   "窄窗口内容应宽于视口（可横向滚动）：contentWidth="
+                   + page.bgScroll.contentWidth + " 视口=" + page.bgScroll.width)
+            verify(page.bgScroll.ScrollBar.horizontal.policy !== ScrollBar.AlwaysOff,
+                   "横向滚动条策略应允许滚动（非 AlwaysOff）")
+            loader.destroy()
+            // 路径 B：直接以窄窗口创建
+            loader = bgSettingsComp.createObject(root)
+            loader.width = 240; loader.height = 720
+            page = loader.item
+            wait(80)
+            compare(page.bgThumb.width, 220, "直接窄窗口创建宽应仍为 220，实际 "
+                   + page.bgThumb.width)
+            compare(page.bgThumb.height, 120, "直接窄窗口创建高应仍为 120，实际 "
+                   + page.bgThumb.height)
+            loader.destroy()
         }
     }
 }

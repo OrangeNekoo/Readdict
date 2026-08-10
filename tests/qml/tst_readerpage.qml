@@ -20,6 +20,14 @@ Item {
     TestCase {
         name: "ReaderNavSmoke"
 
+        // 审查修复：任务5 用例级 cleanup——失败路径也复位背景分区，避免污染
+        // Settings（background/mode、imagePath、textColor 为任务5读写键）。
+        function cleanup() {
+            Settings.setValue("background/mode", "light")
+            Settings.setValue("background/imagePath", "")
+            Settings.setValue("background/textColor", "")
+        }
+
         function initTestCase() {
             Books.doSearch("")
             Books.setFilter("")
