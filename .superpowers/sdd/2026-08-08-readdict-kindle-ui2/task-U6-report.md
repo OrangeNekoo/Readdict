@@ -104,11 +104,11 @@
 
 **结论**：主题语义色零残留——活动代码无 `Material.primary/Material.accent/#3D5AFE/#536DFE`（仅 BookCard.qml:95、StatsPage.qml:158 注释记录"已移除"），也无游离的通用文字/背景色。非 Theme.qml（Token 定义源）/ReaderBackground.qml（Token 引用处）之外的活动 hex 均属**允许的功能色 / 组件内部明暗常量 / 遮罩投影浮层常量**，逐项列明如下，不做笼统豁免。
 
-### 4.1 六位 hex（#RRGGBB）逐项——非 Theme/ReaderBackground 的活动代码值
+### 4.1 六位值扫描与处理记录（含已收编项）
 
 | 位置 | 值 | 用途 | 处理状态 |
 |---|---|---|---|
-| PdfReaderPage.qml:100（注释 99 记录审计） | #1A1A1A | PDF 页顶栏标题文字 | **已替换** → `UITheme.lightTextPrimary`（同值），并补 `import Readdict.UI 1.0`（9b37274 收编）——当前代码零残留 |
+| PdfReaderPage.qml:100（注释 99 记录审计） | #1A1A1A | PDF 页顶栏标题文字 | **历史处理记录**：9b37274 已替换为 `UITheme.lightTextPrimary`（同值）并补 `import Readdict.UI 1.0`——当前代码零残留，不计入活动值 |
 | TtsBar.qml:26 | #E6E6E6 / #1A1A1A | 朗读条前景文字（明/暗两态） | 组件明暗前景常量：随自身 bgMode 三元选择；#1A1A1A 与 lightTextPrimary 同值但属组件内部配色，非主题语义色 |
 | ReaderContent.qml:71 | #FFD54F | TTS 朗读游标高亮黄 | 功能色（朗读会话指示），C5 设计 |
 | ReaderContent.qml:87-89 | #FFEB3B / #A5D6A7 / #F8BBD0 | 划线色板黄/绿/粉 | 用户功能色板，C7 设计 |
