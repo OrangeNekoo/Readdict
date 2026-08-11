@@ -41,9 +41,14 @@ target_link_libraries(tst_settings PRIVATE Qt6::Test)
 add_test(NAME tst_settings COMMAND tst_settings)
 
 # 便携数据目录：路径解析（Windows/macOS/Linux 可注入参数）+ 目录准备 + Windows 旧数据迁移
+# + Windows 权限不足 UAC 提权（helper 命令构造/非 Windows 分支在 macOS 覆盖；ShellExecuteExW 仅 Windows 编译）
 qt_add_executable(tst_portabledata tst_portabledata.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/PortableData.cpp)
 target_include_directories(tst_portabledata PRIVATE ../src)
 target_link_libraries(tst_portabledata PRIVATE Qt6::Test)
+if(WIN32)
+    # PortableData.cpp 的 UAC 提权路径调用 ShellExecuteExW（shell32）
+    target_link_libraries(tst_portabledata PRIVATE shell32)
+endif()
 add_test(NAME tst_portabledata COMMAND tst_portabledata)
 
 # C8：FTS5 全文搜索（SearchEngine）

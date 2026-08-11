@@ -131,6 +131,10 @@ target_link_libraries(Readdict PRIVATE
     Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Sql Qt6::Network Qt6::Pdf Qt6::TextToSpeech Qt6::Multimedia
     MINIZIP::minizipstatic mobi zlibstatic
 )
+# Windows UAC 提权 helper（PortableData.cpp 的 ShellExecuteExW）需要 shell32
+if(WIN32)
+    target_link_libraries(Readdict PRIVATE shell32)
+endif()
 # TextParser 的 GB18030 解码走系统 iconv；macOS 的 iconv 在 libiconv.dylib 中需显式链接
 if(APPLE)
     target_link_libraries(Readdict PRIVATE iconv)

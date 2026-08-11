@@ -93,6 +93,30 @@ static QString resolveStartupLanguage(const SettingsStore &settings) {
 }
 
 int main(int argc, char *argv[]) {
+#if defined(Q_OS_WIN)
+    // Windows 提权 helper 专用模式（最小权限原则，见 PortableData.h）：
+    // 只执行旧数据迁移 + 目录准备后退出，不创建 QGuiApplication、不注册任何
+    // QML 单例；绝不调用 prepareWithElevation（防 UAC 递归）。
+    // 参数固定为 { --prepare-data <path> }；其他形态由 runElevationHelper 拒绝。
+    const QStringList helperArgs = [&] {
+        QStringList l;
+        for (int i = 1; i < argc; ++i)
+            l << QString::fromUtf8(argv[i]); // qtmain 已将宽命令行转为 UTF-8
+        return l;
+    }();
+    if (!helperArgs.isEmpty()
+        && helperArgs.first() == QStringLiteral("--prepare-data")) {
+        QCoreApplication helperApp(argc, argv);
+        helperApp.setApplicationName("Readdict");
+        helperApp.setOrganizationName("Readdict");
+        PortableDataStore::Params dp;
+        dp.applicationDirPath = QCoreApplication::applicationDirPath();
+        dp.appDataLocation =
+            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        return PortableDataStore::runElevationHelper(helperArgs, dp);
+    }
+#endif
+
     QGuiApplication app(argc, argv);
     QQuickStyle::setStyle("Material");
     app.setApplicationName("Readdict");
@@ -124,8 +148,24 @@ int main(int argc, char *argv[]) {
     //（最小权限原则：不以管理员/root 重启整个 GUI，不静默改写其他目录）。
     const QString prepareErr = PortableDataStore::prepareDataDir(dataDir);
     if (!prepareErr.isEmpty()) {
+#if defined(Q_OS_WIN)
+        // Windows：目标目录权限不足时，经一次性最小范围 helper + UAC 提权
+        //（只做迁移/目录准备，成功后普通进程继续使用同一 dataDir）。
+        const auto elev = PortableDataStore::prepareWithElevation(
+            dataDir, QCoreApplication::applicationFilePath(),
+            PortableDataStore::isRunningElevated());
+        if (!elev.success) {
+            qCritical().noquote() << "数据目录准备失败，停止启动:"
+                                  << (elev.error.isEmpty() ? prepareErr : elev.error);
+            return 1;
+        }
+        if (elev.elevated)
+            qInfo().noquote() << "数据目录已通过提权 helper 准备完成:" << dataDir;
+#else
+        // macOS/Linux：不自动提权（不调 sudo/root），显示明确错误和实际路径后停止启动。
         qCritical().noquote() << "数据目录准备失败，停止启动:" << prepareErr;
         return 1;
+#endif
     }
 
     loadBundledFonts();

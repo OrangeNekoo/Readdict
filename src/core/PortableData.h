@@ -46,6 +46,43 @@ public:
     // 否则为可读错误。源目录保留、不修改。macOS/Linux 传空 legacyAppData 即跳过。
     static QString migrateFromLegacy(const QString &legacyAppData, const QString &dataDir);
 
+    // ---- Windows 权限不足自动提权（最小权限 helper，见设计文档“权限处理”）----
+
+    // prepareWithElevation 的结果。
+    struct ElevationResult {
+        bool elevated = false;  // 本次调用是否发起了 UAC 提权
+        bool success = false;   // 调用后 dataDir 可用（无需提权即已可用，或提权后复检通过）
+        QString error;          // 失败原因（success 时为空）
+    };
+
+    // prepareDataDir 的错误是否疑似权限不足（提权决策依据）：匹配已知权限措辞，
+    // 否则检查 dataDir/父目录实际可写性。
+    static bool isPermissionError(const QString &error, const QString &dataDir);
+
+    // 构造 Windows 提权 helper 的命令行参数（仅接受目标目录，不接受任意命令）：
+    // 返回 { "--prepare-data", <按 CommandLineToArgvW 规则转义的路径> }。
+    static QStringList prepareCommand(const QString &dataDir);
+
+    // 一次性目录准备/迁移（含提权）：先以普通权限 prepareDataDir；仅当失败疑似
+    // 权限不足且 !alreadyElevated 时，Windows 以 ShellExecuteExW 的 verb `runas`
+    // 调起自身 helper（executablePath --prepare-data <dataDir>），等待退出并复检
+    // 可写性。macOS/Linux 返回明确的“不支持自动提权”错误，绝不调用 sudo/root。
+    // helper 模式（runElevationHelper）绝不再次提权。
+    static ElevationResult prepareWithElevation(const QString &dataDir,
+                                                const QString &executablePath,
+                                                bool alreadyElevated);
+
+    // Windows 提权 helper 专用入口：参数固定为 { "--prepare-data", <path> } 时执行
+    // 旧数据迁移 + 目录准备并返回退出码（0=成功；1=准备/迁移失败；2=参数形态错误；
+    // 3=路径被拒绝）。不启动 GUI、不注册 QML 单例、绝不再次提权（防 UAC 递归）。
+    // Params 供测试注入（生产传启动时解析的 dp，Windows legacy 用 appDataLocation）。
+    static int runElevationHelper(const QStringList &args, const Params &p);
+
+#if defined(Q_OS_WIN)
+    // 当前进程是否已以管理员权限运行（仅 Windows 定义；用于防二次 UAC 递归）。
+    static bool isRunningElevated();
+#endif
+
     static QString settingsFileName() { return QStringLiteral("settings.json"); }
     static QString dbFileName() { return QStringLiteral("Readdict.db"); }
 

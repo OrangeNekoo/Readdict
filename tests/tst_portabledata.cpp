@@ -203,6 +203,210 @@ private slots:
         QVERIFY(!QDir(dataDir).exists());                         // 无事发生
         QVERIFY(!QDir(tmp.path() + "/data.migrating").exists());
     }
+
+    // ---- 权限不足自动提权（Windows 运行时特性；本机覆盖非 Windows 分支与命令构造）----
+    void isPermissionErrorTrueForUnwritableParent() {
+        QTemporaryDir tmp;
+        const QString dataDir = tmp.path() + "/data";
+        // 父目录只读 → 创建 dataDir 必然失败，属权限错误
+        QVERIFY(QFile::setPermissions(tmp.path(),
+            QFileDevice::ReadOwner | QFileDevice::ExeOwner
+            | QFileDevice::ReadGroup | QFileDevice::ExeGroup
+            | QFileDevice::ReadOther | QFileDevice::ExeOther));
+        const QString err = PortableDataStore::prepareDataDir(dataDir);
+        QVERIFY(!err.isEmpty());
+        QVERIFY2(PortableDataStore::isPermissionError(err, dataDir),
+                 qPrintable(QStringLiteral("期望权限错误，实际错误: ") + err));
+        // 恢复权限，保证 QTemporaryDir 能清理
+        QFile::setPermissions(tmp.path(),
+            QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner
+            | QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup
+            | QFileDevice::ReadOther | QFileDevice::WriteOther | QFileDevice::ExeOther);
+    }
+
+    void isPermissionErrorTrueForUnwritableExistingDir() {
+        QTemporaryDir tmp;
+        const QString dataDir = tmp.path() + "/data";
+        QVERIFY(QDir().mkpath(dataDir));
+        // 目录已存在但只读 → 子目录创建失败属权限错误
+        QVERIFY(QFile::setPermissions(dataDir,
+            QFileDevice::ReadOwner | QFileDevice::ExeOwner
+            | QFileDevice::ReadGroup | QFileDevice::ExeGroup
+            | QFileDevice::ReadOther | QFileDevice::ExeOther));
+        const QString err = PortableDataStore::prepareDataDir(dataDir);
+        QVERIFY(!err.isEmpty());
+        QVERIFY2(PortableDataStore::isPermissionError(err, dataDir),
+                 qPrintable(QStringLiteral("期望权限错误，实际错误: ") + err));
+        QFile::setPermissions(dataDir,
+            QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner
+            | QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup
+            | QFileDevice::ReadOther | QFileDevice::WriteOther | QFileDevice::ExeOther);
+    }
+
+    void isPermissionErrorFalseForPathIsFile() {
+        QTemporaryDir tmp;
+        const QString dataDir = tmp.path() + "/data";
+        writeFile(dataDir, "not-a-dir");                          // 被文件占据：非权限问题
+        const QString err = PortableDataStore::prepareDataDir(dataDir);
+        QVERIFY(!err.isEmpty());
+        QVERIFY(!PortableDataStore::isPermissionError(err, dataDir));
+    }
+
+    void prepareCommandPlainPathUnquoted() {
+        const QStringList cmd =
+            PortableDataStore::prepareCommand(QStringLiteral("F:/Readdict/data"));
+        QCOMPARE(cmd.size(), 2);
+        QCOMPARE(cmd.at(0), QStringLiteral("--prepare-data"));
+        QCOMPARE(cmd.at(1), QStringLiteral("F:/Readdict/data"));  // 无空白/引号 → 不加引号
+    }
+
+    void prepareCommandQuotesPathWithSpaces() {
+        const QStringList cmd = PortableDataStore::prepareCommand(
+            QStringLiteral("C:/Program Files/Readdict/data"));
+        QCOMPARE(cmd.at(1), QStringLiteral("\"C:/Program Files/Readdict/data\""));
+    }
+
+    void prepareCommandEscapesEmbeddedQuote() {
+        const QStringList cmd = PortableDataStore::prepareCommand(
+            QStringLiteral("C:/foo\"bar/data"));
+        QCOMPARE(cmd.at(1), QStringLiteral("\"C:/foo\\\"bar/data\""));
+    }
+
+    void prepareCommandBackslashOnlyPathStaysUnquoted() {
+        const QStringList cmd = PortableDataStore::prepareCommand(
+            QStringLiteral("C:\\Readdict\\data\\"));
+        // CommandLineToArgvW：无空白/引号时反斜杠原样保留，无需引号即可安全往返
+        QCOMPARE(cmd.at(1), QStringLiteral("C:\\Readdict\\data\\"));
+    }
+
+    void prepareCommandDoublesTrailingBackslashesWhenQuoted() {
+        const QStringList cmd = PortableDataStore::prepareCommand(
+            QStringLiteral("C:\\Program Files\\Readdict\\data\\"));
+        // 含空白必须加引号；收尾引号前的反斜杠按 CommandLineToArgvW 规则翻倍
+        QCOMPARE(cmd.at(1), QStringLiteral("\"C:\\Program Files\\Readdict\\data\\\\\""));
+    }
+
+    void elevateNormalPathDoesNotElevate() {
+        QTemporaryDir tmp;
+        const QString dataDir = tmp.path() + "/data";
+        const auto r = PortableDataStore::prepareWithElevation(
+            dataDir, QStringLiteral("/nonexistent/Readdict.exe"), false);
+        QVERIFY(r.success);
+        QVERIFY(!r.elevated);                                     // 普通路径不提权
+        QVERIFY(r.error.isEmpty());
+        QVERIFY(QDir(dataDir + "/books").exists());
+    }
+
+    void elevateNonPermissionErrorDoesNotElevate() {
+        QTemporaryDir tmp;
+        const QString dataDir = tmp.path() + "/data";
+        writeFile(dataDir, "not-a-dir");                          // 非权限错误 → 不提权
+        const auto r = PortableDataStore::prepareWithElevation(
+            dataDir, QStringLiteral("C:/Readdict/Readdict.exe"), false);
+        QVERIFY(!r.success);
+        QVERIFY(!r.elevated);
+        QVERIFY(r.error.contains(dataDir));
+    }
+
+    void elevateNonWindowsReturnsUnsupported() {
+        if (PortableDataStore::currentPlatform() == PortableDataStore::Platform::Windows)
+            QSKIP("UAC 提权为 Windows 运行时特性，不在本机触发");
+        QTemporaryDir tmp;
+        const QString dataDir = tmp.path() + "/data";
+        QVERIFY(QFile::setPermissions(tmp.path(),
+            QFileDevice::ReadOwner | QFileDevice::ExeOwner
+            | QFileDevice::ReadGroup | QFileDevice::ExeGroup
+            | QFileDevice::ReadOther | QFileDevice::ExeOther));
+        const auto r = PortableDataStore::prepareWithElevation(
+            dataDir, QStringLiteral("C:/Readdict/Readdict.exe"), false);
+        QVERIFY(!r.success);
+        QVERIFY(!r.elevated);
+        QVERIFY2(r.error.contains(QStringLiteral("不支持自动提权")),
+                 qPrintable(QStringLiteral("期望不支持自动提权，实际: ") + r.error));
+        QVERIFY(r.error.contains(dataDir));
+        QFile::setPermissions(tmp.path(),
+            QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner
+            | QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup
+            | QFileDevice::ReadOther | QFileDevice::WriteOther | QFileDevice::ExeOther);
+    }
+
+    void elevateAlreadyElevatedDoesNotElevateAgain() {
+        if (PortableDataStore::currentPlatform() == PortableDataStore::Platform::Windows)
+            QSKIP("UAC 提权为 Windows 运行时特性，不在本机触发");
+        QTemporaryDir tmp;
+        const QString dataDir = tmp.path() + "/data";
+        QVERIFY(QFile::setPermissions(tmp.path(),
+            QFileDevice::ReadOwner | QFileDevice::ExeOwner
+            | QFileDevice::ReadGroup | QFileDevice::ExeGroup
+            | QFileDevice::ReadOther | QFileDevice::ExeOther));
+        const auto r = PortableDataStore::prepareWithElevation(
+            dataDir, QStringLiteral("C:/Readdict/Readdict.exe"), true);
+        QVERIFY(!r.success);
+        QVERIFY(!r.elevated);
+        QVERIFY2(r.error.contains(QStringLiteral("提权进程")),
+                 qPrintable(QStringLiteral("期望拒绝二次提权，实际: ") + r.error));
+        QFile::setPermissions(tmp.path(),
+            QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner
+            | QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup
+            | QFileDevice::ReadOther | QFileDevice::WriteOther | QFileDevice::ExeOther);
+    }
+
+    void helperPreparesDir() {
+        QTemporaryDir tmp;
+        PortableDataStore::Params p;
+        p.platform = PortableDataStore::Platform::Windows;
+        p.appDataLocation = tmp.path() + "/legacy_appdata";       // 不存在 → 迁移跳过
+        const QString dataDir = tmp.path() + "/data";
+        QCOMPARE(PortableDataStore::runElevationHelper(
+                     { QStringLiteral("--prepare-data"), dataDir }, p), 0);
+        QVERIFY(QDir(dataDir + "/books").exists());
+        QVERIFY(QDir(dataDir + "/covers").exists());
+        QVERIFY(QDir(dataDir + "/backgrounds").exists());
+    }
+
+    void helperMigratesLegacyData() {
+        QTemporaryDir tmp;
+        const QString legacy = makeLegacyAppData(tmp.path());
+        PortableDataStore::Params p;
+        p.platform = PortableDataStore::Platform::Windows;
+        p.appDataLocation = legacy;
+        const QString dataDir = tmp.path() + "/data";
+        QCOMPARE(PortableDataStore::runElevationHelper(
+                     { QStringLiteral("--prepare-data"), dataDir }, p), 0);
+        QVERIFY(QFile::exists(dataDir + "/settings.json"));
+        QVERIFY(QFile::exists(dataDir + "/Readdict.db"));
+        QVERIFY(QFile::exists(dataDir + "/books/a.epub"));
+        QVERIFY(QFile::exists(dataDir + "/.readdict_migrated"));  // 迁移标记
+        QVERIFY(QFile::exists(legacy + "/settings.json"));        // 源数据保留
+    }
+
+    void helperRejectsTraversal() {
+        QTemporaryDir tmp;
+        PortableDataStore::Params p;
+        p.platform = PortableDataStore::Platform::Windows;
+        const QString evil = tmp.path() + "/../helper-evil";      // 目录穿越
+        QCOMPARE(PortableDataStore::runElevationHelper(
+                     { QStringLiteral("--prepare-data"), evil }, p), 3);
+        QVERIFY(!QDir(QDir::cleanPath(evil)).exists());
+    }
+
+    void helperRejectsRelativePath() {
+        PortableDataStore::Params p;
+        QCOMPARE(PortableDataStore::runElevationHelper(
+                     { QStringLiteral("--prepare-data"), QStringLiteral("data/books") }, p), 3);
+    }
+
+    void helperRejectsBadArgs() {
+        PortableDataStore::Params p;
+        QCOMPARE(PortableDataStore::runElevationHelper({}, p), 2);
+        QCOMPARE(PortableDataStore::runElevationHelper(
+                     { QStringLiteral("--prepare-data") }, p), 2);
+        QCOMPARE(PortableDataStore::runElevationHelper(
+                     { QStringLiteral("--prepare-data"), QStringLiteral("/tmp/x"),
+                       QStringLiteral("extra") }, p), 2);
+        QCOMPARE(PortableDataStore::runElevationHelper(
+                     { QStringLiteral("--some-other-flag"), QStringLiteral("/tmp/x") }, p), 2);
+    }
 };
 
 QTEST_MAIN(TestPortableData)
