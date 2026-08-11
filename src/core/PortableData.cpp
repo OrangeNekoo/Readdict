@@ -5,6 +5,7 @@
 #include <QFileInfo>
 #include <QIODevice>
 #include <QStandardPaths>
+#include <QTemporaryFile>
 
 #include <cerrno>
 
@@ -15,9 +16,28 @@
 
 namespace {
 
+// 是否“链接类”条目（符号链接 / Windows 重解析点、junction、挂载点）。
+// 迁移递归复制与回滚删除都必须拒绝这类条目：跟随它们会越界读写/删除
+// 目标树之外的路径（helper 越界的安全边界）。
+bool isLinkLike(const QFileInfo &fi) {
+    if (fi.isSymbolicLink())
+        return true;
+#if defined(Q_OS_WIN)
+    if (fi.isReparsePoint())
+        return true;
+#endif
+    return false;
+}
+
 // 递归复制 src → dst（合并语义：目标已存在则先移除再复制）。返回空串=成功。
+// 安全边界：源与目标路径上的所有条目（含递归子项）若为符号链接/重解析点
+// 一律拒绝——既不跟随源越界读取，也不跟随目标越界写入。
 QString copyRecursively(const QString &src, const QString &dst) {
     const QFileInfo si(src);
+    if (isLinkLike(si))
+        return QStringLiteral("源为符号链接/重解析点，拒绝复制: %1").arg(src);
+    if (isLinkLike(QFileInfo(dst)))
+        return QStringLiteral("目标为符号链接/重解析点，拒绝写入: %1").arg(dst);
     if (si.isDir()) {
         if (!QDir().mkpath(dst))
             return QStringLiteral("无法创建目录: %1").arg(dst);
@@ -38,9 +58,20 @@ QString copyRecursively(const QString &src, const QString &dst) {
     return {};
 }
 
+// 安全删除目录树：路径为符号链接/重解析点时拒绝跟随（绝不越界删除目标）。
+QString removeTreeSafely(const QString &path) {
+    if (isLinkLike(QFileInfo(path)))
+        return QStringLiteral("拒绝删除符号链接/重解析点: %1").arg(path);
+    QDir(path).removeRecursively();
+    return {};
+}
+
 // 删除单个条目（文件或目录树），供迁移合并失败回滚使用。
+// 链接类条目直接拒绝（不跟随、不越界删除目标树）。
 void removeEntry(const QString &path) {
     const QFileInfo fi(path);
+    if (isLinkLike(fi))
+        return;
     if (fi.isDir())
         QDir(path).removeRecursively();
     else if (fi.exists())
@@ -211,9 +242,15 @@ QString PortableDataStore::resolveDataDir(const PortableDataStore::Params &p) {
         QString base = p.xdgDataHome;
         if (base.isEmpty())
             base = qEnvironmentVariable("XDG_DATA_HOME");
-        if (base.isEmpty())
+        // XDG Base Directory 规格要求 XDG_DATA_HOME 为绝对路径；相对值一律拒绝，
+        // 回退默认 ~/.local/share/Readdict，绝不产出相对 dataDir。
+        if (base.isEmpty() || !QDir::isAbsolutePath(base)) {
+            if (!base.isEmpty())
+                qWarning().noquote() << "XDG_DATA_HOME 非绝对路径，回退默认目录:"
+                                     << base;
             base = (p.homeDir.isEmpty() ? QDir::homePath() : p.homeDir)
                    + QStringLiteral("/.local/share");
+        }
         return QDir::cleanPath(base + QStringLiteral("/Readdict"));
     }
     }
@@ -235,6 +272,18 @@ QString PortableDataStore::prepareDataDir(const QString &dataDir) {
                 .arg(root.filePath(sub), perm ? QStringLiteral("（权限不足）") : QString());
         }
     }
+    // 写探针：目录/子目录已存在时 mkpath 会静默成功，无法发现已有目录 ACL 不可写
+    // （此时若不探针，prepareDataDir 误报成功 → Windows UAC 提权决策无法触发）。
+    // 在 dataDir 内创建唯一临时文件并实际写入一个字节，成功即删除；失败判权限错误。
+    QTemporaryFile probe(dataDir + QStringLiteral("/.readdict_probe_XXXXXX"));
+    probe.setAutoRemove(true);
+    if (!probe.open()) {
+        const bool perm = isPermissionErrno(errno) || pathLooksUnwritable(dataDir);
+        return QStringLiteral("无法写入数据目录: %1%2")
+            .arg(dataDir, perm ? QStringLiteral("（权限不足）") : QString());
+    }
+    probe.write("p", 1);
+    probe.close(); // QTemporaryFile 自动删除探针文件
     return {};
 }
 
@@ -268,14 +317,18 @@ QString PortableDataStore::migrateFromLegacy(const QString &legacyAppData, const
     // 临时目录 + 完成标记：先完整复制到 <data 父目录>/data.migrating/
     const QString staging =
         QFileInfo(dataDir).dir().filePath(QStringLiteral("data.migrating"));
-    QDir(staging).removeRecursively(); // 清理上次失败残留（仅固定名 staging）
+    // 暂存根目录本身若为符号链接/重解析点，mkpath/复制会跟随并写入链接目标
+    // （越界写）——先拒绝，绝不在链接目录上作业。
+    if (isLinkLike(QFileInfo(staging)))
+        return QStringLiteral("迁移暂存目录为符号链接/重解析点，拒绝使用: %1").arg(staging);
+    removeTreeSafely(staging); // 清理上次失败残留（仅固定名 staging，安全拒绝链接）
     if (!QDir().mkpath(staging))
         return QStringLiteral("无法创建迁移暂存目录: %1").arg(staging);
     for (const QString &name : sources) {
         const QString err = copyRecursively(legacy.filePath(name),
                                             staging + QLatin1Char('/') + name);
         if (!err.isEmpty()) {
-            QDir(staging).removeRecursively();
+            removeTreeSafely(staging);
             return QStringLiteral("旧数据迁移失败（%1）: %2").arg(name, err);
         }
     }
@@ -283,7 +336,7 @@ QString PortableDataStore::migrateFromLegacy(const QString &legacyAppData, const
     // 必需内容全部复制成功 → 合并到 dataDir。任一项失败回滚本次已合并项：
     // dataDir 回到“无有效数据”状态，保证可重试（无残留污染、不产生完成标记）。
     if (!QDir().mkpath(dataDir)) {
-        QDir(staging).removeRecursively();
+        removeTreeSafely(staging);
         return QStringLiteral("无法创建数据目录: %1").arg(dataDir);
     }
     QStringList merged;
@@ -293,17 +346,21 @@ QString PortableDataStore::migrateFromLegacy(const QString &legacyAppData, const
         if (!err.isEmpty()) {
             for (const QString &done : merged)
                 removeEntry(dataDir + QLatin1Char('/') + done);
-            QDir(staging).removeRecursively();
+            removeTreeSafely(staging);
             return QStringLiteral("旧数据合并失败（%1）: %2").arg(name, err);
         }
         merged << name;
     }
-    QDir(staging).removeRecursively(); // 合并完成，清理暂存
+    removeTreeSafely(staging); // 合并完成，清理暂存
 
-    // 写入迁移标记
+    // 写入迁移标记。失败也必须回滚本次已合并项：否则 dataDir 已有数据但无标记，
+    // 下次重试会被 portableHasData 误判“已迁移”而跳过（数据残缺且不可恢复）。
     QFile marker(dataDir + QLatin1Char('/') + migrationMarker());
-    if (!marker.open(QIODevice::WriteOnly))
+    if (!marker.open(QIODevice::WriteOnly)) {
+        for (const QString &done : merged)
+            removeEntry(dataDir + QLatin1Char('/') + done);
         return QStringLiteral("无法写入迁移标记: %1").arg(marker.fileName());
+    }
     marker.close();
     return {};
 }
@@ -316,6 +373,12 @@ bool PortableDataStore::portableHasData(const QString &dataDir) {
         return false;
     const QStringList files = { settingsFileName(), dbFileName() };
     for (const QString &f : files) {
+        if (QFile::exists(d.filePath(f)))
+            return true;
+    }
+    // 仅可选文件（.readdict_sync.json/.readdict_index_fail.json）也代表已有数据，
+    // 否则只含可选文件的便携目录会被误判为“无数据”而覆盖旧数据。
+    for (const QString &f : legacyOptionalFiles()) {
         if (QFile::exists(d.filePath(f)))
             return true;
     }

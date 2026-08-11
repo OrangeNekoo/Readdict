@@ -99,3 +99,46 @@ qml/tst_qmlmain.cpp + QML 资源 + 后端单例），本 diff 与 QML 测试无�
    （ACL 拒绝场景下父进程本就不应可写）。
 4. **迁移失败非权限错误不提权**：源数据不可读（ACL/损坏）时提权无意义，返回原始可读错误
    停止启动，与“最小权限、不静默回退”一致。
+
+---
+
+# 便携数据目录 — 安全/路径最终审查修复报告（第二轮）
+
+日期：2026-08-11
+基础提交：`da1820e`
+实现人：impl-flash（HardenPortableSecurity）
+
+## 一、审查发现与修复对照
+
+| # | 审查发现 | 修复 |
+|---|---------|------|
+| 1 | `copyRecursively`/`removeEntry` 跟随符号链接，helper 可越界读写/删除目标树之外 | 新增 `isLinkLike`（Unix `isSymbolicLink`；Windows 另查 `isReparsePoint` 覆盖 junction/挂载点）；`copyRecursively` 对源与目标的每个递归入口（含子项）拒绝链接类条目；`removeEntry`/`removeTreeSafely` 拒绝跟随链接类条目；迁移暂存根目录本身为链接时直接拒绝，mkpath/复制绝不写入链接目标 |
+| 2 | 迁移标记写失败未回滚，重试会被 `portableHasData` 误判“已迁移”而跳过 | 标记 `open` 失败时回滚本次已合并项（`removeEntry`），dataDir 回到“无有效数据”可重试状态；不产生完成标记、源保留 |
+| 3 | `portableHasData` 漏 optional sync/index 文件，只含可选文件也被误判“无数据”而覆盖 | `portableHasData` 增加 `.readdict_sync.json`/`.readdict_index_fail.json` 检查，仅可选文件也算已有数据 |
+| 4 | Linux 相对 `XDG_DATA_HOME` 被接受，产出相对 dataDir | `resolveDataDir` 对相对 `XDG_DATA_HOME` 一律拒绝并 `qWarning` 回退默认 `~/.local/share/Readdict`（XDG Base Directory 规格要求绝对路径），绝不产出相对路径 |
+| 5 | `prepareDataDir` 仅 mkpath 无写探针，已有目录 ACL 不可写时误报成功 | 在 dataDir 内创建唯一 `QTemporaryFile` 探针并实际写入一字节，失败判权限错误（触发 Windows UAC 决策），成功即自动删除，不留残留 |
+
+## 二、测试（tests/tst_portabledata.cpp，49 用例全部通过；本任务新增 8）
+
+TDD：先加 7 个失败测试确认红 → 实现 → 49/49 绿。
+- `linuxRelativeXdgFallsBackToDefault`：相对 xdg 回退默认绝对路径（红：原产出相对路径）
+- `prepareProbeDetectsUnwritableExistingDir`：子目录已存在但 dataDir ACL 只读 → 写探针发现权限错误（红：原 mkpath 全静默成功误报成功）
+- `prepareProbeLeavesNoTrace`：成功准备后目录仅含三个数据子目录，无探针残留
+- `migrateRejectsSymlinkFileInSource` / `migrateRejectsSymlinkDirInSource`：源内文件/子目录符号链接均拒绝，外部目标未被读取/改写（红：原跟随复制）
+- `migrateRejectsSymlinkMergeTarget`：合并目标为符号链接拒绝写入，外部目录未被写入（红：原跟随写入）
+- `migrateMarkerFailureRollsBackAndRetrySucceeds`：标记写失败回滚已合并项，移除阻塞后可重试成功（红：原残留数据不可重试）
+- `migrateSkipsWhenPortableHasOnlyOptionalFiles`：仅可选文件也阻断迁移、不覆盖（红：原误判无数据并覆盖）
+
+## 三、验证结果
+
+- `cmake --build build/Qt_6_11_1_for_macOS_Debug --target tst_portabledata -j2`：通过
+- `./build/Qt_6_11_1_for_macOS_Debug/tests/tst_portabledata`：49 passed, 0 failed
+- `cmake --build build/Qt_6_11_1_for_macOS_Debug --target Readdict -j2`：通过（字体拷贝正常）
+- `ctest --test-dir build/Qt_6_11_1_for_macOS_Debug`：21/21 通过（含 tst_qml）
+
+## 四、疑虑与说明
+
+1. **Windows 重解析点仅编译期核对**：`QFileInfo::isReparsePoint()` 为 Qt 6.1+ API，本机 macOS 无法运行 Windows 分支；按 Qt 文档契约核对（isSymbolicLink 覆盖符号链接、isReparsePoint 覆盖 junction/挂载点）。Unix 符号链接拒绝路径在 macOS 全量覆盖。
+2. **探针用 `QTemporaryFile`**：唯一名 + 自动删除，避免固定名残留；失败时（open 失败）不产生文件，无需清理。
+3. **暂存根目录守卫**：`data.migrating` 为链接时直接返回错误，mkpath/复制绝不跟随链接目标写入；这是对“所有递归入口和目标路径”的补强。
+4. **相对 XDG 选择“回退默认 + 记录”**：规格（XDG Base Directory）要求标准绝对路径，回退默认 `~/.local/share/Readdict` 比中止启动更符合“数据不丢”语义；`qWarning` 记录以便诊断，不产出相对 dataDir。

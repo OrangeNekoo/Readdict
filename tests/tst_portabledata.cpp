@@ -87,6 +87,17 @@ private slots:
     }
 
     // ---- 目录准备 ----
+    void linuxRelativeXdgFallsBackToDefault() {
+        // XDG Base Directory 规格要求 XDG_DATA_HOME 为绝对路径；相对值应被拒绝，
+        // 回退默认 ~/.local/share/Readdict（不产出相对 dataDir）。
+        PortableDataStore::Params p;
+        p.platform = PortableDataStore::Platform::Linux;
+        p.xdgDataHome = "relative/share";
+        p.homeDir = "/home/u";
+        QCOMPARE(PortableDataStore::resolveDataDir(p),
+                 QString("/home/u/.local/share/Readdict"));
+    }
+
     void prepareCreatesSubdirs() {
         QTemporaryDir tmp;
         const QString dataDir = tmp.path() + "/data";
@@ -135,6 +146,44 @@ private slots:
             QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner
             | QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup
             | QFileDevice::ReadOther | QFileDevice::WriteOther | QFileDevice::ExeOther);
+    }
+
+    void prepareProbeDetectsUnwritableExistingDir() {
+        QTemporaryDir tmp;
+        const QString dataDir = tmp.path() + "/data";
+        // 子目录已存在 → mkpath 全部静默成功；但 dataDir 本身 ACL 不可写，
+        // 必须由写探针发现权限错误（否则无法触发 Windows UAC 提权决策）。
+        QVERIFY(QDir().mkpath(dataDir + "/books"));
+        QVERIFY(QDir().mkpath(dataDir + "/covers"));
+        QVERIFY(QDir().mkpath(dataDir + "/backgrounds"));
+        QFile::setPermissions(dataDir,
+            QFileDevice::ReadOwner | QFileDevice::ExeOwner
+            | QFileDevice::ReadGroup | QFileDevice::ExeGroup
+            | QFileDevice::ReadOther | QFileDevice::ExeOther);
+        const QString err = PortableDataStore::prepareDataDir(dataDir);
+        QVERIFY(!err.isEmpty());
+        QVERIFY(err.contains(dataDir));
+        QVERIFY2(PortableDataStore::isPermissionError(err, dataDir),
+                 qPrintable(QStringLiteral("期望权限错误，实际: ") + err));
+        // 恢复权限，保证 QTemporaryDir 清理
+        QFile::setPermissions(dataDir,
+            QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner
+            | QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup
+            | QFileDevice::ReadOther | QFileDevice::WriteOther | QFileDevice::ExeOther);
+    }
+
+    void prepareProbeLeavesNoTrace() {
+        QTemporaryDir tmp;
+        const QString dataDir = tmp.path() + "/data";
+        const QString err = PortableDataStore::prepareDataDir(dataDir);
+        QVERIFY2(err.isEmpty(), qPrintable(err));
+        // 写探针文件必须已清理，目录只含三个数据子目录，不留残留
+        const QStringList contents = QDir(dataDir).entryList(
+            QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden);
+        QCOMPARE(contents.size(), 3);
+        QVERIFY(contents.contains(QStringLiteral("books")));
+        QVERIFY(contents.contains(QStringLiteral("covers")));
+        QVERIFY(contents.contains(QStringLiteral("backgrounds")));
     }
 
     // ---- Windows 旧数据迁移 ----
@@ -254,6 +303,113 @@ private slots:
         QVERIFY(QFile::exists(dataDir + "/settings.json"));
         QVERIFY(QFile::exists(dataDir + "/books/a.epub"));
         QVERIFY(QFile::exists(dataDir + "/.readdict_migrated"));
+    }
+
+    void migrateRejectsSymlinkFileInSource() {
+        QTemporaryDir tmp;
+        // 越界目标：legacy 外的一个“秘密”文件
+        const QString outside = tmp.path() + "/outside_secret.txt";
+        writeFile(outside, "secret");
+        const QString legacy = tmp.path() + "/legacy_appdata";
+        QDir().mkpath(legacy + "/books");
+        writeFile(legacy + "/settings.json", "{}");
+        // books 内放一个指向外部文件的符号链接 → 递归复制必须拒绝，不得越界读取
+        QVERIFY(QFile::link(outside, legacy + "/books/evil.epub"));
+        const QString dataDir = tmp.path() + "/data";
+        const QString err = PortableDataStore::migrateFromLegacy(legacy, dataDir);
+        QVERIFY(!err.isEmpty());
+        QVERIFY(err.contains(QStringLiteral("符号链接")));
+        // 未复制符号链接内容、外部文件未被动过
+        QVERIFY(!QFile::exists(dataDir + "/books/evil.epub"));
+        QVERIFY(QFile::exists(outside));
+        QFile outsideF(outside);
+        QVERIFY(outsideF.open(QIODevice::ReadOnly));
+        QCOMPARE(outsideF.readAll(), QByteArray("secret"));
+        QVERIFY(QFile::exists(legacy + "/settings.json")); // 源保留
+    }
+
+    void migrateRejectsSymlinkDirInSource() {
+        QTemporaryDir tmp;
+        const QString outsideDir = tmp.path() + "/outside_dir";
+        QVERIFY(QDir().mkpath(outsideDir));
+        writeFile(outsideDir + "/x.txt", "x");
+        const QString legacy = tmp.path() + "/legacy_appdata";
+        QDir().mkpath(legacy);
+        writeFile(legacy + "/settings.json", "{}");
+        // legacy/books 本身是指向外部目录的符号链接 → 顶层即拒绝，不越界复制
+        QVERIFY(QFile::link(outsideDir, legacy + "/books"));
+        const QString dataDir = tmp.path() + "/data";
+        const QString err = PortableDataStore::migrateFromLegacy(legacy, dataDir);
+        QVERIFY(!err.isEmpty());
+        QVERIFY(!QFile::exists(dataDir + "/books/x.txt"));  // 未越界复制
+        QVERIFY(QFile::exists(outsideDir + "/x.txt"));       // 外部目录未被改写
+    }
+
+    void migrateRejectsSymlinkMergeTarget() {
+        QTemporaryDir tmp;
+        const QString legacy = makeLegacyAppData(tmp.path());
+        const QString dataDir = tmp.path() + "/data";
+        QVERIFY(QDir().mkpath(dataDir));
+        // dataDir/books 是指向外部目录的符号链接 → 合并阶段拒绝写入目标，防越界写
+        const QString outsideDir = tmp.path() + "/outside_dir";
+        QVERIFY(QDir().mkpath(outsideDir));
+        QVERIFY(QFile::link(outsideDir, dataDir + "/books"));
+        const QString err = PortableDataStore::migrateFromLegacy(legacy, dataDir);
+        QVERIFY(!err.isEmpty());
+        QVERIFY(err.contains(QStringLiteral("符号链接")));
+        QVERIFY(!QFile::exists(outsideDir + "/a.epub")); // 外部目录未被写入
+        QVERIFY(QFile::exists(legacy + "/Readdict.db")); // 源保留
+    }
+
+    void migrateMarkerFailureRollsBackAndRetrySucceeds() {
+        QTemporaryDir tmp;
+        const QString legacy = makeLegacyAppData(tmp.path());
+        const QString dataDir = tmp.path() + "/data";
+        QVERIFY(QDir().mkpath(dataDir));
+        // 用“指向只读目录的悬空符号链接”占据标记路径：portableHasData 的存在性
+        // 检查跟随链接、目标缺失 → 判定无有效数据 → 继续迁移；合并成功后写标记时
+        // 因目标目录只读而失败 → 必须回滚本次已合并项，保证无残留、可重试。
+        const QString readonlyDir = tmp.path() + "/ro";
+        QVERIFY(QDir().mkpath(readonlyDir));
+        QFile::setPermissions(readonlyDir,
+            QFileDevice::ReadOwner | QFileDevice::ExeOwner
+            | QFileDevice::ReadGroup | QFileDevice::ExeGroup
+            | QFileDevice::ReadOther | QFileDevice::ExeOther);
+        QVERIFY(QFile::link(readonlyDir + "/marker", dataDir + "/.readdict_migrated"));
+        const QString err = PortableDataStore::migrateFromLegacy(legacy, dataDir);
+        QVERIFY(!err.isEmpty());
+        QVERIFY(err.contains(QStringLiteral("迁移标记")));
+        // 回滚：本次已合并项被清理，dataDir 回到“无有效数据”可重试状态
+        QVERIFY(!QFile::exists(dataDir + "/settings.json"));
+        QVERIFY(!QFile::exists(dataDir + "/Readdict.db"));
+        QVERIFY(!QFile::exists(dataDir + "/books/a.epub"));
+        QVERIFY(QFile::exists(legacy + "/settings.json")); // 源保留
+        // 移除阻塞（只读目录 + 悬空链接）后可重试成功，无“已迁移”误判跳过
+        QFile::setPermissions(readonlyDir,
+            QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner
+            | QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup
+            | QFileDevice::ReadOther | QFileDevice::WriteOther | QFileDevice::ExeOther);
+        QVERIFY(QFile::remove(dataDir + "/.readdict_migrated"));
+        const QString retry = PortableDataStore::migrateFromLegacy(legacy, dataDir);
+        QVERIFY2(retry.isEmpty(), qPrintable(retry));
+        QVERIFY(QFile::exists(dataDir + "/settings.json"));
+        QVERIFY(QFile::exists(dataDir + "/.readdict_migrated"));
+    }
+
+    void migrateSkipsWhenPortableHasOnlyOptionalFiles() {
+        QTemporaryDir tmp;
+        const QString legacy = makeLegacyAppData(tmp.path());
+        const QString dataDir = tmp.path() + "/data";
+        QVERIFY(QDir().mkpath(dataDir));
+        // 仅可选文件（.readdict_sync.json）也算“已有数据”→ 迁移跳过、不覆盖
+        writeFile(dataDir + "/.readdict_sync.json", "{\"synced\":true}");
+        const QString err = PortableDataStore::migrateFromLegacy(legacy, dataDir);
+        QVERIFY2(err.isEmpty(), qPrintable(err));            // 跳过不是错误
+        QVERIFY(!QFile::exists(dataDir + "/settings.json")); // 旧数据不覆盖
+        QVERIFY(!QFile::exists(dataDir + "/Readdict.db"));
+        QVERIFY(!QFile::exists(dataDir + "/.readdict_migrated"));
+        QVERIFY(QFile::exists(dataDir + "/.readdict_sync.json")); // 已有可选文件保留
+        QVERIFY(QFile::exists(legacy + "/Readdict.db"));     // 源保留
     }
 
     // ---- 权限不足自动提权（Windows 运行时特性；本机覆盖非 Windows 分支与命令构造）----
