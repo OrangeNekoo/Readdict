@@ -184,3 +184,52 @@ TDD：先加 5 个失败测试确认红（5/54 failed）→ 实现 → 54/54 绿
 2. **探针 write/flush 失败未做确定性测试**：write/flush 失败在 macOS 上无法不经注入稳定触发（需磁盘满/配额），按简报允许的“可注入 helper 或至少检查代码路径”取代码路径检查；行为可观察路径（open 失败判权限错误、成功不留残留）由既有测试锁定。
 3. **标记写入内容**：标记从空文件改为写入 `"1"`，使 write 长度检查有实际意义；仅存在性被消费（portableHasData/migrateFromLegacy），内容不对外读取。
 4. **既有 `migrateMarkerFailureRollsBackAndRetrySucceeds` 语义微调**：悬空标记链接现在被链接守卫先行拒绝（消息仍含“迁移标记”，回滚/重试断言不变），原“open 失败”路径仍由错误消息覆盖，测试未放宽。
+
+---
+
+# 便携数据目录 — 便携最终复审剩余迁移安全问题修复报告（第四轮）
+
+日期：2026-08-12
+基础提交：`f99ce04`
+审查发现来源：便携最终复审（RereviewPortableSecurity，两项剩余）
+实现人：impl-flash（FixPortableFinalSecurity）
+
+## 一、审查发现与修复对照
+
+| # | 审查发现 | 修复 |
+|---|---------|------|
+| 1 | `portableHasData` 用 `QFile::exists`/`QDir` 枚举做存在性检查，会**跟随**已有 marker/子目录符号链接：marker 指向外部已有文件、settings/db/optional 文件为指向外部已有文件的链接、`books/covers/backgrounds` 为指向非空外部目录的链接时，被判“已有数据”，`migrateFromLegacy` 静默跳过迁移（fail-open，旧数据永不迁入且不可恢复） | `portableHasData` 改为 fail-closed 三态 `DataPresence { None, Present, LinkRejected }`：对 marker、settings/Readdict.db、两个 optional 文件、三个子目录逐一先做 `isLinkLike` 检查（符号链接/Windows 重解析点），任一为链接类条目即返回 `LinkRejected`；`migrateFromLegacy` 收到 `LinkRejected` 返回可读错误（“便携数据目录含符号链接/重解析点，拒绝迁移”），既不信赖（不误判跳过）也不跟随（不在链接目标上作业）。悬空链接同样拒绝（isSymbolicLink 不依赖目标存在性） |
+| 2 | `copyRecursively` 目录条目内部复制一部分后失败（如 `books/` 内 a.epub 已复制、evil.epub 为源内符号链接被拒），当前条目已复制的 partial 未清理；该条目尚未加入 `merged`，回滚只删此前完整成功的条目，partial 残留在 dataDir，下次被 `portableHasData` 判为“已有数据”而跳过迁移 | `copyRecursively` 子项失败时对当前条目调用 `removeTreeSafely(dst)` 整体清理已复制部分（dst 由本函数创建、入口已拒绝链接类条目，删除不越界），再向上返回错误；文件 `QFile::copy` 失败时主动 `QFile::remove(dst)` 清除可能的部分文件。迁移合并回滚语义因此闭合：失败条目自身无残留，与 `merged` 回滚共同保证“无 partial、无 marker、可重试”。`removeTreeSafely` 定义上移到 `copyRecursively` 之前 |
+
+## 二、TDD 证据
+
+先加测试确认红（`tst_portabledata` 55 passed, **4 failed**，4 个失败均为“静默跳过→err 为空”）：
+
+- `migrateRejectsExistingSymlinkMarker`：marker 为指向外部**已有**文件的符号链接（红：原 `QFile::exists` 跟随→Present→跳过）
+- `migrateRejectsSymlinkSettingsFile`：settings.json 为指向外部已有文件的符号链接（红）
+- `migrateRejectsSymlinkOptionalFile`：`.readdict_sync.json` 为指向外部已有文件的符号链接（红）
+- `migrateRejectsSymlinkChildDirNonEmpty`：dataDir/books 为指向**非空**外部目录的符号链接（红：原 `QDir::exists`+`entryList` 跟随→非空→跳过）
+
+实现后 **59/59 绿**。另新增契约锁定用例：
+
+- `migrateCopyPartialCleansTargetAndRetrySucceeds`：legacy/books 含 [a.epub, evil(符号链接)]，复制 books 中途失败（a.epub 已复制后 evil 被拒）→ 断言 dataDir 无任何 partial（settings/db/books 均不存在）、无 `.readdict_migrated`、暂存已清、源保留；移除 evil 后重试成功（books/a.epub、settings.json、marker 齐全），证明无 partial 残留导致“已有数据”误判跳过。
+
+适配（fail-closed 提前拒绝，行为语义变更）：
+
+- `migrateRejectsSymlinkMarker`：断言由“迁移标记”改为“符号链接”（拒绝点从合并后写标记守卫提前到存在性探测），外部目录未被创建任何文件等断言不变
+- `migrateMarkerFailureRollsBackAndRetrySucceeds`：标记路径为链接时现于存在性探测即拒绝（不再走到合并后写标记），断言改“符号链接”，移除链接后重试成功断言不变；原只读目录构造不再相关，已简化
+
+## 三、验证结果
+
+- `cmake --build build/Qt_6_11_1_for_macOS_Debug --target tst_portabledata -j2`：通过
+- `./build/Qt_6_11_1_for_macOS_Debug/tests/tst_portabledata`：59 passed, 0 failed（红阶段 55 passed, 4 failed）
+- `cmake --build build/Qt_6_11_1_for_macOS_Debug --target Readdict -j2`：通过（字体拷贝正常）
+- `ctest --test-dir build/Qt_6_11_1_for_macOS_Debug`：**21/21 通过**
+- 提交：`f94e292`（中文）
+
+## 四、疑虑与说明
+
+1. **partial 清理用例的触发路径**：`migrateCopyPartialCleansTargetAndRetrySucceeds` 经暂存阶段触发（books 内 a.epub 复制成功后 evil 符号链接被拒）。合并阶段中 `portableHasData==None` 前提下（三个子目录为空/不存在）预置阻塞无法通过存在性探测，故确定性 partial 只出现在暂存阶段；实现仍按规格对合并阶段同样自清理（同一函数），TOCTOU/IO 错误路径（磁盘满等不可确定性触发）由该防御覆盖。
+2. **fail-closed 提前拒绝的既有用例影响**：`migrateRejectsSymlinkMergeTarget`（dataDir/books 链接→空外部目录）现于存在性探测拒绝（消息仍含“符号链接”，外部未被写入、源保留断言不变）；`migrateSkipsWhenPortableHasData` 系列（真实文件/非空子目录）语义不变。
+3. **Windows 分支仍为编译期核对**：`isLinkLike` 的 Windows 重解析点分支沿用上轮 `GetFileAttributesW` 方案，本机 macOS 无法运行；Unix 符号链接路径（含悬空链接）全量覆盖。
+4. **`QFile::copy` 失败清理**为防御性处理（Qt 是否在失败时删除目标未在文档中保证），与“不残留 partial 被误判有效数据”契约一致。
