@@ -40,6 +40,12 @@ target_include_directories(tst_settings PRIVATE ../src)
 target_link_libraries(tst_settings PRIVATE Qt6::Test)
 add_test(NAME tst_settings COMMAND tst_settings)
 
+# 便携数据目录：路径解析（Windows/macOS/Linux 可注入参数）+ 目录准备 + Windows 旧数据迁移
+qt_add_executable(tst_portabledata tst_portabledata.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/PortableData.cpp)
+target_include_directories(tst_portabledata PRIVATE ../src)
+target_link_libraries(tst_portabledata PRIVATE Qt6::Test)
+add_test(NAME tst_portabledata COMMAND tst_portabledata)
+
 # C8：FTS5 全文搜索（SearchEngine）
 qt_add_executable(tst_search tst_search.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/SearchEngine.cpp)
 target_include_directories(tst_search PRIVATE ../src)

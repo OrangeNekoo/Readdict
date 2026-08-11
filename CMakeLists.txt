@@ -39,6 +39,8 @@ qt_add_executable(Readdict
     src/core/DatabaseManager.cpp
     src/core/BookManager.cpp
     src/core/SettingsStore.cpp
+    # 便携数据目录边界：路径解析/目录准备/Windows 旧数据迁移（main.cpp 唯一数据目录来源）
+    src/core/PortableData.cpp
     src/core/BookImporter.cpp
     src/core/HighlightManager.cpp
     src/core/SearchEngine.cpp

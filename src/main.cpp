@@ -15,6 +15,7 @@
 #include "core/BookManager.h"
 #include "core/BookImporter.h"
 #include "core/HighlightManager.h"
+#include "core/PortableData.h"
 #include "core/SearchEngine.h"
 #include "core/SettingsStore.h"
 #include "sync/SyncController.h"
@@ -97,14 +98,40 @@ int main(int argc, char *argv[]) {
     app.setApplicationName("Readdict");
     app.setOrganizationName("Readdict");
 
-    // 确保 AppData 目录存在：SettingsStore 直接写 settings.json、数据库与书库目录都在其下，
-    // 父目录缺失会导致写入/打开失败（A4 记录的问题）。
-    QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+    // 便携数据目录边界（唯一平台路径判断点，见 PortableData.h）：启动时一次解析
+    // dataDir，并把同一 dataDir 传给 Settings/Books/Importer/Highlights/Search/Sync
+    // 全部单例。规则：Windows → <程序目录>/data/；macOS → AppDataLocation；
+    // Linux → $XDG_DATA_HOME/Readdict（空则 ~/.local/share/Readdict）。
+    PortableDataStore::Params dp;
+    dp.applicationDirPath = QCoreApplication::applicationDirPath();
+    dp.appDataLocation = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    const QString dataDir = PortableDataStore::resolveDataDir(dp);
+    if (dataDir.isEmpty()) {
+        qCritical() << "无法解析数据目录，停止启动";
+        return 1;
+    }
+    // Windows：旧 Qt AppData 数据迁移到 <程序目录>/data/（macOS/Linux 新旧路径
+    // 相同，传空 legacyAppData 自动跳过）。失败保留错误并停止，不静默回退。
+    const QString legacyAppData =
+        PortableDataStore::currentPlatform() == PortableDataStore::Platform::Windows
+            ? dp.appDataLocation : QString();
+    const QString migrateErr = PortableDataStore::migrateFromLegacy(legacyAppData, dataDir);
+    if (!migrateErr.isEmpty()) {
+        qCritical().noquote() << "旧数据迁移失败，停止启动:" << migrateErr;
+        return 1;
+    }
+    // 目录准备（dataDir/books/covers/backgrounds）。失败显示实际路径并停止启动
+    //（最小权限原则：不以管理员/root 重启整个 GUI，不静默改写其他目录）。
+    const QString prepareErr = PortableDataStore::prepareDataDir(dataDir);
+    if (!prepareErr.isEmpty()) {
+        qCritical().noquote() << "数据目录准备失败，停止启动:" << prepareErr;
+        return 1;
+    }
 
     loadBundledFonts();
 
-    const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    auto *settings = new SettingsStore(appData + "/settings.json");
+    const QString dbPath = dataDir + "/Readdict.db";
+    auto *settings = new SettingsStore(dataDir + "/settings.json");
     // D6：语言控制器（zh_CN/zh_TW/en）。启动按 Settings ui/language（或系统语言，默认 zh_CN）
     // 加载翻译；语言切换由设置页下拉触发 applyLanguage，languageChanged 驱动 QML 重译。
     auto *lang = new LanguageController(resolveStartupLanguage(*settings));
@@ -119,12 +146,12 @@ int main(int argc, char *argv[]) {
     // 共用的 background/mode 四态白名单归一）
     qmlRegisterSingletonType(QUrl("qrc:/qt/qml/Readdict/src/ui/qml/BackgroundNorm.qml"),
                              "Readdict.UI", 1, 0, "BackgroundNorm");
-    auto *books = new BookManager(appData + "/Readdict.db");
+    auto *books = new BookManager(dbPath);
     // 阅读器进度（progress/<bookId>）与 Books 单例解耦读写 settings.json（B8）
     books->setSettingsStore(settings);
     // importer 内部 BookManager 使用独立连接名 readdict_importer，避免 addDatabase
     // 同名连接时移除 Books 单例的 readdict_main 连接（Books->m_db 会随之失效）。
-    auto *importer = new BookImporter(appData, appData + "/Readdict.db");
+    auto *importer = new BookImporter(dataDir, dbPath);
     // 导入成功（importer.imported）后驱动 Books 单例刷新，UI 的 booksModel 依赖其 booksChanged。
     QObject::connect(importer, &BookImporter::imported, books, [books] { emit books->booksChanged(); });
     // B2：refreshCovers 更新了封面后同样驱动 Books 单例刷新（importer 内部连接
@@ -135,10 +162,10 @@ int main(int argc, char *argv[]) {
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Importer", importer);
     // C7：划线/笔记单例。独立连接名 readdict_highlights（C6 支持注入），避免与
     // Books 单例的 readdict_main 重名（同名 addDatabase 会移除旧连接，见 DatabaseManager.h）。
-    auto *highlights = new HighlightManager(appData + "/Readdict.db", QStringLiteral("readdict_highlights"));
+    auto *highlights = new HighlightManager(dbPath, QStringLiteral("readdict_highlights"));
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Highlights", highlights);
     // C8：FTS5 全文搜索单例（书架全文搜索 + 书内搜索共用；固定连接名同 Highlights 模式）。
-    auto *search = new SearchEngine(appData + "/Readdict.db", QStringLiteral("readdict_search"));
+    auto *search = new SearchEngine(dbPath, QStringLiteral("readdict_search"));
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Search", search);
     // C8 复审：存量书索引回填——功能上线前已入库的书没有全文索引。延迟到事件循环
     // 起来后逐本执行（书与书之间让出，UI 保持响应），回填失败不影响启动。
@@ -169,9 +196,9 @@ int main(int argc, char *argv[]) {
     tts->setVoice(voice);
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Tts", tts);
     // D3：WebDAV 同步控制器（手动/每 30 分钟自动）。SyncManager 内部直连 SQLite
-    // （独立连接名 readdict_sync），与各单例连接隔离；dbPath=AppDataLocation/Readdict.db，
-    // libraryDir=AppDataLocation（同 Books 单例）。启动时恢复上次的自动同步开关。
-    auto *syncController = new SyncController(appData + "/Readdict.db", appData);
+    // （独立连接名 readdict_sync），与各单例连接隔离；dbPath/libraryDir 同其余
+    // 单例共用 dataDir。启动时恢复上次的自动同步开关。
+    auto *syncController = new SyncController(dbPath, dataDir);
     // L2（P0#2）：注入设置单例——同步合并结果经 SettingsStore::setRoot 原子落盘并刷新
     // 内存，杜绝 SyncManager 直写文件后单例旧快照再保存覆盖合并结果。
     syncController->setSettingsStore(settings);
