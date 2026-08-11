@@ -65,9 +65,25 @@ TDD 顺序：先加测试 → 构建失败（`ensurePortableData` 不存在，�
 - `./build/Qt_6_11_1_for_macOS_Debug/tests/tst_portabledata`：41 passed, 0 failed
 - `cmake --build build/Qt_6_11_1_for_macOS_Debug --target Readdict -j2`：通过（字体拷贝正常）
 - `ctest --test-dir build/Qt_6_11_1_for_macOS_Debug`：21/21 通过
-  （首次运行 tst_qml 出现 1 例 flake：262 passed/1 failed；立即重跑 tst_qml 263 passed/0 failed，
-  全量 ctest 复跑 21/21 绿。本次改动仅触及 PortableData/main/tst_portabledata，与 QML 测试无依赖，
-  判定为既有环境 flake，非本 diff 回归）
+
+### tst_qml 首次 1 例失败 = 既有环境 flake（复现与记录）
+
+首次 ctest 运行 tst_qml 输出 `262 passed, 1 failed, 4 skipped`（当时未捕获失败用例名；
+该次输出含 `tst_u4.qml`/`tst_u5.qml "window not active after requestActivate()"` QWARN，
+与既有窗口激活竞态 flake 特征一致）。后续复现记录：
+
+| 轮次 | 结果 |
+|------|------|
+| 立即重跑 tst_qml | 263 passed, 0 failed |
+| 全量 ctest 复跑 | 21/21 通过 |
+| 复现轮 1（独立运行） | 263 passed, 0 failed |
+| 复现轮 2（独立运行） | 263 passed, 0 failed |
+| 复现轮 3（独立运行） | 263 passed, 0 failed |
+
+连续 5 轮（4 次独立 + 1 次全量）均未复现。tst_qml 目标不编译/不链接
+PortableData.cpp（tests/CMakeLists.txt 仅 tst_portabledata 引用；tst_qml 源列表为
+qml/tst_qmlmain.cpp + QML 资源 + 后端单例），本 diff 与 QML 测试无任何依赖路径，
+判定为既有环境 flake，非本 diff 回归。
 
 ## 五、疑虑与说明
 
