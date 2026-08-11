@@ -142,3 +142,45 @@ TDD：先加 7 个失败测试确认红 → 实现 → 49/49 绿。
 2. **探针用 `QTemporaryFile`**：唯一名 + 自动删除，避免固定名残留；失败时（open 失败）不产生文件，无需清理。
 3. **暂存根目录守卫**：`data.migrating` 为链接时直接返回错误，mkpath/复制绝不跟随链接目标写入；这是对“所有递归入口和目标路径”的补强。
 4. **相对 XDG 选择“回退默认 + 记录”**：规格（XDG Base Directory）要求标准绝对路径，回退默认 `~/.local/share/Readdict` 比中止启动更符合“数据不丢”语义；`qWarning` 记录以便诊断，不产出相对 dataDir。
+
+---
+
+# 便携数据目录 — 便携最终审查阻塞修复报告（第三轮）
+
+日期：2026-08-11
+基础提交：`8946fb6`
+审查发现来源：便携最终审查（五项阻塞中的三项）
+实现人：impl-flash（FixPortableFinalSecurity）
+
+## 一、审查发现与修复对照
+
+| # | 审查发现 | 修复 |
+|---|---------|------|
+| 1 | `QFileInfo::isReparsePoint()` 非 Qt 6.11 公共 API（6.11.1 头文件仅 `isSymbolicLink`/`isJunction`），Windows 构建阻断 | `isLinkLike` 的 Windows 分支改为 Win32 guarded helper `isWindowsReparsePoint`：`GetFileAttributesW` 检查 `FILE_ATTRIBUTE_REPARSE_POINT`，覆盖符号链接/junction/挂载点等一切重解析条目；GetFileAttributesW 不跟随末级链接，悬空链接返回链接自身属性，与 QFileInfo 语义一致 |
+| 2 | copy/remove 未检查 dataDir/legacy 根、marker 本身 symlink，可越界写 | `prepareDataDir` 入口先于 mkpath 拒绝 dataDir 根链接；循环内拒绝 books/covers/backgrounds 子目录链接（mkpath 对链接会静默“成功”并跟随写入目标）。`migrateFromLegacy` 入口拒绝 legacy 根链接（防越界读）与 dataDir 根链接（防越界写）；写标记前拒绝 marker 路径本身为链接（open(WriteOnly) 会沿链接覆盖/创建链接目标之外的文件），拒绝时回滚本次已合并项 |
+| 3 | QTemporaryFile write/close 返回值未检查 | 写探针改为 `probe.write("p", 1) != 1 || !probe.flush()` 全检查（close 为 void 不报告落盘失败，故显式 flush），失败判权限错误返回；标记 open/write/flush 全检查，任一失败回滚已合并项，dataDir 回到“无有效数据”可重试状态 |
+
+## 二、测试（tests/tst_portabledata.cpp，54 用例全部通过；本任务新增 5）
+
+TDD：先加 5 个失败测试确认红（5/54 failed）→ 实现 → 54/54 绿。
+
+- `prepareRejectsSymlinkDataDirRoot`：dataDir 是指向外部目录的符号链接 → 拒绝，外部目录未被 mkpath 写入任何子目录/探针（红：原 mkpath 跟随链接在外部建目录）
+- `prepareRejectsSymlinkSubdir`：dataDir/books 指向外部目录 → 拒绝并停止，其余子目录不创建，外部未被改写
+- `migrateRejectsSymlinkDataDirRoot`：迁移目标根为链接 → 拒绝，外部目录未被写入 settings.json/Readdict.db/books
+- `migrateRejectsSymlinkLegacyRoot`：legacy 根为链接 → 拒绝，未从链接目标复制，未创建暂存目录
+- `migrateRejectsSymlinkMarker`：标记路径为指向外部目录的悬空链接 → 拒绝且回滚已合并项，外部目录未创建任何文件（无越界写），源保留
+
+## 三、验证结果
+
+- `cmake --build build/Qt_6_11_1_for_macOS_Debug --target tst_portabledata -j2`：通过
+- `./build/Qt_6_11_1_for_macOS_Debug/tests/tst_portabledata`：54 passed, 0 failed
+- `cmake --build build/Qt_6_11_1_for_macOS_Debug --target Readdict -j2`：通过（字体拷贝正常）
+- `ctest --test-dir build/Qt_6_11_1_for_macOS_Debug`：首轮 tst_qml `262 passed, 1 failed`（`ArrowKeyPagingSmoke::test_realDragScrollDoesNotSummon` 拖动/窗口激活竞态，与既有 flake 签名一致，tst_qml 不编译/不链接 PortableData.cpp）；独立重跑 `263 passed, 0 failed`，全量 ctest 复跑 21/21 通过
+- 提交：`2d4a312`（中文）
+
+## 四、疑虑与说明
+
+1. **Windows 分支仅编译期核对**：`isWindowsReparsePoint` 只用 Win32 公共 API（GetFileAttributesW / FILE_ATTRIBUTE_REPARSE_POINT / INVALID_FILE_ATTRIBUTES，windows.h 已有包含），本机 macOS 无法编译 Windows 分支；Unix 符号链接拒绝路径在 macOS 全量覆盖，Win32 语义按 MSDN 文档核对（不跟随末级链接、悬空链接返回 REPARSE_POINT）。
+2. **探针 write/flush 失败未做确定性测试**：write/flush 失败在 macOS 上无法不经注入稳定触发（需磁盘满/配额），按简报允许的“可注入 helper 或至少检查代码路径”取代码路径检查；行为可观察路径（open 失败判权限错误、成功不留残留）由既有测试锁定。
+3. **标记写入内容**：标记从空文件改为写入 `"1"`，使 write 长度检查有实际意义；仅存在性被消费（portableHasData/migrateFromLegacy），内容不对外读取。
+4. **既有 `migrateMarkerFailureRollsBackAndRetrySucceeds` 语义微调**：悬空标记链接现在被链接守卫先行拒绝（消息仍含“迁移标记”，回滚/重试断言不变），原“open 失败”路径仍由错误消息覆盖，测试未放宽。
