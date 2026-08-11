@@ -16,6 +16,18 @@
 
 namespace {
 
+#if defined(Q_OS_WIN)
+// Windows 重解析点探测：FILE_ATTRIBUTE_REPARSE_POINT 覆盖符号链接/junction/
+// 挂载点等一切重解析条目（QFileInfo::isSymbolicLink 只认符号链接、isJunction
+// 只认 junction，其余重解析点如挂载卷会漏判）。GetFileAttributesW 不跟随末级
+// 链接，悬空链接返回链接自身属性（含 REPARSE_POINT），与 QFileInfo 语义一致。
+bool isWindowsReparsePoint(const QString &path) {
+    const DWORD attrs = GetFileAttributesW(reinterpret_cast<LPCWSTR>(path.utf16()));
+    return attrs != INVALID_FILE_ATTRIBUTES
+        && (attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+}
+#endif
+
 // 是否“链接类”条目（符号链接 / Windows 重解析点、junction、挂载点）。
 // 迁移递归复制与回滚删除都必须拒绝这类条目：跟随它们会越界读写/删除
 // 目标树之外的路径（helper 越界的安全边界）。
@@ -23,7 +35,7 @@ bool isLinkLike(const QFileInfo &fi) {
     if (fi.isSymbolicLink())
         return true;
 #if defined(Q_OS_WIN)
-    if (fi.isReparsePoint())
+    if (isWindowsReparsePoint(fi.absoluteFilePath()))
         return true;
 #endif
     return false;
@@ -258,6 +270,10 @@ QString PortableDataStore::resolveDataDir(const PortableDataStore::Params &p) {
 }
 
 QString PortableDataStore::prepareDataDir(const QString &dataDir) {
+    // 关键根守卫：dataDir 本身若为符号链接/重解析点，mkpath/写探针/后续业务
+    // 写入都会跟随链接目标（越界写）——必须先于 mkpath 拒绝，绝不在链接根上作业。
+    if (isLinkLike(QFileInfo(dataDir)))
+        return QStringLiteral("数据目录为符号链接/重解析点，拒绝使用: %1").arg(dataDir);
     if (!QDir().mkpath(dataDir)) {
         const bool perm = isPermissionErrno(errno) || pathLooksUnwritable(dataDir);
         return QStringLiteral("无法创建数据目录: %1%2")
@@ -266,6 +282,11 @@ QString PortableDataStore::prepareDataDir(const QString &dataDir) {
     QDir root(dataDir);
     const QStringList subs = subDirs();
     for (const QString &sub : subs) {
+        // 关键子目录守卫：子目录为链接时 mkpath 会静默“成功”（跟随链接目标），
+        // 后续业务写入会越界写外部目录——拒绝并停止。
+        if (isLinkLike(QFileInfo(root.filePath(sub))))
+            return QStringLiteral("数据子目录为符号链接/重解析点，拒绝使用: %1")
+                       .arg(root.filePath(sub));
         if (!root.mkpath(sub)) {
             const bool perm = isPermissionErrno(errno) || pathLooksUnwritable(dataDir);
             return QStringLiteral("无法创建数据子目录: %1%2")
@@ -282,7 +303,13 @@ QString PortableDataStore::prepareDataDir(const QString &dataDir) {
         return QStringLiteral("无法写入数据目录: %1%2")
             .arg(dataDir, perm ? QStringLiteral("（权限不足）") : QString());
     }
-    probe.write("p", 1);
+    // write 必须写满一字节且 flush 成功才算探针通过：open 成功不代表写入落盘，
+    // 否则“看似可写实际写不进”会误报准备成功（UAC 提权决策依赖此探针）。
+    if (probe.write("p", 1) != 1 || !probe.flush()) {
+        const bool perm = isPermissionErrno(errno) || pathLooksUnwritable(dataDir);
+        return QStringLiteral("无法写入数据目录: %1%2")
+            .arg(dataDir, perm ? QStringLiteral("（权限不足）") : QString());
+    }
     probe.close(); // QTemporaryFile 自动删除探针文件
     return {};
 }
@@ -290,9 +317,17 @@ QString PortableDataStore::prepareDataDir(const QString &dataDir) {
 QString PortableDataStore::migrateFromLegacy(const QString &legacyAppData, const QString &dataDir) {
     if (legacyAppData.isEmpty())
         return {}; // macOS/Linux：新旧路径相同，不迁移
+    // 关键根守卫：旧目录根为链接时，文件收集/复制都会沿链接读取目标树之外
+    // 的内容——拒绝（防越界读）。
+    if (isLinkLike(QFileInfo(legacyAppData)))
+        return QStringLiteral("旧数据目录为符号链接/重解析点，拒绝迁移: %1").arg(legacyAppData);
     const QDir legacy(legacyAppData);
     if (!legacy.exists())
         return {}; // 无旧目录
+    // 关键根守卫：目标 dataDir 根为链接时，mkpath/合并写入都会跟随链接目标
+    // （越界写）——必须先于 portableHasData/mkpath 拒绝。
+    if (isLinkLike(QFileInfo(dataDir)))
+        return QStringLiteral("数据目录为符号链接/重解析点，拒绝迁移: %1").arg(dataDir);
     if (portableHasData(dataDir))
         return {}; // 便携目录已有有效数据 → 不覆盖
 
@@ -355,11 +390,28 @@ QString PortableDataStore::migrateFromLegacy(const QString &legacyAppData, const
 
     // 写入迁移标记。失败也必须回滚本次已合并项：否则 dataDir 已有数据但无标记，
     // 下次重试会被 portableHasData 误判“已迁移”而跳过（数据残缺且不可恢复）。
-    QFile marker(dataDir + QLatin1Char('/') + migrationMarker());
+    const QString markerPath = dataDir + QLatin1Char('/') + migrationMarker();
+    // 标记路径本身若是链接，open(WriteOnly) 会沿链接覆盖/创建链接目标之外的文件
+    // （越界写）——先于 open 拒绝并回滚。
+    if (isLinkLike(QFileInfo(markerPath))) {
+        for (const QString &done : merged)
+            removeEntry(dataDir + QLatin1Char('/') + done);
+        return QStringLiteral("迁移标记为符号链接/重解析点，拒绝写入: %1").arg(markerPath);
+    }
+    QFile marker(markerPath);
     if (!marker.open(QIODevice::WriteOnly)) {
         for (const QString &done : merged)
             removeEntry(dataDir + QLatin1Char('/') + done);
         return QStringLiteral("无法写入迁移标记: %1").arg(marker.fileName());
+    }
+    // write 必须写满且 flush 成功才算标记落盘；任一失败同样回滚（close 为 void，
+    // 不报告底层落盘失败，故显式 flush 检查）。
+    const QByteArray payload = QByteArrayLiteral("1");
+    if (marker.write(payload) != payload.size() || !marker.flush()) {
+        marker.close();
+        for (const QString &done : merged)
+            removeEntry(dataDir + QLatin1Char('/') + done);
+        return QStringLiteral("无法完整写入迁移标记: %1").arg(marker.fileName());
     }
     marker.close();
     return {};
