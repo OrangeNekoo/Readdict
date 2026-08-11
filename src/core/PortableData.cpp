@@ -41,6 +41,14 @@ bool isLinkLike(const QFileInfo &fi) {
     return false;
 }
 
+// 安全删除目录树：路径为符号链接/重解析点时拒绝跟随（绝不越界删除目标）。
+QString removeTreeSafely(const QString &path) {
+    if (isLinkLike(QFileInfo(path)))
+        return QStringLiteral("拒绝删除符号链接/重解析点: %1").arg(path);
+    QDir(path).removeRecursively();
+    return {};
+}
+
 // 递归复制 src → dst（合并语义：目标已存在则先移除再复制）。返回空串=成功。
 // 安全边界：源与目标路径上的所有条目（含递归子项）若为符号链接/重解析点
 // 一律拒绝——既不跟随源越界读取，也不跟随目标越界写入。
@@ -58,23 +66,25 @@ QString copyRecursively(const QString &src, const QString &dst) {
         for (const QString &e : entries) {
             const QString err = copyRecursively(src + QLatin1Char('/') + e,
                                                 dst + QLatin1Char('/') + e);
-            if (!err.isEmpty())
+            if (!err.isEmpty()) {
+                // 当前条目复制中途失败：清理本条目已复制的部分（dst 是本函数
+                // 创建的目录，入口已拒绝链接类条目，删除不会越界）。保证调用方
+                // “已合并条目”回滚语义成立——失败条目不残留 partial 文件/目录，
+                // 可重试且不会被 portableHasData 误判“已有数据”而跳过迁移。
+                removeTreeSafely(dst);
                 return err;
+            }
         }
         return {};
     }
     if (QFile::exists(dst) && !QFile::remove(dst))
         return QStringLiteral("无法覆盖目标文件: %1").arg(dst);
-    if (!QFile::copy(src, dst))
+    if (!QFile::copy(src, dst)) {
+        // QFile::copy 失败时目标可能残留部分文件（不保证失败即清理），
+        // 主动删除避免 partial 残留被误判为有效数据。
+        QFile::remove(dst);
         return QStringLiteral("无法复制 %1 → %2").arg(src, dst);
-    return {};
-}
-
-// 安全删除目录树：路径为符号链接/重解析点时拒绝跟随（绝不越界删除目标）。
-QString removeTreeSafely(const QString &path) {
-    if (isLinkLike(QFileInfo(path)))
-        return QStringLiteral("拒绝删除符号链接/重解析点: %1").arg(path);
-    QDir(path).removeRecursively();
+    }
     return {};
 }
 
@@ -328,8 +338,17 @@ QString PortableDataStore::migrateFromLegacy(const QString &legacyAppData, const
     // （越界写）——必须先于 portableHasData/mkpath 拒绝。
     if (isLinkLike(QFileInfo(dataDir)))
         return QStringLiteral("数据目录为符号链接/重解析点，拒绝迁移: %1").arg(dataDir);
-    if (portableHasData(dataDir))
+    // 存在性探测必须 fail-closed：marker/数据文件/子目录/可选文件任一为链接类
+    // 条目（符号链接/重解析点）都返回拒绝信号——既不跟随链接误判“已有数据”
+    // 而跳过迁移（指向外部已有文件/目录），也不在链接目标上继续作业。
+    switch (portableHasData(dataDir)) {
+    case DataPresence::LinkRejected:
+        return QStringLiteral("便携数据目录含符号链接/重解析点，拒绝迁移: %1").arg(dataDir);
+    case DataPresence::Present:
         return {}; // 便携目录已有有效数据 → 不覆盖
+    case DataPresence::None:
+        break;
+    }
 
     // 收集旧目录中实际存在的可迁移内容
     QStringList sources;
@@ -417,31 +436,47 @@ QString PortableDataStore::migrateFromLegacy(const QString &legacyAppData, const
     return {};
 }
 
-bool PortableDataStore::portableHasData(const QString &dataDir) {
-    if (QFile::exists(dataDir + QLatin1Char('/') + migrationMarker()))
-        return true; // 已完成迁移
+PortableDataStore::DataPresence PortableDataStore::portableHasData(const QString &dataDir) {
+    // 全部使用 no-follow 语义：先查链接类条目（符号链接/重解析点）。这类条目
+    // 要么会跟随误判“已有数据”而静默跳过迁移（指向已存在的外部目标），要么
+    // 悬空不可信——一律 fail-closed 返回拒绝信号，绝不信任、绝不跟随。
+    const QFileInfo marker(dataDir + QLatin1Char('/') + migrationMarker());
+    if (isLinkLike(marker))
+        return DataPresence::LinkRejected;
+    if (marker.exists())
+        return DataPresence::Present; // 已完成迁移
     const QDir d(dataDir);
     if (!d.exists())
-        return false;
+        return DataPresence::None;
     const QStringList files = { settingsFileName(), dbFileName() };
     for (const QString &f : files) {
-        if (QFile::exists(d.filePath(f)))
-            return true;
+        const QFileInfo fi(d.filePath(f));
+        if (isLinkLike(fi))
+            return DataPresence::LinkRejected;
+        if (fi.exists())
+            return DataPresence::Present;
     }
     // 仅可选文件（.readdict_sync.json/.readdict_index_fail.json）也代表已有数据，
     // 否则只含可选文件的便携目录会被误判为“无数据”而覆盖旧数据。
     for (const QString &f : legacyOptionalFiles()) {
-        if (QFile::exists(d.filePath(f)))
-            return true;
+        const QFileInfo fi(d.filePath(f));
+        if (isLinkLike(fi))
+            return DataPresence::LinkRejected;
+        if (fi.exists())
+            return DataPresence::Present;
     }
     // 只认有效数据：空子目录（目录准备遗留）不算，否则会阻止后续迁移
     for (const QString &sub : subDirs()) {
-        const QDir sd(d.filePath(sub));
-        if (sd.exists()
-            && !sd.entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden).isEmpty())
-            return true;
+        const QFileInfo sd(d.filePath(sub));
+        if (isLinkLike(sd))
+            return DataPresence::LinkRejected;
+        if (sd.isDir()
+            && !QDir(sd.absoluteFilePath())
+                    .entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden)
+                    .isEmpty())
+            return DataPresence::Present;
     }
-    return false;
+    return DataPresence::None;
 }
 
 bool PortableDataStore::isPermissionError(const QString &error, const QString &dataDir) {

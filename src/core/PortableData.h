@@ -100,8 +100,12 @@ public:
     static QString dbFileName() { return QStringLiteral("Readdict.db"); }
 
 private:
+    // 便携目录存在性探测结果：None=无有效数据；Present=已有有效数据（迁移跳过）；
+    // LinkRejected=目录内存在链接类条目（符号链接/重解析点），fail-closed 拒绝迁移。
+    enum class DataPresence { None, Present, LinkRejected };
+
     static QStringList subDirs();              // books/covers/backgrounds
     static QStringList legacyOptionalFiles();  // .readdict_sync.json/.readdict_index_fail.json
     static QString migrationMarker();          // .readdict_migrated
-    static bool portableHasData(const QString &dataDir);
+    static DataPresence portableHasData(const QString &dataDir);
 };

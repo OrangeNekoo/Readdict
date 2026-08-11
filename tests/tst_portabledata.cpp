@@ -440,23 +440,128 @@ private slots:
         const QString legacy = makeLegacyAppData(tmp.path());
         const QString dataDir = tmp.path() + "/data";
         QVERIFY(QDir().mkpath(dataDir));
-        // 标记路径是指向外部目录下不存在文件的悬空符号链接 → 若无守卫，
-        // open(WriteOnly) 会沿链接在外部目录创建文件（越界写）。守卫必须拒绝。
+        // 标记路径是指向外部目录下不存在文件的悬空符号链接 → 存在性探测必须
+        // no-follow 先行拒绝：既不信任它（跟随悬空链接读不到“已迁移”），也绝不让
+        // open(WriteOnly) 沿链接在外部目录创建文件（越界写）。
         const QString outsideDir = tmp.path() + "/outside_dir";
         QVERIFY(QDir().mkpath(outsideDir));
         QVERIFY(QFile::link(outsideDir + "/marker", dataDir + "/.readdict_migrated"));
         const QString err = PortableDataStore::migrateFromLegacy(legacy, dataDir);
         QVERIFY(!err.isEmpty());
-        QVERIFY(err.contains(QStringLiteral("迁移标记")));
+        QVERIFY(err.contains(QStringLiteral("符号链接")));
         // 外部目录未被创建任何文件（无越界写）
         QVERIFY(!QFile::exists(outsideDir + "/marker"));
         QVERIFY(QDir(outsideDir).entryList(
             QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden).isEmpty());
-        // 本次已合并项回滚，无标记、无残留、源保留
+        // 拒绝发生在合并之前：无标记、无残留、源保留
         QVERIFY(!QFile::exists(dataDir + "/settings.json"));
         QVERIFY(!QFile::exists(dataDir + "/Readdict.db"));
         QVERIFY(!QFile::exists(dataDir + "/books/a.epub"));
         QVERIFY(QFile::exists(legacy + "/Readdict.db"));
+    }
+
+    void migrateRejectsExistingSymlinkMarker() {
+        // 已有目标 marker 是指向外部已有文件的符号链接：若存在性检查跟随链接，
+        // 会误判“已迁移”而静默跳过迁移（fail-open、数据丢失不可恢复）。
+        // 必须 fail-closed：拒绝迁移并报可读错误。
+        QTemporaryDir tmp;
+        const QString legacy = makeLegacyAppData(tmp.path());
+        const QString dataDir = tmp.path() + "/data";
+        QVERIFY(QDir().mkpath(dataDir));
+        const QString outside = tmp.path() + "/outside_marker.txt";
+        writeFile(outside, "not-a-marker");
+        QVERIFY(QFile::link(outside, dataDir + "/.readdict_migrated"));
+        const QString err = PortableDataStore::migrateFromLegacy(legacy, dataDir);
+        QVERIFY(!err.isEmpty());                       // 不得静默跳过迁移
+        QVERIFY(err.contains(QStringLiteral("符号链接")));
+        QVERIFY(!QFile::exists(dataDir + "/settings.json")); // 未写入任何内容
+        QVERIFY(QFile::exists(legacy + "/Readdict.db"));      // 源保留
+    }
+
+    void migrateRejectsSymlinkSettingsFile() {
+        // dataDir/settings.json 是指向外部已有文件的符号链接：跟随会被误判
+        // “已有数据”而跳过迁移。必须 fail-closed 拒绝。
+        QTemporaryDir tmp;
+        const QString legacy = makeLegacyAppData(tmp.path());
+        const QString dataDir = tmp.path() + "/data";
+        QVERIFY(QDir().mkpath(dataDir));
+        const QString outside = tmp.path() + "/outside_settings.txt";
+        writeFile(outside, "{}");
+        QVERIFY(QFile::link(outside, dataDir + "/settings.json"));
+        const QString err = PortableDataStore::migrateFromLegacy(legacy, dataDir);
+        QVERIFY(!err.isEmpty());
+        QVERIFY(err.contains(QStringLiteral("符号链接")));
+        QVERIFY(!QFile::exists(dataDir + "/Readdict.db"));
+        QVERIFY(QFile::exists(legacy + "/Readdict.db"));
+    }
+
+    void migrateRejectsSymlinkOptionalFile() {
+        // dataDir/.readdict_sync.json 是指向外部已有文件的符号链接：仅可选文件
+        // 也算“已有数据”，跟随链接同样会误判跳过。必须 fail-closed 拒绝。
+        QTemporaryDir tmp;
+        const QString legacy = makeLegacyAppData(tmp.path());
+        const QString dataDir = tmp.path() + "/data";
+        QVERIFY(QDir().mkpath(dataDir));
+        const QString outside = tmp.path() + "/outside_sync.txt";
+        writeFile(outside, "{}");
+        QVERIFY(QFile::link(outside, dataDir + "/.readdict_sync.json"));
+        const QString err = PortableDataStore::migrateFromLegacy(legacy, dataDir);
+        QVERIFY(!err.isEmpty());
+        QVERIFY(err.contains(QStringLiteral("符号链接")));
+        QVERIFY(!QFile::exists(dataDir + "/settings.json"));
+        QVERIFY(QFile::exists(legacy + "/Readdict.db"));
+    }
+
+    void migrateRejectsSymlinkChildDirNonEmpty() {
+        // dataDir/books 是指向非空外部目录的符号链接：跟随枚举会被误判“已有
+        // 数据”而跳过迁移。必须 fail-closed 拒绝，且不触碰外部目录。
+        QTemporaryDir tmp;
+        const QString legacy = makeLegacyAppData(tmp.path());
+        const QString dataDir = tmp.path() + "/data";
+        QVERIFY(QDir().mkpath(dataDir));
+        const QString outsideDir = tmp.path() + "/outside_books";
+        QVERIFY(QDir().mkpath(outsideDir));
+        writeFile(outsideDir + "/sentinel.txt", "x");
+        QVERIFY(QFile::link(outsideDir, dataDir + "/books"));
+        const QString err = PortableDataStore::migrateFromLegacy(legacy, dataDir);
+        QVERIFY(!err.isEmpty());
+        QVERIFY(err.contains(QStringLiteral("符号链接")));
+        QVERIFY(QFile::exists(outsideDir + "/sentinel.txt")); // 外部未被改写
+        QVERIFY(!QFile::exists(dataDir + "/settings.json"));
+        QVERIFY(QFile::exists(legacy + "/Readdict.db"));
+    }
+
+    void migrateCopyPartialCleansTargetAndRetrySucceeds() {
+        // copyRecursively 当前条目（books）部分复制后中途失败：a.epub 已复制、
+        // evil.epub 为源内符号链接被拒绝。失败条目已复制的部分必须被清理——
+        // 不残留 partial 文件/目录、无完成标记；移除阻塞后可重试成功（不被
+        // portableHasData 误判“已有数据”而跳过迁移）。
+        QTemporaryDir tmp;
+        const QString outside = tmp.path() + "/outside_secret.txt";
+        writeFile(outside, "secret");
+        const QString legacy = tmp.path() + "/legacy_appdata";
+        QDir().mkpath(legacy + "/books");
+        writeFile(legacy + "/settings.json", "{}");
+        writeFile(legacy + "/Readdict.db", "sqlite-bytes");
+        writeFile(legacy + "/books/a.epub", "epub-bytes");
+        QVERIFY(QFile::link(outside, legacy + "/books/evil.epub"));
+        const QString dataDir = tmp.path() + "/data";
+        const QString err = PortableDataStore::migrateFromLegacy(legacy, dataDir);
+        QVERIFY(!err.isEmpty());
+        // 失败即干净：dataDir 无任何 partial、无完成标记、暂存已清、源保留
+        QVERIFY(!QFile::exists(dataDir + "/settings.json"));
+        QVERIFY(!QFile::exists(dataDir + "/Readdict.db"));
+        QVERIFY(!QDir(dataDir + "/books").exists());      // 失败条目整体已清理
+        QVERIFY(!QFile::exists(dataDir + "/.readdict_migrated"));
+        QVERIFY(!QDir(tmp.path() + "/data.migrating").exists());
+        QVERIFY(QFile::exists(legacy + "/settings.json"));
+        // 移除阻塞后可重试成功：无 partial 残留导致“已有数据”误判跳过
+        QVERIFY(QFile::remove(legacy + "/books/evil.epub"));
+        const QString retry = PortableDataStore::migrateFromLegacy(legacy, dataDir);
+        QVERIFY2(retry.isEmpty(), qPrintable(retry));
+        QVERIFY(QFile::exists(dataDir + "/books/a.epub"));
+        QVERIFY(QFile::exists(dataDir + "/settings.json"));
+        QVERIFY(QFile::exists(dataDir + "/.readdict_migrated"));
     }
 
     void migrateMarkerFailureRollsBackAndRetrySucceeds() {
@@ -464,29 +569,20 @@ private slots:
         const QString legacy = makeLegacyAppData(tmp.path());
         const QString dataDir = tmp.path() + "/data";
         QVERIFY(QDir().mkpath(dataDir));
-        // 用“指向只读目录的悬空符号链接”占据标记路径：portableHasData 的存在性
-        // 检查跟随链接、目标缺失 → 判定无有效数据 → 继续迁移；合并成功后写标记时
-        // 因目标目录只读而失败 → 必须回滚本次已合并项，保证无残留、可重试。
+        // 标记路径被链接类条目占据（悬空符号链接）：存在性探测 fail-closed
+        // 拒绝，不进入合并；移除阻塞（链接）后可重试成功，无“已迁移”误判跳过。
         const QString readonlyDir = tmp.path() + "/ro";
         QVERIFY(QDir().mkpath(readonlyDir));
-        QFile::setPermissions(readonlyDir,
-            QFileDevice::ReadOwner | QFileDevice::ExeOwner
-            | QFileDevice::ReadGroup | QFileDevice::ExeGroup
-            | QFileDevice::ReadOther | QFileDevice::ExeOther);
         QVERIFY(QFile::link(readonlyDir + "/marker", dataDir + "/.readdict_migrated"));
         const QString err = PortableDataStore::migrateFromLegacy(legacy, dataDir);
         QVERIFY(!err.isEmpty());
-        QVERIFY(err.contains(QStringLiteral("迁移标记")));
-        // 回滚：本次已合并项被清理，dataDir 回到“无有效数据”可重试状态
+        QVERIFY(err.contains(QStringLiteral("符号链接")));
+        // 拒绝发生在合并之前：dataDir 无残留、无标记、源保留
         QVERIFY(!QFile::exists(dataDir + "/settings.json"));
         QVERIFY(!QFile::exists(dataDir + "/Readdict.db"));
         QVERIFY(!QFile::exists(dataDir + "/books/a.epub"));
         QVERIFY(QFile::exists(legacy + "/settings.json")); // 源保留
-        // 移除阻塞（只读目录 + 悬空链接）后可重试成功，无“已迁移”误判跳过
-        QFile::setPermissions(readonlyDir,
-            QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner
-            | QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup
-            | QFileDevice::ReadOther | QFileDevice::WriteOther | QFileDevice::ExeOther);
+        // 移除阻塞（悬空链接）后可重试成功，无“已迁移”误判跳过
         QVERIFY(QFile::remove(dataDir + "/.readdict_migrated"));
         const QString retry = PortableDataStore::migrateFromLegacy(legacy, dataDir);
         QVERIFY2(retry.isEmpty(), qPrintable(retry));
