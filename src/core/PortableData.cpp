@@ -38,6 +38,15 @@ QString copyRecursively(const QString &src, const QString &dst) {
     return {};
 }
 
+// 删除单个条目（文件或目录树），供迁移合并失败回滚使用。
+void removeEntry(const QString &path) {
+    const QFileInfo fi(path);
+    if (fi.isDir())
+        QDir(path).removeRecursively();
+    else if (fi.exists())
+        QFile::remove(path);
+}
+
 // errno 是否为权限类错误（QDir::mkpath/QFileSystemEngine 失败后 errno 保真：
 // Windows ACL 拒绝映射为 EACCES，POSIX 为 EACCES/EPERM/EROFS）。
 bool isPermissionErrno(int err) {
@@ -104,8 +113,9 @@ QString windowsErrorText(DWORD code) {
 }
 
 // Windows 提权路径：ShellExecuteExW verb `runas` 调起自身 helper
-// （executablePath --prepare-data <dataDir>），等待退出并复检可写性。
-// 仅当 prepareDataDir 失败疑似权限不足且非提权进程时由 prepareWithElevation 调用。
+// （executablePath --prepare-data <dataDir>）。helper 内部自行 迁移+准备；
+// 本函数只负责启动、有界等待与退出码检查，成功后由 ensurePortableData 复检。
+// 仅当 迁移/准备 失败疑似权限不足且非提权进程时由 ensurePortableData 调用。
 PortableDataStore::ElevationResult elevateViaUac(const QString &dataDir,
                                                  const QString &executablePath) {
     PortableDataStore::ElevationResult result;
@@ -120,6 +130,7 @@ PortableDataStore::ElevationResult elevateViaUac(const QString &dataDir,
     sei.lpParameters = reinterpret_cast<LPCWSTR>(params.utf16());
     sei.nShow = SW_HIDE;
 
+    // UAC 失败/取消（ERROR_CANCELLED）在此返回可读错误，不进入等待。
     if (!ShellExecuteExW(&sei)) {
         const DWORD code = GetLastError();
         result.elevated = false;
@@ -133,24 +144,39 @@ PortableDataStore::ElevationResult elevateViaUac(const QString &dataDir,
 
     result.elevated = true;
     DWORD exitCode = 0;
-    if (sei.hProcess) {
-        WaitForSingleObject(sei.hProcess, INFINITE); // helper 只做目录操作，必然快速退出
-        GetExitCodeProcess(sei.hProcess, &exitCode);
-        CloseHandle(sei.hProcess);
+    if (!sei.hProcess) {
+        result.success = false;
+        result.error = QStringLiteral("提权 helper 启动后未返回进程句柄: %1").arg(dataDir);
+        return result;
     }
+    // 等待 helper 退出（helper 只做目录/迁移、无事件循环，正常必然快速退出；
+    // 保留 INFINITE 但必须检查 API 返回，等待失败不得以未知状态继续）。
+    const DWORD waitResult = WaitForSingleObject(sei.hProcess, INFINITE);
+    if (waitResult != WAIT_OBJECT_0) {
+        const DWORD code = GetLastError();
+        result.success = false;
+        result.error = QStringLiteral("等待提权 helper 退出失败（%1）: %2")
+            .arg(waitResult == WAIT_FAILED ? windowsErrorText(code)
+                 : QStringLiteral("未获得对象信号，状态 %1").arg(waitResult),
+                 dataDir);
+        CloseHandle(sei.hProcess);
+        return result;
+    }
+    if (!GetExitCodeProcess(sei.hProcess, &exitCode)) {
+        const DWORD code = GetLastError();
+        result.success = false;
+        result.error = QStringLiteral("读取提权 helper 退出码失败（%1）: %2")
+            .arg(windowsErrorText(code), dataDir);
+        CloseHandle(sei.hProcess);
+        return result;
+    }
+    CloseHandle(sei.hProcess);
 
-    // 成功后普通进程重新检查可写性（helper 内部已 prepareDataDir，此处双保险）。
+    // helper 退出码 1=准备/迁移失败、2=参数形态错误、3=路径被拒绝，统一报可读错误。
     if (exitCode != 0) {
         result.success = false;
         result.error = QStringLiteral("提权 helper 执行失败（退出码 %1）: %2")
                            .arg(exitCode).arg(dataDir);
-        return result;
-    }
-    const QString recheck = PortableDataStore::prepareDataDir(dataDir);
-    if (!recheck.isEmpty()) {
-        result.success = false;
-        result.error = QStringLiteral("提权后目录仍不可写: %1（%2）")
-                           .arg(dataDir, recheck);
         return result;
     }
     result.success = true;
@@ -254,18 +280,23 @@ QString PortableDataStore::migrateFromLegacy(const QString &legacyAppData, const
         }
     }
 
-    // 必需内容全部复制成功 → 合并到 dataDir
+    // 必需内容全部复制成功 → 合并到 dataDir。任一项失败回滚本次已合并项：
+    // dataDir 回到“无有效数据”状态，保证可重试（无残留污染、不产生完成标记）。
     if (!QDir().mkpath(dataDir)) {
         QDir(staging).removeRecursively();
         return QStringLiteral("无法创建数据目录: %1").arg(dataDir);
     }
+    QStringList merged;
     for (const QString &name : sources) {
         const QString err = copyRecursively(staging + QLatin1Char('/') + name,
                                             dataDir + QLatin1Char('/') + name);
         if (!err.isEmpty()) {
+            for (const QString &done : merged)
+                removeEntry(dataDir + QLatin1Char('/') + done);
             QDir(staging).removeRecursively();
             return QStringLiteral("旧数据合并失败（%1）: %2").arg(name, err);
         }
+        merged << name;
     }
     QDir(staging).removeRecursively(); // 合并完成，清理暂存
 
@@ -288,8 +319,11 @@ bool PortableDataStore::portableHasData(const QString &dataDir) {
         if (QFile::exists(d.filePath(f)))
             return true;
     }
+    // 只认有效数据：空子目录（目录准备遗留）不算，否则会阻止后续迁移
     for (const QString &sub : subDirs()) {
-        if (d.exists(sub))
+        const QDir sd(d.filePath(sub));
+        if (sd.exists()
+            && !sd.entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden).isEmpty())
             return true;
     }
     return false;
@@ -310,19 +344,23 @@ QStringList PortableDataStore::prepareCommand(const QString &dataDir) {
     return { QStringLiteral("--prepare-data"), quoteWindowsArgument(dataDir) };
 }
 
-PortableDataStore::ElevationResult PortableDataStore::prepareWithElevation(
-    const QString &dataDir, const QString &executablePath, bool alreadyElevated) {
+PortableDataStore::ElevationResult PortableDataStore::ensurePortableData(
+    const QString &legacyAppData, const QString &dataDir,
+    const QString &executablePath, bool alreadyElevated) {
     ElevationResult result;
 
-    // 1. 先以普通权限尝试；成功则无需提权（普通路径不提权）。
-    const QString err = prepareDataDir(dataDir);
+    // 1. 普通权限整体尝试：旧数据迁移 + 目录准备一次完成。
+    //    （迁移失败不再单独致命：权限不足时可经提权 helper 重跑。）
+    QString err = migrateFromLegacy(legacyAppData, dataDir);
+    if (err.isEmpty())
+        err = prepareDataDir(dataDir);
     if (err.isEmpty()) {
         result.elevated = false;
         result.success = true;
         return result;
     }
 
-    // 2. 非权限错误（如路径被文件占据）直接失败，不提权。
+    // 2. 非权限错误（如路径被文件占据、源数据不可读）直接失败，提权无意义。
     if (!isPermissionError(err, dataDir)) {
         result.elevated = false;
         result.success = false;
@@ -341,7 +379,22 @@ PortableDataStore::ElevationResult PortableDataStore::prepareWithElevation(
     }
 
 #if defined(Q_OS_WIN)
-    return elevateViaUac(dataDir, executablePath);
+    // 4. 提权 helper 内部自行 迁移+准备（其 legacy 由其启动参数解析）。
+    result = elevateViaUac(dataDir, executablePath);
+    if (!result.success)
+        return result;
+
+    // 5. 复检：提权后 迁移+准备 都必须成立才 success（helper 已完成则此处均为
+    //    幂等空操作——迁移见 .readdict_migrated/有效数据即跳过，准备见目录已存在）。
+    err = migrateFromLegacy(legacyAppData, dataDir);
+    if (err.isEmpty())
+        err = prepareDataDir(dataDir);
+    if (!err.isEmpty()) {
+        result.elevated = true;
+        result.success = false;
+        result.error = QStringLiteral("提权后数据目录仍不可用: %1（%2）").arg(dataDir, err);
+    }
+    return result;
 #else
     // macOS/Linux：不自动提权（不调 sudo/root），返回明确错误由调用方停止启动。
     result.elevated = false;
@@ -351,15 +404,27 @@ PortableDataStore::ElevationResult PortableDataStore::prepareWithElevation(
 #endif
 }
 
+PortableDataStore::ElevationResult PortableDataStore::prepareWithElevation(
+    const QString &dataDir, const QString &executablePath, bool alreadyElevated) {
+    // 仅“目录准备”语义的旧接口：等价于 ensurePortableData 传空 legacy
+    // （普通路径无旧数据可迁移，migrateFromLegacy 为空操作）。
+    return ensurePortableData(QString(), dataDir, executablePath, alreadyElevated);
+}
+
 int PortableDataStore::runElevationHelper(const QStringList &args, const Params &p) {
     // 仅接受固定形态：--prepare-data <路径>。不接受任何其他命令。
     if (args.size() != 2 || args.at(0) != QStringLiteral("--prepare-data"))
         return 2;
     const QString dataDir = args.at(1);
-    // 路径穿越防护：必须是 cleanPath 后的绝对路径（拒绝 .. 穿越/相对路径/脏路径），
-    // 且只处理调用方解析出的目标目录。
+    // 路径穿越防护：必须是 cleanPath 后的绝对路径（拒绝 .. 穿越/相对路径/脏路径）。
     const QString clean = QDir::cleanPath(dataDir);
     if (clean.isEmpty() || !QDir::isAbsolutePath(clean) || clean != dataDir)
+        return 3;
+    // 安全边界：只接受本程序目录下的 data/（Windows 便携目录唯一形态）。任意其他
+    // 绝对路径一律拒绝——提权进程绝不被诱导在管理员权限下写入任意位置。
+    const QString expected = p.applicationDirPath.isEmpty()
+        ? QString() : QDir::cleanPath(p.applicationDirPath + QStringLiteral("/data"));
+    if (expected.isEmpty() || clean != expected)
         return 3;
     // Windows 旧数据迁移（提权后一并完成）；macOS/Linux 传空 legacyAppData 即跳过。
     const QString legacy =

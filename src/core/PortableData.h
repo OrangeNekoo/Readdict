@@ -63,18 +63,31 @@ public:
     // 返回 { "--prepare-data", <按 CommandLineToArgvW 规则转义的路径> }。
     static QStringList prepareCommand(const QString &dataDir);
 
-    // 一次性目录准备/迁移（含提权）：先以普通权限 prepareDataDir；仅当失败疑似
-    // 权限不足且 !alreadyElevated 时，Windows 以 ShellExecuteExW 的 verb `runas`
-    // 调起自身 helper（executablePath --prepare-data <dataDir>），等待退出并复检
-    // 可写性。macOS/Linux 返回明确的“不支持自动提权”错误，绝不调用 sudo/root。
-    // helper 模式（runElevationHelper）绝不再次提权。
+    // 一次性完成 旧数据迁移 + 目录准备（含提权），main 启动唯一入口：
+    // 1) 先以普通权限整体尝试（migrateFromLegacy → prepareDataDir），成功即返回；
+    // 2) 失败且疑似权限不足且 !alreadyElevated 时，Windows 以 ShellExecuteExW 的
+    //    verb `runas` 调起自身 helper（executablePath --prepare-data <dataDir>），
+    //    helper 内部自行 迁移+准备（其 legacy 由其启动参数解析），等待退出并检查
+    //    API 返回与退出码，随后普通进程复检 迁移+准备 均成立才算成功；
+    // 3) 非权限错误直接返回原错误（提权无意义）；macOS/Linux 返回明确的
+    //    “不支持自动提权”错误，绝不调用 sudo/root；helper 模式绝不再次提权。
+    static ElevationResult ensurePortableData(const QString &legacyAppData,
+                                              const QString &dataDir,
+                                              const QString &executablePath,
+                                              bool alreadyElevated);
+
+    // 仅“目录准备”语义的提权入口（旧接口，等价于 ensurePortableData 传空 legacy）：
+    // 先以普通权限 prepareDataDir；仅当失败疑似权限不足且 !alreadyElevated 时提权。
+    // macOS/Linux 返回明确的“不支持自动提权”错误，绝不调用 sudo/root。
     static ElevationResult prepareWithElevation(const QString &dataDir,
                                                 const QString &executablePath,
                                                 bool alreadyElevated);
 
     // Windows 提权 helper 专用入口：参数固定为 { "--prepare-data", <path> } 时执行
     // 旧数据迁移 + 目录准备并返回退出码（0=成功；1=准备/迁移失败；2=参数形态错误；
-    // 3=路径被拒绝）。不启动 GUI、不注册 QML 单例、绝不再次提权（防 UAC 递归）。
+    // 3=路径被拒绝）。安全边界：<path> 必须等于 cleanPath(applicationDirPath/data)
+    // （Windows 便携目录唯一形态）——提权进程绝不接受任意绝对路径，防诱导写入。
+    // 不启动 GUI、不注册 QML 单例、绝不再次提权（防 UAC 递归）。
     // Params 供测试注入（生产传启动时解析的 dp，Windows legacy 用 appDataLocation）。
     static int runElevationHelper(const QStringList &args, const Params &p);
 

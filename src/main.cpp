@@ -134,39 +134,28 @@ int main(int argc, char *argv[]) {
         qCritical() << "无法解析数据目录，停止启动";
         return 1;
     }
-    // Windows：旧 Qt AppData 数据迁移到 <程序目录>/data/（macOS/Linux 新旧路径
-    // 相同，传空 legacyAppData 自动跳过）。失败保留错误并停止，不静默回退。
+    // Windows：旧 Qt AppData 迁移 + 目录准备作为一次 elevated operation——先以
+    // 普通权限整体尝试；任一失败疑似权限不足时经一次性最小范围 helper + UAC 提权
+    // 重跑（helper 内自行 迁移+准备，成功返回后普通进程复检），成功后普通进程继续
+    // 使用同一 dataDir。macOS/Linux：新旧路径相同（legacy 为空自动跳过迁移），
+    // 普通尝试失败即显示实际路径并停止启动，不自动提权、不静默回退。
     const QString legacyAppData =
         PortableDataStore::currentPlatform() == PortableDataStore::Platform::Windows
             ? dp.appDataLocation : QString();
-    const QString migrateErr = PortableDataStore::migrateFromLegacy(legacyAppData, dataDir);
-    if (!migrateErr.isEmpty()) {
-        qCritical().noquote() << "旧数据迁移失败，停止启动:" << migrateErr;
-        return 1;
-    }
-    // 目录准备（dataDir/books/covers/backgrounds）。失败显示实际路径并停止启动
-    //（最小权限原则：不以管理员/root 重启整个 GUI，不静默改写其他目录）。
-    const QString prepareErr = PortableDataStore::prepareDataDir(dataDir);
-    if (!prepareErr.isEmpty()) {
+    const bool alreadyElevated =
 #if defined(Q_OS_WIN)
-        // Windows：目标目录权限不足时，经一次性最小范围 helper + UAC 提权
-        //（只做迁移/目录准备，成功后普通进程继续使用同一 dataDir）。
-        const auto elev = PortableDataStore::prepareWithElevation(
-            dataDir, QCoreApplication::applicationFilePath(),
-            PortableDataStore::isRunningElevated());
-        if (!elev.success) {
-            qCritical().noquote() << "数据目录准备失败，停止启动:"
-                                  << (elev.error.isEmpty() ? prepareErr : elev.error);
-            return 1;
-        }
-        if (elev.elevated)
-            qInfo().noquote() << "数据目录已通过提权 helper 准备完成:" << dataDir;
+        PortableDataStore::isRunningElevated();
 #else
-        // macOS/Linux：不自动提权（不调 sudo/root），显示明确错误和实际路径后停止启动。
-        qCritical().noquote() << "数据目录准备失败，停止启动:" << prepareErr;
-        return 1;
+        false;
 #endif
+    const auto portable = PortableDataStore::ensurePortableData(
+        legacyAppData, dataDir, QCoreApplication::applicationFilePath(), alreadyElevated);
+    if (!portable.success) {
+        qCritical().noquote() << "数据目录准备失败，停止启动:" << portable.error;
+        return 1;
     }
+    if (portable.elevated)
+        qInfo().noquote() << "数据目录已通过提权 helper 准备完成:" << dataDir;
 
     loadBundledFonts();
 

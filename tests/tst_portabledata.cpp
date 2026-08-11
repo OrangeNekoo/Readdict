@@ -204,6 +204,58 @@ private slots:
         QVERIFY(!QDir(tmp.path() + "/data.migrating").exists());
     }
 
+    void migrateEmptySubdirDoesNotBlockMigration() {
+        QTemporaryDir tmp;
+        const QString legacy = makeLegacyAppData(tmp.path());
+        const QString dataDir = tmp.path() + "/data";
+        // prepareDataDir 遗留的空子目录不算有效数据，不应阻止迁移
+        QVERIFY(QDir().mkpath(dataDir + "/books"));
+        QVERIFY(QDir().mkpath(dataDir + "/covers"));
+        const QString err = PortableDataStore::migrateFromLegacy(legacy, dataDir);
+        QVERIFY2(err.isEmpty(), qPrintable(err));
+        QVERIFY(QFile::exists(dataDir + "/settings.json"));
+        QVERIFY(QFile::exists(dataDir + "/books/a.epub"));   // 旧数据已并入
+        QVERIFY(QFile::exists(dataDir + "/.readdict_migrated"));
+    }
+
+    void migrateSkipsWhenPortableHasNonEmptyBooks() {
+        QTemporaryDir tmp;
+        const QString legacy = makeLegacyAppData(tmp.path());
+        const QString dataDir = tmp.path() + "/data";
+        QVERIFY(QDir().mkpath(dataDir + "/books"));
+        writeFile(dataDir + "/books/existing.epub", "x");    // 非空子目录 = 有效数据
+        const QString err = PortableDataStore::migrateFromLegacy(legacy, dataDir);
+        QVERIFY2(err.isEmpty(), qPrintable(err));            // 跳过不是错误
+        QVERIFY(!QFile::exists(dataDir + "/settings.json")); // 不覆盖便携数据
+        QVERIFY(!QFile::exists(dataDir + "/.readdict_migrated"));
+        QVERIFY(!QFile::exists(dataDir + "/books/a.epub"));  // 旧书未并入
+        QVERIFY(QFile::exists(legacy + "/Readdict.db"));     // 源保留
+    }
+
+    void migrateMergeFailureRollsBackAndRetrySucceeds() {
+        QTemporaryDir tmp;
+        const QString legacy = makeLegacyAppData(tmp.path());
+        const QString dataDir = tmp.path() + "/data";
+        QVERIFY(QDir().mkpath(dataDir));
+        writeFile(dataDir + "/books", "blocker");            // 合并 books 时必然失败
+        const QString err = PortableDataStore::migrateFromLegacy(legacy, dataDir);
+        QVERIFY(!err.isEmpty());
+        QVERIFY(err.contains(QStringLiteral("旧数据合并失败")));
+        // 失败清理：本次已合并项回滚，无残留、无标记、暂存已清、源保留
+        QVERIFY(!QFile::exists(dataDir + "/settings.json"));
+        QVERIFY(!QFile::exists(dataDir + "/Readdict.db"));
+        QVERIFY(!QFile::exists(dataDir + "/.readdict_migrated"));
+        QVERIFY(!QDir(tmp.path() + "/data.migrating").exists());
+        QVERIFY(QFile::exists(legacy + "/Readdict.db"));
+        // 移除阻塞后可重试成功（无“已迁移”误判跳过、无残留污染）
+        QVERIFY(QFile::remove(dataDir + "/books"));
+        const QString retry = PortableDataStore::migrateFromLegacy(legacy, dataDir);
+        QVERIFY2(retry.isEmpty(), qPrintable(retry));
+        QVERIFY(QFile::exists(dataDir + "/settings.json"));
+        QVERIFY(QFile::exists(dataDir + "/books/a.epub"));
+        QVERIFY(QFile::exists(dataDir + "/.readdict_migrated"));
+    }
+
     // ---- 权限不足自动提权（Windows 运行时特性；本机覆盖非 Windows 分支与命令构造）----
     void isPermissionErrorTrueForUnwritableParent() {
         QTemporaryDir tmp;
@@ -351,10 +403,70 @@ private slots:
             | QFileDevice::ReadOther | QFileDevice::WriteOther | QFileDevice::ExeOther);
     }
 
+    void ensurePortableDataSucceedsNormalPath() {
+        QTemporaryDir tmp;
+        const QString legacy = makeLegacyAppData(tmp.path());
+        const QString dataDir = tmp.path() + "/data";
+        const auto r = PortableDataStore::ensurePortableData(
+            legacy, dataDir, QStringLiteral("C:/Readdict/Readdict.exe"), false);
+        QVERIFY(r.success);
+        QVERIFY(!r.elevated);
+        QVERIFY(r.error.isEmpty());
+        QVERIFY(QFile::exists(dataDir + "/settings.json"));   // 迁移完成
+        QVERIFY(QFile::exists(dataDir + "/books/a.epub"));
+        QVERIFY(QFile::exists(dataDir + "/.readdict_migrated"));
+        QVERIFY(QDir(dataDir + "/covers").exists());           // 目录准备完成
+        QVERIFY(QDir(dataDir + "/backgrounds").exists());
+    }
+
+    void elevateReachedWhenMigrateFailsPermission() {
+        if (PortableDataStore::currentPlatform() == PortableDataStore::Platform::Windows)
+            QSKIP("UAC 提权为 Windows 运行时特性，不在本机触发");
+        QTemporaryDir tmp;
+        const QString legacy = makeLegacyAppData(tmp.path());
+        const QString dataDir = tmp.path() + "/data";
+        QVERIFY(QFile::setPermissions(tmp.path(),
+            QFileDevice::ReadOwner | QFileDevice::ExeOwner
+            | QFileDevice::ReadGroup | QFileDevice::ExeGroup
+            | QFileDevice::ReadOther | QFileDevice::ExeOther));
+        // 迁移阶段即权限失败（无法创建暂存目录）→ 仍进入提权流程，
+        // 而不是在 migrate 一步就中止：非 Windows 返回平台级“不支持自动提权”
+        const auto r = PortableDataStore::ensurePortableData(
+            legacy, dataDir, QStringLiteral("C:/Readdict/Readdict.exe"), false);
+        QVERIFY(!r.success);
+        QVERIFY(!r.elevated);
+        QVERIFY2(r.error.contains(QStringLiteral("不支持自动提权")),
+                 qPrintable(QStringLiteral("期望进入提权流程，实际: ") + r.error));
+        QVERIFY(r.error.contains(dataDir));
+        QFile::setPermissions(tmp.path(),
+            QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner
+            | QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup
+            | QFileDevice::ReadOther | QFileDevice::WriteOther | QFileDevice::ExeOther);
+    }
+
+    void migrateFailureNonPermissionDoesNotElevate() {
+        if (PortableDataStore::currentPlatform() == PortableDataStore::Platform::Windows)
+            QSKIP("UAC 提权为 Windows 运行时特性，不在本机触发");
+        QTemporaryDir tmp;
+        const QString legacy = makeLegacyAppData(tmp.path());
+        const QString dataDir = tmp.path() + "/data";
+        QFile db(legacy + "/Readdict.db");
+        QVERIFY(db.setPermissions(QFileDevice::Permissions())); // 源不可读：非权限错误
+        const auto r = PortableDataStore::ensurePortableData(
+            legacy, dataDir, QStringLiteral("C:/Readdict/Readdict.exe"), false);
+        QVERIFY(!r.success);
+        QVERIFY(!r.elevated);
+        QVERIFY2(r.error.contains(QStringLiteral("旧数据迁移失败")),
+                 qPrintable(QStringLiteral("期望返回迁移错误，实际: ") + r.error));
+        QVERIFY(!r.error.contains(QStringLiteral("不支持自动提权")));
+        QVERIFY(r.error.contains(dataDir));
+    }
+
     void helperPreparesDir() {
         QTemporaryDir tmp;
         PortableDataStore::Params p;
         p.platform = PortableDataStore::Platform::Windows;
+        p.applicationDirPath = tmp.path();                        // 只接受自身 <appDir>/data
         p.appDataLocation = tmp.path() + "/legacy_appdata";       // 不存在 → 迁移跳过
         const QString dataDir = tmp.path() + "/data";
         QCOMPARE(PortableDataStore::runElevationHelper(
@@ -369,6 +481,7 @@ private slots:
         const QString legacy = makeLegacyAppData(tmp.path());
         PortableDataStore::Params p;
         p.platform = PortableDataStore::Platform::Windows;
+        p.applicationDirPath = tmp.path();                        // 只接受自身 <appDir>/data
         p.appDataLocation = legacy;
         const QString dataDir = tmp.path() + "/data";
         QCOMPARE(PortableDataStore::runElevationHelper(
@@ -378,6 +491,33 @@ private slots:
         QVERIFY(QFile::exists(dataDir + "/books/a.epub"));
         QVERIFY(QFile::exists(dataDir + "/.readdict_migrated"));  // 迁移标记
         QVERIFY(QFile::exists(legacy + "/settings.json"));        // 源数据保留
+    }
+
+    void helperRejectsPathOutsideOwnDataDir() {
+        QTemporaryDir tmp;
+        PortableDataStore::Params p;
+        p.platform = PortableDataStore::Platform::Windows;
+        p.applicationDirPath = tmp.path();
+        // 绝对干净路径但不在本程序目录 data/ 下 → 拒绝（提权进程绝不写入其他位置）
+        const QString other = tmp.path() + "/other";
+        QCOMPARE(PortableDataStore::runElevationHelper(
+                     { QStringLiteral("--prepare-data"), other }, p), 3);
+        QVERIFY(!QDir(other).exists());
+        const QString sibling = tmp.path() + "/data-extra";
+        QCOMPARE(PortableDataStore::runElevationHelper(
+                     { QStringLiteral("--prepare-data"), sibling }, p), 3);
+        QVERIFY(!QDir(sibling).exists());
+    }
+
+    void helperRejectsEmptyApplicationDir() {
+        QTemporaryDir tmp;
+        PortableDataStore::Params p;
+        p.platform = PortableDataStore::Platform::Windows;
+        // 无法推导本程序目录 data/ → 拒绝一切路径（防诱导写入）
+        const QString dataDir = tmp.path() + "/data";
+        QCOMPARE(PortableDataStore::runElevationHelper(
+                     { QStringLiteral("--prepare-data"), dataDir }, p), 3);
+        QVERIFY(!QDir(dataDir).exists());
     }
 
     void helperRejectsTraversal() {
