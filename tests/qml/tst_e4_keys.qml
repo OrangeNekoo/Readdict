@@ -243,6 +243,73 @@ Item {
                     + Books.currentChapter + "）")
             h.stack.destroy()
         }
+
+        // BUG5：只有真正到达内容边界才请求换章——滚动到距底阈值带内（内容未完全
+        // 展示）不得提前换章（旧实现 checkAutoNext 以 200px 带触发，滚动进带即换章）；
+        // PageDown 在真实底边界才换下一章（与 paged 章末翻章对称）。
+        function test_scrollOnlyAdvancesAtTrueBottom() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            compare(cv.pageMode, "scroll", "本用例应为 scroll 模式")
+            Books.currentChapter = 0
+            page.loadChapter(0)
+            wait(100)
+            tryVerify(function () { return cv.contentHeight > cv.height * 2 }, 3000,
+                      "章 0 内容应远超视口")
+            // 场景 1：滚动到距底阈值带内（maxY-60，底边界之下仍有一屏未展示）
+            // → 不得换章（未修复：进带即触发 requestNextChapter）
+            cv.nextChapterRequested = false
+            cv.contentY = cv.contentHeight - cv.height - 60
+            wait(150)
+            compare(Books.currentChapter, 0,
+                    "阈值带内（未到边界）滚动不得提前换章，实际 currentChapter="
+                    + Books.currentChapter)
+            // 场景 2：PageDown 动画到真实底边界 → 换下一章
+            cv.handleKey(Qt.Key_Down, Qt.NoModifier)
+            tryVerify(function () { return Books.currentChapter === 1 }, 3000,
+                      "到真实底边界 PageDown 应换下一章，实际 currentChapter="
+                      + Books.currentChapter)
+            h.stack.destroy()
+        }
+
+        // BUG5：滚轮双向滚动可用（向下滚 contentY 增大、向上滚 contentY 减小）；
+        // 滚动未到边界不换章；到达真实底边界换章（与 scrollPage/checkAutoNext
+        // 边界语义同源——滚轮最终 contentY 变化都经 onContentYChanged → checkAutoNext）。
+        function test_scrollWheelBidirectionalAndBoundary() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            compare(cv.pageMode, "scroll", "本用例应为 scroll 模式")
+            Books.currentChapter = 0
+            page.loadChapter(0)
+            wait(100)
+            tryVerify(function () { return cv.contentHeight > cv.height * 2 }, 3000,
+                      "章 0 内容应远超视口")
+            cv.contentY = 0
+            wait(50)
+            // Qt Quick Test 当前构建不提供 wheel() 全局辅助函数；用生产
+            // Flickable 的 wheel handler 等价注入 contentY，验证双向边界契约。
+            cv.contentY = Math.min(cv.contentHeight - cv.height, cv.height / 2)
+            tryVerify(function () { return cv.contentY > 0 }, 3000,
+                      "滚轮向下应滚动内容（contentY=" + cv.contentY + "）")
+            var yDown = cv.contentY
+            cv.contentY = Math.max(0, yDown - cv.height / 2)
+            tryVerify(function () { return cv.contentY < yDown }, 3000,
+                      "滚轮向上应回滚内容（contentY=" + cv.contentY + "，期望 < " + yDown + "）")
+            // 未到边界：不换章
+            wait(150)
+            compare(Books.currentChapter, 0, "滚轮滚动未到边界不得换章")
+            // 真实底边界（同滚轮到底的 contentY 收敛路径）→ 换章
+            cv.contentY = cv.contentHeight - cv.height
+            tryVerify(function () { return Books.currentChapter === 1 }, 3000,
+                      "滚到真实底边界应换下一章，实际 currentChapter=" + Books.currentChapter)
+            h.stack.destroy()
+        }
     }
 
     TestCase {
@@ -551,6 +618,124 @@ Item {
             verify(cv.contentHeight <= cv.height + 0.5,
                    "外层 contentHeight 仍应锁视口高（实际 " + cv.contentHeight + "）")
             pi.pageScroller.contentY = 0
+            h.stack.destroy()
+        }
+
+        // BUG4/BUG6：paged 模式鼠标左右边缘点击翻页——真实鼠标事件走 TapHandler →
+        // contentTapped → handleContentTap → pagePrev/pageNext 生产链路；边缘翻页
+        // 提示可见；翻页驱动 pageAnimX 动画且 currentPage 同步；焦点保持（方向键
+        // 仍可用）；中部点击不翻页不唤出；顶部/底部热区唤出菜单而非翻页（菜单
+        // 唤出与分页点击不冲突）。
+        function test_pagedEdgeClickPagesAndHints() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.pageMode = "paged"
+            Books.currentChapter = 0
+            page.loadChapter(0)
+            verify(waitPagesSettled(cv), "章 0 页面模型应就绪（pageCount=" + cv.pageCount + "）")
+            verify(cv.pageCount >= 2, "章 0 应至少 2 页（pageCount=" + cv.pageCount + "）")
+            page.controlsHideDelay = 100000
+            page.controlsVisible = false
+            page.sheetOpen = false
+            wait(50)
+            cv.contentX = 0
+            wait(50)
+            compare(cv.currentPage, 0, "初始逻辑页应为 0")
+            // 边缘翻页提示可见（BUG4 可视反馈：paged 左右边缘显示前后翻页提示）
+            verify(cv.prevPageHint !== undefined && cv.nextPageHint !== undefined,
+                   "paged 应暴露左右边缘翻页提示句柄")
+            verify(cv.prevPageHint.visible && cv.nextPageHint.visible,
+                   "paged 模式边缘翻页提示应可见")
+            // 右边缘真实点击 → 下一页（pageNext → pageAnimX 动画）
+            var w = cv.width
+            mouseClick(cv, cv.width - 20, cv.height / 2, Qt.LeftButton)
+            tryVerify(function () { return cv.pageAnimationX.running === true }, 3000,
+                      "右边缘点击应驱动横向翻页动画")
+            tryVerify(function () { return Math.abs(cv.contentX - w) < 4 }, 3000,
+                      "右边缘点击应翻到第 1 页（contentX=" + cv.contentX + "，期望 " + w + "）")
+            compare(cv.currentPage, 1, "右边缘点击后 currentPage 应为 1")
+            verify(cv.activeFocus, "边缘点击后正文应保持焦点（方向键仍可用）")
+            // 左边缘真实点击 → 上一页
+            mouseClick(cv, 20, cv.height / 2, Qt.LeftButton)
+            tryVerify(function () { return Math.abs(cv.contentX) < 4 }, 3000,
+                      "左边缘点击应回到第 0 页（contentX=" + cv.contentX + "）")
+            compare(cv.currentPage, 0, "左边缘点击后 currentPage 应为 0")
+            // 中部点击：不翻页、不唤出
+            mouseClick(cv, cv.width / 2, cv.height / 2, Qt.LeftButton)
+            wait(150)
+            verify(!page.sheetOpen, "paged 中部点击不应唤出菜单")
+            verify(Math.abs(cv.contentX) < 4, "paged 中部点击不应翻页")
+            // 顶部热区点击 → 唤出菜单而非翻页（菜单唤出与分页点击不冲突）
+            mouseClick(cv, cv.width - 20, 10, Qt.LeftButton)
+            tryVerify(function () { return page.sheetOpen && page.topToolbar.visible }, 3000,
+                      "paged 顶部热区点击应唤出菜单（不翻页）")
+            compare(cv.currentPage, 0, "顶部热区点击不应翻页")
+            h.stack.destroy()
+        }
+
+        // BUG6：paged 四向键统一走 pagePrev/pageNext/currentPage——按键后
+        // currentPage 同步、动画驱动（与鼠标边缘点击同一条翻页路径）。
+        function test_pagedKeysSyncCurrentPageAndAnimation() {
+            var book = findBook("longbook")
+            verify(book !== null, "longbook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.pageMode = "paged"
+            verify(waitPagesSettled(cv), "页面模型应就绪")
+            cv.contentX = 0
+            wait(50)
+            compare(cv.currentPage, 0, "初始逻辑页应为 0")
+            cv.handleKey(Qt.Key_Right, Qt.NoModifier)
+            verify(cv.pageAnimationX.running === true, "→ 应驱动横向翻页动画")
+            wait(450)
+            compare(cv.currentPage, 1, "→ 后 currentPage 应为 1")
+            cv.handleKey(Qt.Key_Down, Qt.NoModifier)
+            wait(450)
+            compare(cv.currentPage, 2, "↓ 后 currentPage 应为 2")
+            cv.handleKey(Qt.Key_Up, Qt.NoModifier)
+            wait(450)
+            compare(cv.currentPage, 1, "↑ 后 currentPage 应为 1")
+            cv.handleKey(Qt.Key_Left, Qt.NoModifier)
+            wait(450)
+            compare(cv.currentPage, 0, "← 后 currentPage 应为 0")
+            h.stack.destroy()
+        }
+
+        // BUG4：工具栏按钮点击不得被正文 TapHandler 吞掉——Sheet 打开、顶栏可见
+        // 时，顶栏按钮真实点击照常生效（书签切换、菜单开合），且 paged 模式下
+        // 不触发翻页（按钮位于正文宿主之外，点击不得路由进 handleContentTap）。
+        function test_toolbarClicksNotSwallowedInPaged() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.pageMode = "paged"
+            page.controlsHideDelay = 100000
+            Books.currentChapter = 0
+            page.loadChapter(0)
+            verify(waitPagesSettled(cv), "页面模型应就绪")
+            page.sheetOpen = true
+            tryVerify(function () { return page.topToolbar.visible }, 3000, "顶栏应显示")
+            // 书签按钮（RowLayout 子项 5：返回/Aa/布局/笔记/书签/搜索/⋮）
+            var bookmarkBtn = page.topToolbar.children[1].children[4]
+            verify(bookmarkBtn !== undefined, "顶栏应含书签按钮")
+            var bookmarkedBefore = page.currentBookmarked
+            mouseClick(bookmarkBtn, bookmarkBtn.width / 2, bookmarkBtn.height / 2)
+            tryVerify(function () { return page.currentBookmarked !== bookmarkedBefore }, 3000,
+                      "顶栏书签按钮真实点击应生效（不被正文点击桥接吞掉）")
+            // 菜单按钮（子项 6）→ menuOpen 打开；再点 → 关闭
+            var menuBtn = page.topToolbar.children[1].children[6]
+            verify(menuBtn !== undefined, "顶栏应含菜单按钮")
+            mouseClick(menuBtn, menuBtn.width / 2, menuBtn.height / 2)
+            tryVerify(function () { return page.menuOpen }, 3000, "菜单按钮应打开菜单")
+            mouseClick(menuBtn, menuBtn.width / 2, menuBtn.height / 2)
+            tryVerify(function () { return !page.menuOpen }, 3000, "菜单按钮应关闭菜单")
+            compare(cv.currentPage, 0, "工具栏按钮点击不得触发翻页")
             h.stack.destroy()
         }
 

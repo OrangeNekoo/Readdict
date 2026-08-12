@@ -11,8 +11,8 @@ import Readdict.UI 1.0
 // 测试句柄：fontItems/sizeItems（两个 Repeater，供点击驱动）。
 Item {
     id: fontSheet
-
     objectName: "fontSheetPanel"
+    implicitHeight: fontColumn.implicitHeight
     property string fontFamily: ""
     property int fontSize: 18
     signal setFontFamily(string family)
@@ -30,9 +30,10 @@ Item {
     property alias sizeItems: sizeRepeater
 
     ColumnLayout {
+        id: fontColumn
         anchors.fill: parent
-        anchors.margins: 16
-        spacing: 12
+        anchors.margins: 8
+        spacing: 4
 
         Label {
             text: qsTr("字体")
@@ -42,7 +43,7 @@ Item {
         // 4 字体族单选行（○● + 显示名，选中描边加深）
         ColumnLayout {
             Layout.fillWidth: true
-            spacing: 8
+            spacing: 4
             Repeater {
                 id: fontRepeater
                 model: fontSheet.fontModel
@@ -104,21 +105,23 @@ Item {
                     required property int modelData
                     Layout.fillWidth: true
                     Layout.preferredHeight: 34
+                    implicitWidth: 44
+                    implicitHeight: 34
                     radius: 6
                     color: "transparent"
                     border.color: modelData === fontSheet.fontSize
                                   ? UITheme.borderActive : UITheme.borderDefault
                     border.width: modelData === fontSheet.fontSize ? 2 : 1
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: fontSheet.setFontSize(modelData)
-                    }
                     Label {
                         anchors.centerIn: parent
                         text: modelData
                         font.pixelSize: 13
                         color: modelData === fontSheet.fontSize
                                ? UITheme.textPrimary : UITheme.textSecondary
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: fontSheet.setFontSize(modelData)
                     }
                 }
             }

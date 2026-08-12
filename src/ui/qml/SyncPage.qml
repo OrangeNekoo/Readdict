@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Window
 import Readdict.Backend
 import Readdict.UI 1.0
 
@@ -11,33 +10,71 @@ import Readdict.UI 1.0
 // （与设置页即时生效语义一致），「立即同步」按钮只触发 Sync.run。
 // 同步日志来自 SyncController.log（SyncManager 逐条操作记录，含时间戳）。
 //
-// 任务 1：整页表单放入页面级 ScrollView——小窗口下全部配置项可滚动可达；
-// 日志区保留明确高度与内部垂直滚动（不做页面级滚动条的替身）。宽度基于实际
-// viewport 与 padding 单向计算（不绑 availableWidth：内容尺寸计算前可能为 0，
-// 会使行内控件宽度坍缩，同 SettingsPage 裁定）。
+// BUG1：返回按钮固定顶部（B4 模式，同 SettingsPage/SettingsTtsPage/
+// SettingsBackgroundPage）——header 移出页面级 ScrollView，滚动后仍固定可见，
+// 不再随表单滚出视口（左上角无滚动残影）；ScrollView top 锚接 header.bottom。
+// 整页表单放入页面级 ScrollView——小窗口下全部配置项可滚动可达；日志区保留
+// 明确高度与内部垂直滚动（不做页面级滚动条的替身）。宽度基于实际 viewport 与
+// padding 单向计算（不绑 availableWidth：内容尺寸计算前可能为 0，会使行内
+// 控件宽度坍缩，同 SettingsPage 裁定）。
 Page {
     id: page
     title: qsTr("WebDAV 同步")
+    // B4/BUG1：返回上一页——只 pop 当前层（绝不经 Main.goBack 弹回主页；
+    // 无 StackView 上下文如测试直载时安全空操作）
     function goBack() {
-        const win = Window.window
-        if (win && win.goBack) win.goBack()
-        else page.StackView.view.pop()
+        const stack = page.StackView.view
+        if (stack && stack.depth > 1) stack.pop()
     }
     // U2：导航页标识（Main 底部导航直达同步页；经设置页推入时高亮跟随）
     property string navId: "sync"
     // 测试/外部句柄（QML 冒烟经此驱动配置与自动同步开关，ShelfPage 同模式）
     property alias syncUrlField: urlField
     property alias syncAutoCheck: cbAuto
-    // 任务 1：页面级滚动容器与日志列表句柄（滚动/宽度冒烟断言用）
+    // 页面级滚动容器与日志列表句柄（滚动/宽度冒烟断言用）
     property alias syncScroll: syncScroll
     property alias syncForm: syncForm
     property alias syncLogView: logView
+    // BUG1：返回按钮句柄（固定 header，滚到底仍可见——tst_syncpage 断言）
+    property alias backButton: backButton
 
+    // 固定顶部：返回 + 页面标题（B4 返回导航位，同 SettingsPage/TTS/背景子页模式）
+    RowLayout {
+        id: header
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.leftMargin: 24
+        anchors.rightMargin: 24
+        anchors.topMargin: 16
+        ToolButton {
+            id: backButton
+            text: "← " + qsTr("返回")
+            onClicked: page.goBack()
+        }
+        Label {
+            text: page.title
+            font.pixelSize: UITheme.fsPageTitle
+            font.bold: true
+            color: UITheme.textPrimary
+            Layout.leftMargin: 8
+        }
+    }
+
+    // BUG1：页面级滚动容器（header 不在其中——固定 header 不参与内容滚动；
+    // clip 显式声明，滚动内容不渗出视口边缘，左上角无灰色残留）
     ScrollView {
         id: syncScroll
-        anchors.fill: parent
-        anchors.margins: 24
-        // 任务 1：页面级滚动条——内容超出视口时可见，保证小窗口下表单可达
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.top: header.bottom
+        anchors.leftMargin: 24
+        anchors.rightMargin: 24
+        anchors.bottomMargin: 24
+        anchors.topMargin: 12
+        clip: true
+        // 页面级滚动条——内容超出视口时可见，保证小窗口下表单可达
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
         ColumnLayout {
             id: syncForm
@@ -46,22 +83,6 @@ Page {
             width: Math.max(0, syncScroll.width
                                 - syncScroll.leftPadding - syncScroll.rightPadding)
             spacing: 12
-
-            RowLayout {
-                Button {
-                    text: qsTr("返回")
-                    onClicked: {
-                        const win = Window.window
-                        if (win && win.goBack) win.goBack()
-                        else page.StackView.view.pop()
-                    }
-                }
-                Label {
-                    text: qsTr("WebDAV 同步")
-                    font.bold: true
-                    font.pixelSize: 18
-                }
-            }
 
             RowLayout {
                 Label { text: qsTr("服务器地址") }
@@ -150,7 +171,7 @@ Page {
             ListView {
                 id: logView
                 Layout.fillWidth: true
-                // 任务 1：日志区保留明确高度（小窗口下不被视口压缩成 0），
+                // 日志区保留明确高度（小窗口下不被视口压缩成 0），
                 // 页面级滚动负责表单整体，日志内部仍独立滚动
                 Layout.preferredHeight: 180
                 clip: true

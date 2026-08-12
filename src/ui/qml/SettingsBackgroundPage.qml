@@ -41,6 +41,8 @@ Page {
     property alias textColorSection: textColorSection
     property alias textColorGrid: textColorGrid
     property alias bgImageHint: bgImageHint
+    // BUG8：FileDialog 句柄（空 selectedFiles 防御路径冒烟断言用）
+    property alias bgFileDialog: bgFileDialog
     // 当前背景分区状态（onCompleted 从 Settings 恢复；导入后更新）
     property string bgImagePath: ""
     property real bgBlur: 0.0
@@ -139,7 +141,10 @@ Page {
                 title: qsTr("选择背景图片")
                 fileMode: FileDialog.OpenFile
                 nameFilters: ["图片 (*.png *.jpg *.jpeg *.webp *.bmp *.gif)"]
-                onAccepted: page.importBackgroundImage(bgFileDialog.selectedFiles[0])
+                // BUG8：防御性接受——取消/个别平台路径可能以空 selectedFiles 发
+                // accepted，空选择不触发导入；非空才走复制导入（selectedFiles[0]
+                // 为 file:// URL，copyToBackgrounds 可处理）
+                onAccepted: page.handleBgFileAccepted()
             }
             // 任务5：自定义图片预览固定为小长方形卡片（220×120，始终可见）——
             // 未选图时显示当前背景模式底色；image 模式叠加图片与 MultiEffect
@@ -288,9 +293,12 @@ Page {
         }
     }
 
-    // B4：返回上一页（设置页）。抽函数暴露供 QML 冒烟测试驱动
+    // B4/BUG2：返回上一页（设置页）——只 pop 当前层（绝不经 Main.goBack
+    // 弹回主页；无 StackView 上下文如测试直载时安全空操作）。抽函数暴露供
+    // QML 冒烟测试驱动
     function goBack() {
-        page.StackView.view.pop()
+        const stack = page.StackView.view
+        if (stack && stack.depth > 1) stack.pop()
     }
 
     // ---- D5：阅读背景分区（background/mode、imagePath、blur、brightness）----
@@ -306,6 +314,12 @@ Page {
     function setBgBrightness(v) {
         page.bgBrightness = Math.max(0.5, Math.min(1.5, v))
         Settings.setValue("background/brightness", page.bgBrightness)
+    }
+    // BUG8：FileDialog accepted 防御——取消/空 selectedFiles（个别平台以空列表
+    // 发 accepted）不触发导入；非空才转交 importBackgroundImage（函数供冒烟驱动）
+    function handleBgFileAccepted() {
+        if (bgFileDialog.selectedFiles.length === 0) return
+        page.importBackgroundImage(bgFileDialog.selectedFiles[0])
     }
     // 选图导入：复制到 AppData/backgrounds/ 成功后写 imagePath + mode=image，并同步单选/提示。
     // 注：程序化 currentValue 赋值不触发 KdRadioGrid.selected（Qt 6.11 实测语义），

@@ -427,5 +427,32 @@ Item {
                    + page.bgThumb.height)
             loader.destroy()
         }
+
+        // BUG8：FileDialog 防御——取消/空 selectedFiles 不触发导入（onAccepted
+        // 只处理非空选择；个别平台/路径可能以空列表发 accepted，不得写模式/路径）
+        function test_10_fileDialogEmptySelectionNoImport() {
+            Settings.setValue("background/mode", "light")
+            Settings.setValue("background/imagePath", "")
+            var loader = bgSettingsComp.createObject(root)
+            loader.width = 1100; loader.height = 720
+            var page = loader.item
+            verify(page !== null, "SettingsBackgroundPage 应能加载")
+            verify(page.bgFileDialog !== undefined, "应暴露背景 FileDialog 句柄")
+            // 未打开/取消后 selectedFiles 为空——防御路径不触发导入
+            compare(page.bgFileDialog.selectedFiles.length, 0,
+                    "未选择的 FileDialog selectedFiles 应为空")
+            page.handleBgFileAccepted()
+            compare(String(Settings.value("background/mode")), "light",
+                    "空 selectedFiles 不应改背景模式")
+            compare(String(Settings.value("background/imagePath")), "",
+                    "空 selectedFiles 不应导入图片")
+            // 非空选择仍正常导入（防御不破坏正常路径）
+            page.importBackgroundImage(TestEnv.backgroundImage)
+            verify(String(Settings.value("background/imagePath")).length > 0,
+                   "有效选择仍应导入图片")
+            loader.destroy()
+            Settings.setValue("background/mode", "light")
+            Settings.setValue("background/imagePath", "")
+        }
     }
 }

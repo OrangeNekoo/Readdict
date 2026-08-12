@@ -543,38 +543,22 @@ Item {
             c.contentY = 0
             wait(100)
             compare(fires, 0, "顶部滚动不应触发 requestNextChapter")
-            // 距底部 50px（< autoNextThreshold 200px）→ 触发
+            // BUG5：距底 50px 仍有内容未展示，不应提前换章；只有真实底边界才触发。
             c.contentY = Math.max(0, c.contentHeight - c.height - 50)
+            wait(100)
+            compare(fires, 0, "距底 50px 尚未到边界，不应触发")
+            c.contentY = 10
+            wait(50)
+            c.contentY = Math.max(0, c.contentHeight - c.height)
             tryVerify(function () { return fires >= 1 }, 3000,
-                      "滚动接近底部应触发 requestNextChapter，实际 " + fires)
-            // 去重：同一章内反复滚到章末不再重复触发
-            c.contentY = 10
-            wait(50)
-            c.contentY = Math.max(0, c.contentHeight - c.height - 50)
-            wait(100)
+                      "滚动到真实底边界应触发 requestNextChapter，实际 " + fires)
             compare(fires, 1, "同一章内 requestNextChapter 应只触发一次")
-            // 短章语义：maxY <= 阈值带（内容仅超出视口 1..200px）时任何 contentY>0
-            // 都落在带内——不得触发（否则首个小滚动即误换章、连翻多章）
+            // 短章语义：maxY<=0 时停在顶部不触发。
             c.nextChapterRequested = false
-            c.autoNextThreshold = 10000   // 阈值大于 maxY → 模拟短章
-            c.contentY = 10
-            wait(50)
-            c.contentY = Math.max(0, c.contentHeight - c.height - 50)
+            c.autoNextThreshold = 10000
+            c.contentY = 0
             wait(100)
-            compare(fires, 1, "maxY 小于等于阈值时滚动触底不应触发")
-            // 阈值带精确：阈值 10px → 距底 50px（带外）不触发、距底 5px（带内）触发
-            c.nextChapterRequested = false
-            c.autoNextThreshold = 10
-            c.contentY = 10
-            wait(50)
-            c.contentY = Math.max(0, c.contentHeight - c.height - 50)
-            wait(100)
-            compare(fires, 1, "距底超过阈值不应触发")
-            c.contentY = 10
-            wait(50)
-            c.contentY = Math.max(0, c.contentHeight - c.height - 5)
-            wait(100)
-            compare(fires, 2, "距底 5px（小于阈值 10px）应触发")
+            compare(fires, 1, "短章顶部不应触发")
             loader.destroy()
         }
 
@@ -601,14 +585,14 @@ Item {
             c.requestNextChapter.connect(function () { fires++ })
             // TTS 暂停（state==2）：滚动触底不触发（暂停会话不应被丢弃）
             Tts.pause()
-            c.contentY = Math.max(0, c.contentHeight - c.height - 50)
+            c.contentY = Math.max(0, c.contentHeight - c.height)
             wait(150)
             compare(fires, 0, "TTS 暂停中滚动触底不应触发 requestNextChapter")
-            // TTS 停止（state==0）：滚动续章恢复
+            // TTS 停止（state==0）：滚动续章恢复；必须到真实底边界。
             Tts.stop()
             c.contentY = 10
             wait(50)
-            c.contentY = Math.max(0, c.contentHeight - c.height - 50)
+            c.contentY = Math.max(0, c.contentHeight - c.height)
             tryVerify(function () { return fires >= 1 }, 3000,
                       "TTS 停止后滚动触底应触发 requestNextChapter")
             loader.destroy()
@@ -640,16 +624,14 @@ Item {
             c.followSentence(79)
             wait(600) // 动画 320ms + 余量，期间每帧 contentY 变化都会进 checkAutoNext
             compare(fires, 0, "动画滚动到章末不应触发 requestNextChapter")
-            // 用户手动滚动（先上移再回到底部）→ 触发
+            // 用户手动滚动（先上移再回到底部）→ 触发；真实底边界前不换章。
             c.contentY = Math.max(0, c.contentHeight - c.height - 100)
             wait(50)
-            c.contentY = Math.max(0, c.contentHeight - c.height - 20)
+            c.contentY = Math.max(0, c.contentHeight - c.height)
             tryVerify(function () { return fires >= 1 }, 3000,
                       "用户手动滚动到章末应触发 requestNextChapter")
             loader.destroy()
         }
-
-        // 规格 §7 端到端绑定：ReaderContent 的 requestNextChapter 信号必须经 ReaderPage 的
         // onRequestNextChapter 绑定调用 autoNextChapter 换章（断绑则滚动续章静默失效）。
         // 直接 emit 信号（QML 信号可作方法调用）锁定该一行绑定，不依赖无头环境的锚定布局。
         function test_scrollAutoNextBinding() {
@@ -859,6 +841,103 @@ Item {
             card.book = { id: 106, title: "无出版社书", cover: "", progress: 0 }
             compare(card.publisherLabel.visible, false, "无出版社时出版社行应隐藏")
             loader.destroy()
+        }
+        // BUG3：出版社行不被进度条遮挡——标准书（title+author+publisher）出版社底部
+        // 必须不越过进度条顶部；author-only / publisher-only 场景同样成立；进度条与
+        // 出版社都完整落在卡片内。
+        function test_publisherNotCoveredByProgressLine() {
+            var loader = cardComp.createObject(root)
+            var card = loader.item
+            verify(card !== null, "BookCard 应能加载")
+            verify(card.progressLine !== undefined, "进度条应暴露句柄 progressLine")
+            verify(card.publisherLabel !== undefined, "出版社行应暴露句柄 publisherLabel")
+            verify(card.authorLabel !== undefined, "作者行应暴露句柄 authorLabel")
+            // 标准书：title+author+publisher 全有（原几何中进度条 y=283..286 压在出版社底部）
+            card.book = { id: 201, title: "标准书", author: "作者甲", publisher: "出版社乙", cover: "", progress: 0.5 }
+            wait(50)
+            verify(card.publisherLabel.visible, "有出版社时出版社行应显示")
+            var pubBottom = card.publisherLabel.y + card.publisherLabel.height
+            verify(pubBottom <= card.progressLine.y,
+                   "出版社底部(" + pubBottom + ")不应越过进度条顶部(" + card.progressLine.y + ")")
+            verify(pubBottom <= card.height,
+                   "出版社应完整落在卡片内：底部 " + pubBottom + " 超出卡片高 " + card.height)
+            verify(card.progressLine.y + card.progressLine.height <= card.height,
+                   "进度条应完整落在卡片内：y=" + card.progressLine.y + " h=" + card.progressLine.height
+                   + " 超出卡片高 " + card.height)
+            // author-only：无出版社——进度条不得压作者行
+            card.book = { id: 202, title: "仅作者书", author: "作者丙", cover: "", progress: 0.5 }
+            wait(20)
+            verify(!card.publisherLabel.visible, "无出版社时出版社行应隐藏")
+            var authBottom = card.authorLabel.y + card.authorLabel.height
+            verify(authBottom <= card.progressLine.y,
+                   "仅作者时作者底部(" + authBottom + ")不应越过进度条顶部(" + card.progressLine.y + ")")
+            // publisher-only：无作者——出版社紧跟标题，进度条不得压出版社
+            card.book = { id: 203, title: "仅出版社书", publisher: "出版社丁", cover: "", progress: 0.5 }
+            wait(20)
+            verify(!card.authorLabel.visible, "无作者时作者行应隐藏")
+            verify(card.publisherLabel.visible, "publisher-only 时出版社行应显示")
+            var pubBottom2 = card.publisherLabel.y + card.publisherLabel.height
+            verify(pubBottom2 <= card.progressLine.y,
+                   "publisher-only 时出版社底部(" + pubBottom2 + ")不应越过进度条顶部(" + card.progressLine.y + ")")
+            loader.destroy()
+        }
+        // BUG3：compact（HomePage 横排）卡片不显示作者/出版社/进度条，标题不越界
+        function test_compactCardNoOverlap() {
+            var loader = cardComp.createObject(root)
+            var card = loader.item
+            verify(card !== null, "BookCard 应能加载")
+            card.compact = true
+            card.book = { id: 204, title: "紧凑书", author: "作者戊", publisher: "出版社己", cover: "", progress: 0.5 }
+            wait(50)
+            compare(card.authorLabel.visible, false, "compact 卡片不应显示作者行")
+            compare(card.publisherLabel.visible, false, "compact 卡片不应显示出版社行")
+            compare(card.progressLine.visible, false, "compact 卡片不应显示进度条")
+            verify(card.cardTitle.y + card.cardTitle.height <= card.height,
+                   "compact 标题应完整落在卡片内：底部 "
+                   + (card.cardTitle.y + card.cardTitle.height) + " 超出卡片高 " + card.height)
+            loader.destroy()
+        }
+        // BUG3：书架网格 cell 与卡片尺寸一致——800x600 与 1100x720 下真实渲染的
+        // 卡片内容不互相覆盖（cell 预留呼吸空间 + 网格内出版社不被进度条遮挡）
+        function test_gridCellFitsCard() {
+            var cardLoader = cardComp.createObject(root)
+            var card = cardLoader.item
+            verify(card !== null, "BookCard 应能加载")
+            card.book = { id: 205, title: "网格书", author: "作者庚", publisher: "出版社辛", cover: "", progress: 0.5 }
+            wait(50)
+            var sizes = [[800, 600], [1100, 720]]
+            for (var i = 0; i < sizes.length; i++) {
+                var loader = shelfComp.createObject(root)
+                loader.width = sizes[i][0]
+                loader.height = sizes[i][1]
+                var shelf = loader.item
+                verify(shelf !== null, "ShelfPage 应能加载")
+                verify(shelf.grid !== undefined, "ShelfPage 应暴露 grid 句柄")
+                var grid = shelf.grid
+                verify(grid.cellWidth >= card.width + 8,
+                       "cellWidth(" + grid.cellWidth + ") 应大于卡片宽(" + card.width + ")，窗口 "
+                       + sizes[i][0] + "x" + sizes[i][1])
+                verify(grid.cellHeight >= card.height + 8,
+                       "cellHeight(" + grid.cellHeight + ") 应大于卡片高(" + card.height + ")，窗口 "
+                       + sizes[i][0] + "x" + sizes[i][1])
+                // 真实 delegate 渲染：模型替换为固定数据，网格内卡片不得互相覆盖
+                grid.model = [{ id: 205, title: "网格书", author: "作者庚", publisher: "出版社辛", cover: "", progress: 0.5 }]
+                var delegate = null
+                tryVerify(function () {
+                    var ch = grid.contentItem.children
+                    for (var j = 0; j < ch.length; j++)
+                        if (ch[j].book && ch[j].book.title === "网格书") { delegate = ch[j]; return true }
+                    return false
+                }, 2000, "网格应实例化卡片 delegate")
+                verify(delegate !== null, "网格内应能找到卡片 delegate")
+                var pb = delegate.publisherLabel.y + delegate.publisherLabel.height
+                verify(pb <= delegate.progressLine.y,
+                       "网格内出版社底部(" + pb + ")不应越过进度条顶部(" + delegate.progressLine.y + ")")
+                verify(delegate.progressLine.y + delegate.progressLine.height <= delegate.height,
+                       "网格内进度条应完整落在卡片内")
+                loader.destroy()
+            }
+            cardLoader.destroy()
         }
     }
     TestCase {

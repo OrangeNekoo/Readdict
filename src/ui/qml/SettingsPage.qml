@@ -52,7 +52,7 @@ Page {
         anchors.topMargin: 16
         ToolButton {
             id: backButton
-            text: "← " + qsTr("返回")
+            contentItem: KdIcons { name: "back"; size: 22; color: UITheme.textPrimary }
             onClicked: page.goBack()
         }
         Label {
@@ -205,10 +205,12 @@ Page {
         }
     }
 
+    // B4/BUG2：返回上一页——只 pop 当前层（绝不经 Main.goBack 把设置子页/
+    // 辅助页直接弹回主页；无 StackView 上下文如测试直载时安全空操作）。
+    // 与 SyncPage/StatsPage/设置子页同模式。
     function goBack() {
-        const win = Window.window
-        if (win && win.goBack) win.goBack()
-        else page.StackView.view.pop()
+        const stack = page.StackView.view
+        if (stack && stack.depth > 1) stack.pop()
     }
 
     // B2：刷新封面——同步调用并显示提示（经 Importer.coversRefreshed 联动书架）

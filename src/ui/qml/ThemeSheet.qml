@@ -22,6 +22,7 @@ import Readdict.UI 1.0
 // manageRow（管理主题入口）、openSaveDialog()/saveCurrentTheme(name)/refresh()。
 Item {
     id: themeSheet
+    implicitHeight: themeColumn.implicitHeight
 
     objectName: "themeSheetPanel"
     property string bgMode: "light"
@@ -54,6 +55,7 @@ Item {
     property alias manageRow: manageEntry
 
     ColumnLayout {
+        id: themeColumn
         anchors.fill: parent
         anchors.margins: 12
         spacing: 10

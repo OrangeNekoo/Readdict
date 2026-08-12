@@ -18,6 +18,8 @@ Page {
     property alias filterButton: filterButton
     property alias filterIcon: filterIcon
     property alias fulltextList: ftList
+    // BUG3：书架网格句柄（冒烟断言 cellWidth/cellHeight 与 BookCard 尺寸一致、不覆盖）
+    property alias grid: grid
 
     Connections {
         target: Importer
@@ -138,7 +140,9 @@ Page {
             clip: true
             readonly property int columnCount: Math.max(1, Math.floor(width / 200))
             cellWidth: Math.max(190, Math.floor(width / columnCount))
-            cellHeight: 306
+            // BUG3：与 BookCard 非 compact 高度 316 同步（316 + 10 行间呼吸空间）；
+            // 原 306 对应旧卡高 296，卡高增至 316 后必须同步，否则下行卡片压住上行
+            cellHeight: 326
             model: Books.booksModel
             delegate: BookCard {
                 width: 180

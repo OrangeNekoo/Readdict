@@ -51,9 +51,8 @@ Page {
     }
 
     function goBack() {
-        const win = Window.window
-        if (win && win.goBack) win.goBack()
-        else page.StackView.view.pop()
+        const stack = page.StackView.view
+        if (stack && stack.depth > 1) stack.pop()
     }
     Component.onCompleted: page.refresh()
 

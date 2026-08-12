@@ -129,5 +129,50 @@ Item {
             loader.destroy()
             host.destroy()
         }
+
+        // BUG1：返回按钮固定顶部——header 移出页面滚动容器，滚动后不随表单
+        // 滚出视口（同 SettingsPage B4 模式：固定 header + ScrollView 顶部锚接）
+        function test_backButtonFixedWhileFormScrolls() {
+            var host = Qt.createQmlObject(
+                "import QtQuick; Item { width: 480; height: 420 }",
+                root, "syncSmallHostFixedHeader")
+            var loader = syncPageComp.createObject(host)
+            loader.width = host.width
+            loader.height = host.height
+            var page = loader.item
+            verify(page !== null, "SyncPage 应能加载")
+            verify(page.backButton !== undefined, "SyncPage 应暴露返回按钮句柄")
+            tryVerify(function () {
+                return page.syncScroll !== undefined
+                       && page.syncScroll.width > 0
+                       && page.syncScroll.contentHeight > 0
+            }, 3000, "页面滚动容器应完成布局")
+            // 返回按钮位于滚动容器上方（固定 header，不参与内容滚动）
+            var btnBottom = page.backButton.mapToItem(page, 0, page.backButton.height).y
+            var scrollTop = page.syncScroll.mapToItem(page, 0, 0).y
+            verify(btnBottom <= scrollTop,
+                   "返回按钮应位于滚动容器上方：btnBottom=" + btnBottom
+                   + " scrollTop=" + scrollTop)
+            // ScrollView 通过 contentItem 的 Flickable 承载滚动位置；使用其真实
+            // contentY 驱动滚底，避免把 ScrollView 自身当作 Flickable。
+            var scrollFlick = page.syncScroll.contentItem
+            verify(scrollFlick !== null, "ScrollView 应暴露内容 Flickable")
+            var beforeY = page.backButton.mapToItem(page, 0, 0).y
+            scrollFlick.contentY = Math.max(0,
+                scrollFlick.contentHeight - scrollFlick.height)
+            compare(page.backButton.mapToItem(page, 0, 0).y, beforeY,
+                    "滚动后返回按钮位置不应移动")
+            var btnY = beforeY
+            verify(page.backButton.visible && btnY >= 0
+                   && btnY + page.backButton.height <= page.height,
+                   "滚动后返回按钮应固定可见（y=" + btnY + "）")
+            // 必要滚动条：内容超高 → 垂直滚动条策略允许按需出现（AsNeeded）
+            verify(page.syncScroll.ScrollBar.vertical !== null,
+                   "页面级垂直滚动条句柄应存在")
+            verify(page.syncScroll.ScrollBar.vertical.policy !== ScrollBar.AlwaysOff,
+                   "垂直滚动条策略应允许按需出现")
+            loader.destroy()
+            host.destroy()
+        }
     }
 }

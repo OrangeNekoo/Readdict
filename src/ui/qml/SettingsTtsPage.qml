@@ -233,11 +233,12 @@ Page {
         }
     }
 
-    // B4：返回上一页（设置页）。抽函数暴露供 QML 冒烟测试驱动
+    // B4/BUG2：返回上一页（设置页）——只 pop 当前层（绝不经 Main.goBack
+    // 弹回主页；无 StackView 上下文如测试直载时安全空操作）。抽函数暴露供
+    // QML 冒烟测试驱动
     function goBack() {
-        const win = Window.window
-        if (win && win.goBack) win.goBack()
-        else page.StackView.view.pop()
+        const stack = page.StackView.view
+        if (stack && stack.depth > 1) stack.pop()
     }
 
     // 保存 TTS 配置：写 settings.json 的 tts/ 分区 → Tts.reconfigure 重建引擎。

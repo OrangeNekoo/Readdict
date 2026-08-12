@@ -37,14 +37,19 @@ Item {
     signal clicked()
     // U3：Kindle 封面网格——封面 3:4（宽 -12 = 168，高 224）、无圆角、轻投影
     //（UITheme.shadowBook rgba(0,0,0,0.08)）、无卡片边框；标题下置 15px（fsListItem）、
-    // 作者小字灰（textSecondary）、进度细条。卡片 180×296（网格 cell 190×306，见 ShelfPage）。
+    // 作者小字灰（textSecondary）、进度细条。卡片 180×316（网格 cell 190×326，见 ShelfPage）。
+    // BUG3：非 compact 高度 296 → 316——出版社行（约 y=290，随字体度量浮动）之下还需
+    // 容纳 8px 间距 + 3px 进度条；高度同步 cellHeight（ShelfPage 306 → 326）保证网格
+    // 行间仍留 10px 呼吸空间，卡片不互相覆盖。
     width: compact ? 96 : 180
-    height: compact ? 168 : 296
+    height: compact ? 168 : 316
     implicitWidth: width
     implicitHeight: height
     property alias authorLabel: authorLabel
     // 任务4：出版社行句柄（冒烟断言有出版社显示/无出版社隐藏）
     property alias publisherLabel: publisherLabel
+    // BUG3：进度条句柄（冒烟断言出版社/作者行不被进度条遮挡、进度条完整落在卡片内）
+    property alias progressLine: progressLine
 
     // D7：悬停上浮——scale 1.03 + Behavior 缓动（Material 卡片悬停反馈）
     scale: cardMouse.hovered ? 1.03 : 1.0
@@ -195,16 +200,21 @@ Item {
 
         // B5：进度细条（Kindle 主页风格）——细 3px 圆角线替代 ProgressBar；
         // U1：填充色改 Kindle 选中 Token（light #1A1A1A / dark #E8E8E3）；
-        // U3：轨道色改 divider Token（原硬编码 #33FFFFFF/#22000000 移除）
+        // U3：轨道色改 divider Token（原硬编码 #33FFFFFF/#22000000 移除）；
+        // BUG3：锚点从卡片底改为最后一个文本行（出版社>作者>标题）下方 8px——
+        // 无论哪一行存在，进度条都不会压住文本（原 bottom 锚定使 y=283..286 覆盖
+        // 出版社底部），author-only/publisher-only 场景同样成立
         Rectangle {
             visible: !card.compact
             id: progressLine
-            anchors.bottom: parent.bottom
+            anchors.top: publisherLabel.visible ? publisherLabel.bottom
+                         : authorLabel.visible ? authorLabel.bottom
+                         : titleText.bottom
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.leftMargin: 12
             anchors.rightMargin: 12
-            anchors.bottomMargin: 10
+            anchors.topMargin: 8
             height: 3
             radius: 1.5
             color: UITheme.divider

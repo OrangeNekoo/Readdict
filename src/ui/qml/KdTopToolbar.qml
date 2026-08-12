@@ -8,7 +8,8 @@ import Readdict.UI 1.0
 Rectangle {
     id: bar
     height: 40
-    color: "transparent"
+    color: UITheme.bgPrimary
+    opacity: 1
 
     property bool bookmarked: false
     signal back()

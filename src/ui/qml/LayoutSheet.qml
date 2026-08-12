@@ -9,8 +9,8 @@ import Readdict.UI 1.0
 // setLineHeight/setAlign。测试句柄：modeItems/marginItems/lineItems/alignSlider。
 Item {
     id: layoutSheet
-
     objectName: "layoutSheetPanel"
+    implicitHeight: layoutColumn.implicitHeight
     property string pageMode: "scroll"
     property string pageWidth: "normal"
     property real lineHeight: 1.6
@@ -49,6 +49,7 @@ Item {
     property alias alignSlider: alignSlider
 
     ColumnLayout {
+        id: layoutColumn
         anchors.fill: parent
         anchors.margins: 16
         spacing: 10

@@ -124,7 +124,7 @@ ApplicationWindow {
 
     function goBack() {
         if (stack.depth <= 1) return
-        stack.pop(null, StackView.Immediate)
+        stack.pop()
         root.syncNav()
     }
 

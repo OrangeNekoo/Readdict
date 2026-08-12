@@ -100,6 +100,9 @@ Flickable {
     // 两动画驱动同一 contentY，并发会让目标互相覆盖）
     property alias pageAnimation: pageAnim
     property alias followAnimation: followAnim
+    // BUG4：paged 左右边缘翻页提示句柄（冒烟测试断言提示可见且不拦截点击）
+    property alias prevPageHint: prevEdgeHint
+    property alias nextPageHint: nextEdgeHint
     // ---- C7：划线/笔记 ----
     property int bookId: -1                      // 当前书 id（addHighlight 参数）
     property var highlights: []                   // Highlights.highlightsForBook 结果（ReaderPage 注入）
@@ -158,9 +161,9 @@ Flickable {
     // 按压 grab 的隐式仲裁（不同 Qt 版本/输入设备下该仲裁可能变化）。
     TapHandler {
         id: contentTapHandler
+        enabled: flick.pageMode !== "paged"
         acceptedButtons: Qt.LeftButton
         gesturePolicy: TapHandler.DragThreshold
-        // 视口坐标命中可见选择/颜色工具条（selBar/colorBar 是 contentItem 子项，
         // 坐标为内容坐标；mapToItem 换算回视口，与 point.position 同坐标系）
         function toolbarHitTest(vx, vy) {
             if (selBar.visible) {
@@ -400,13 +403,12 @@ Flickable {
                 || flick.ttsActive || followAnim.running || pageAnim.running
                 || flick.contentHeight <= 0 || flick.height <= 0)
             return
-        // 可滚动范围必须大于阈值带：maxY <= autoNextThreshold 的短章（内容仅超出视口
-        // 1..200px）任何 contentY>0 都落在带内，首个小滚动即误换章、连翻多章——不触发
-        if (flick.contentHeight - flick.height <= flick.autoNextThreshold)
-            return
-        // contentY > 0：整章放得下视口的短章（maxY<=0）停在顶部时不触发；
-        // 短章读者已看到全部内容，不应被自动拽走
-        if (flick.contentY > 0 && flick.contentY >= flick.contentHeight - flick.height - flick.autoNextThreshold) {
+        // BUG5：只有**真正到达内容边界**（maxY，1px 容差）才请求换章——旧实现以
+        // autoNextThreshold（200px）带触发，滚动进带即换章，带内内容（最多一屏）
+        // 尚未展示就被拽走（"未完全展示提前翻章"）；短章（maxY<=0）由
+        // contentY > 0 门控天然排除（整章已完整可见，停在顶部不触发）。
+        // contentY > 0：整章放得下视口的短章（maxY<=0）停在顶部时不触发
+        if (flick.contentY > 0 && flick.contentY >= flick.contentHeight - flick.height - 1) {
             flick.nextChapterRequested = true   // 去重：同一章只发一次，换章（onChapterChanged）复位
             flick.requestNextChapter()
         }
@@ -538,9 +540,9 @@ Flickable {
         }
         switch (key) {
         case Qt.Key_Up: case Qt.Key_PageUp:
-            flick.scrollPage(-1); return true
+            flick.scrollPage(-1, isAutoRepeat); return true
         case Qt.Key_Down: case Qt.Key_PageDown:
-            flick.scrollPage(1); return true
+            flick.scrollPage(1, isAutoRepeat); return true
         case Qt.Key_Left:
             if (!isAutoRepeat) flick.requestPrevChapter(); return true
         case Qt.Key_Right:
@@ -549,12 +551,20 @@ Flickable {
         return false
     }
 
-    // scroll 模式：滚动一视口页（± 视口高度，钳制到 [0, maxY]）
-    function scrollPage(dir) {
+    // scroll 模式：滚动一视口页（± 视口高度，钳制到 [0, maxY]）。
+    // BUG5：双向边界语义——向上在页首（contentY=0）钳制原地不换章；向下已在
+    // 真实底边界（target==maxY==current，整章已完全展示）时请求换下一章
+    //（与 paged 章末翻章对称；ReaderPage.autoNextChapter 兜底末章不换）。
+    // 动画/状态：边界时不启动空转动画（不置 checkNextOnStop，避免 onStopped
+    // 重复补查）；非边界正常驱动 pageAnim 并在自然停止时补查边界换章。
+    function scrollPage(dir, isAutoRepeat) {
         if (flick.contentHeight <= 0 || flick.height <= 0) return
         var maxY = Math.max(0, flick.contentHeight - flick.height)
         var target = Math.max(0, Math.min(flick.contentY + dir * flick.height, maxY))
-        if (Math.abs(target - flick.contentY) < 1) return
+        if (Math.abs(target - flick.contentY) < 1) {
+            if (dir > 0 && !isAutoRepeat) flick.requestNextChapter()
+            return
+        }
         followAnim.stop()   // E4 复审：两动画驱动同一 contentY，启动前停掉对方
         pageAnim.stop()
         flick.checkNextOnStop = true
@@ -1023,12 +1033,18 @@ Flickable {
                 id: pageScroll
                 anchors.fill: parent
                 clip: true
-                // 数值枚举同外层技巧（本 Qt 6.11 类型名枚举不可解析、字面量被编译器
-                // 静态枚举校验拒绝）——三元表达式恒取 2=VerticalOnly；boundsBehavior
-                // 默认即 StopAtBounds，无需显式赋值
                 flickableDirection: true ? 2 : 1
                 contentWidth: pageScroll.width
                 contentHeight: pageCol.implicitHeight
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                TapHandler {
+                    acceptedButtons: Qt.LeftButton
+                    gesturePolicy: TapHandler.DragThreshold
+                    onTapped: {
+                        const mapped = pageScroll.mapToItem(flick, 0, point.position.y)
+                        flick.contentTapped(point.position.x, mapped.y)
+                    }
+                }
                 Column {
                     id: pageCol
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -1082,6 +1098,47 @@ Flickable {
             id: pageRep
             model: flick.pageModel
             delegate: pageComp
+        }
+    }
+
+    // ---- BUG4：paged 左右边缘翻页提示 ----
+    // 半透明圆角箭头条，垂直居中贴左右边缘；纯视觉（不挂 MouseArea/TapHandler，
+    // 不拦截点击——边缘点击仍由根级 contentTapHandler 上报 ReaderPage 翻页）。
+    // 视口固定：x 叠加 contentX（同 selBar 模式；paged 下 contentY 恒 0）；
+    // z 低于选择工具条（selBar/colorBar z:10）。仅 paged 模式显示；Sheet/菜单
+    // 打开时被全页遮罩盖住，无需额外显隐联动。
+    Rectangle {
+        id: prevEdgeHint
+        visible: flick.pageMode === "paged"
+        x: flick.contentX + 10
+        y: flick.contentY + flick.height / 2 - prevEdgeHint.height / 2
+        width: 36
+        height: 52
+        radius: 8
+        color: "#2E000000"
+        z: 5
+        Text {
+            anchors.centerIn: parent
+            text: "‹"
+            color: "white"
+            font.pixelSize: 26
+        }
+    }
+    Rectangle {
+        id: nextEdgeHint
+        visible: flick.pageMode === "paged"
+        x: flick.contentX + flick.width - nextEdgeHint.width - 10
+        y: flick.contentY + flick.height / 2 - nextEdgeHint.height / 2
+        width: 36
+        height: 52
+        radius: 8
+        color: "#2E000000"
+        z: 5
+        Text {
+            anchors.centerIn: parent
+            text: "›"
+            color: "white"
+            font.pixelSize: 26
         }
     }
 

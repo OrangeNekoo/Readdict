@@ -851,22 +851,36 @@ Page {
     // 调用——否则违反"隐藏后计时停止"；重置只发生在显示态。
     function handleContentTap(y, x) {
         content.forceActiveFocus()
-        if (page.sheetOpen) { page.sheetOpen = false; return }
-        if (page.menuOpen) { page.menuOpen = false; return }
-        if (page.pageMode === "paged" && x !== undefined && x >= 0) {
-            if (x >= content.width / 2) content.pageNext(false)
-            else content.pagePrev(false)
+        if (page.menuOpen) {
+            page.menuOpen = false
+            page.sheetOpen = false
             return
         }
-        // 保留隐藏态底部唤出语义；其余位置切换 Kindle Sheet。
-        const summonBottom = content.y + content.height * 0.75
-        if (!page.controlsVisible && y >= summonBottom) {
+        if (page.sheetOpen) {
+            page.sheetOpen = false
+            return
+        }
+        if (page.pageMode === "paged" && x !== undefined && x >= 0) {
+            const hotTop = content.y + content.height * 0.2
+            const hotBottom = content.y + content.height * 0.8
+            if (y <= hotTop || y >= hotBottom) {
+                page.controlsVisible = true
+                page.sheetOpen = true
+                hideControlsTimer.stop()
+                return
+            }
+            const edge = Math.max(72, content.width * 0.15)
+            if (x <= edge) content.pagePrev(false)
+            else if (x >= content.width - edge) content.pageNext(false)
+            return
+        }
+        const hotTop = content.y + content.height * 0.2
+        const hotBottom = content.y + content.height * 0.8
+        if (y <= hotTop || y >= hotBottom) {
             page.controlsVisible = true
             page.sheetOpen = true
             hideControlsTimer.stop()
-            return
         }
-        page.sheetOpen = true
     }
     onSheetOpenChanged: {
         if (page.sheetOpen) hideControlsTimer.stop()
@@ -905,33 +919,32 @@ Page {
     Item {
         id: menuOverlay
         z: 30
-
         anchors.fill: parent
-        visible: page.menuOpen
-        // 遮罩（rgba(0,0,0,0.3)，淡入）
+        visible: page.menuOpen || opacity > 0.01
+        opacity: page.menuOpen ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 150 } }
         Rectangle {
             anchors.fill: parent
             color: UITheme.overlay
-            opacity: page.menuOpen ? 1 : 0
-            Behavior on opacity {
-                NumberAnimation { duration: 150 }
-            }
             MouseArea {
                 anchors.fill: parent
+                enabled: page.menuOpen
                 onClicked: page.menuOpen = false
             }
         }
-        // 菜单面板：贴右上角（顶栏下方），实色背景 + 细边框，无圆角（§5 组件样式）
         Rectangle {
+            id: menuPanel
             anchors.top: parent.top
             anchors.topMargin: 38
             anchors.right: parent.right
             anchors.rightMargin: 8
             width: parent.width * 0.62
+            height: menuColumn.implicitHeight
             color: UITheme.bgPrimary
             border.color: UITheme.divider
             border.width: 1
             Column {
+                id: menuColumn
                 width: parent.width
                 Repeater {
                     id: menuRepeater
@@ -941,7 +954,7 @@ Page {
                         width: parent.width
                         height: modelData.divider ? 1 : 48
                         color: modelData.divider ? UITheme.divider
-                                                 : (menuRowMouse.containsMouse ? "#0A000000" : "transparent")
+                                                 : (menuRowMouse.containsMouse ? UITheme.bgSecondary : UITheme.bgPrimary)
                         MouseArea {
                             id: menuRowMouse
                             anchors.fill: parent
@@ -955,11 +968,7 @@ Page {
                             anchors.rightMargin: 16
                             spacing: 14
                             visible: !modelData.divider
-                            KdIcons {
-                                name: modelData.icon || "dot"
-                                size: 22
-                                color: UITheme.textPrimary
-                            }
+                            KdIcons { name: modelData.icon || "dot"; size: 22; color: UITheme.textPrimary }
                             Label {
                                 text: modelData.text || ""
                                 Layout.fillWidth: true

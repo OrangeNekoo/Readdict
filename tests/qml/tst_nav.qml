@@ -192,4 +192,57 @@ Item {
             loader.destroy()
         }
     }
+
+    TestCase {
+        name: "SettingsSubpageNavSmoke"
+        // BUG2：设置子页逐层 push、返回只 pop 当前层——从设置页进入语言/TTS/
+        // 背景/同步/统计后返回必须回到设置页（不得经 Main.goBack 直接弹回主页）
+        function test_settingsSubpagesReturnToSettings() {
+            var loader = mainComp.createObject(root)
+            var win = loader.item
+            verify(win !== null, "Main.qml 应能加载")
+            tryVerify(function () {
+                return win.navStack.currentItem && win.navStack.currentItem.navId === "home"
+            }, 3000, "初始应为主页")
+            win.onShelfMenu("settings")
+            tryVerify(function () {
+                return win.navStack.currentItem && win.navStack.currentItem.navId === "settings"
+            }, 3000, "书架菜单应进入设置页")
+            var settingsPage = win.navStack.currentItem
+            var subs = [
+                { handle: "languageEntryButton", backHandle: "backButton" },
+                { handle: "ttsEntryButton", backHandle: "backButton" },
+                { handle: "backgroundEntryButton", backHandle: "backButton" },
+                { handle: "syncEntryButton", backHandle: "backButton" },
+                { handle: "statsEntryButton", backHandle: "" }
+            ]
+            for (let sub of subs) {
+                let entry = settingsPage[sub.handle]
+                verify(entry !== undefined, sub.handle + " 入口句柄应保留")
+                entry.clicked()
+                tryVerify(function () {
+                    return win.navStack.currentItem !== settingsPage
+                }, 3000, sub.handle + " 应推入子页")
+                var subPage = win.navStack.currentItem
+                if (sub.backHandle) {
+                    verify(subPage[sub.backHandle] !== undefined,
+                           sub.handle + " 子页应暴露返回按钮句柄")
+                    subPage[sub.backHandle].clicked()
+                } else {
+                    verify(subPage.goBack !== undefined, "统计页应暴露 goBack()")
+                    subPage.goBack()
+                }
+                tryVerify(function () {
+                    return win.navStack.currentItem === settingsPage
+                }, 3000, sub.handle + " 返回应回到设置页（而非主页）")
+            }
+            // 唯一合法的回主页路径：设置页自身返回
+            win.goBack()
+            tryVerify(function () {
+                return win.navStack.currentItem && win.navStack.currentItem.navId === "home"
+            }, 3000, "设置页返回应回到主页")
+            win.visible = false
+            loader.destroy()
+        }
+    }
 }

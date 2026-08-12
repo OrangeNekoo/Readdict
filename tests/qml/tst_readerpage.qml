@@ -229,6 +229,36 @@ Item {
             h.stack.destroy()
         }
 
+        // BUG4：点击状态机——只有窗口上部/下部热区唤出菜单；中部点击不改变
+        // 菜单（旧实现任何位置都弹 Sheet，与 paged 左右翻页冲突）。scroll 模式
+        // 断言：上部热区（y<zoneH）、下部热区（y>高-zoneH）轻点唤出 Sheet 与
+        // 顶栏；中部轻点既不唤出也不关闭。
+        function test_scrollModeHotZonesOnlySummon() {
+            var h = openPage()
+            var page = h.page
+            page.controlsHideDelay = 100000
+            page.controlsVisible = false
+            page.sheetOpen = false
+            wait(50)
+            // 中部轻点：不改变菜单（Sheet 保持关闭，旧实现此处弹 Sheet）
+            page.handleContentTap(page.contentView.height / 2)
+            wait(100)
+            verify(!page.sheetOpen && !page.topToolbar.visible,
+                   "scroll 中部轻点不应唤出菜单（BUG4）")
+            // 上部热区轻点 → 唤出
+            page.handleContentTap(10)
+            tryVerify(function () { return page.sheetOpen && page.topToolbar.visible }, 3000,
+                      "scroll 上部热区轻点应唤出 Sheet 与顶栏")
+            // 关闭后下部热区轻点 → 唤出
+            page.sheetOpen = false
+            page.controlsVisible = false
+            wait(50)
+            page.handleContentTap(page.contentView.height - 10)
+            tryVerify(function () { return page.sheetOpen && page.topToolbar.visible }, 3000,
+                      "scroll 下部热区轻点应唤出 Sheet 与顶栏")
+            h.stack.destroy()
+        }
+
         // 任务2（生产点击链路）：不调用 handleContentTap，而是用 QtTest.mouseClick
         // 在正文宿主（ReaderContent/Flickable 表面）真实点击——验证 TapHandler 桥接
         // 真实存在。旧实现 TapHandler 挂在 ReaderPage 层，被正文 Flickable 的按压

@@ -35,9 +35,9 @@ Item {
     property alias mask: mask
     property alias body: body
     property alias contentLoader: panelLoader
+    property alias panelScroller: panelScroller
     property alias tabBar: tabBar
     property alias actionBar: actionHost
-
     // 遮罩：Kindle 半透明暗色（rgba(0,0,0,0.3) → UITheme.overlay）。opacity 动画
     // 淡入淡出；关闭时禁用鼠标（enabled 门控）——透明层不拦截正文点击。
     Rectangle {
@@ -87,15 +87,29 @@ Item {
                 onTabClicked: (id) => sheet.tabClicked(id)
             }
 
-            // 内容区：按 currentId 切换面板组件
-            Loader {
-                id: panelLoader
+            Flickable {
+                id: panelScroller
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                sourceComponent: {
-                    for (const p of sheet.pages)
-                        if (p.id === sheet.currentId) return p.source
-                    return null
+                clip: true
+                interactive: panelLoader.item && panelScroller.contentHeight > panelScroller.height + 1
+                contentWidth: width
+                contentHeight: Math.max(height,
+                    panelLoader.item ? panelLoader.item.implicitHeight : height)
+                flickableDirection: true ? 2 : 1
+                ScrollBar.vertical: ScrollBar {
+                    policy: panelScroller.interactive ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+                }
+                Loader {
+                    id: panelLoader
+                    width: panelScroller.width
+                    height: Math.max(panelScroller.height,
+                                     item ? item.implicitHeight : panelScroller.height)
+                    sourceComponent: {
+                        for (const p of sheet.pages)
+                            if (p.id === sheet.currentId) return p.source
+                        return null
+                    }
                 }
             }
 

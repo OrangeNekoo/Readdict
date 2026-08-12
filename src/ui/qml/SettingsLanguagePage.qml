@@ -74,10 +74,9 @@ Page {
         Item { Layout.fillHeight: true }
     }
 
-    // B4：返回上一页（设置页）。抽函数暴露供 QML 冒烟测试驱动
+    // B4/BUG2：返回上一页（设置页）——只 pop 当前层。
     function goBack() {
-        const win = Window.window
-        if (win && win.goBack) win.goBack()
-        else page.StackView.view.pop()
+        const stack = page.StackView.view
+        if (stack && stack.depth > 1) stack.pop()
     }
 }

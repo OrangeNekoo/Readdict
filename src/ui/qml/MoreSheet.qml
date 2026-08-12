@@ -9,8 +9,8 @@ import Readdict.UI 1.0
 // 测试句柄：continueToggle/followToggle/progressRow。
 Item {
     id: moreSheet
-
     objectName: "moreSheetPanel"
+    implicitHeight: moreColumn.implicitHeight
     property bool autoContinue: true
     property bool darkFollow: false
     signal setAutoContinue(bool on)
@@ -22,6 +22,7 @@ Item {
     property alias progressRow: progressRow
 
     ColumnLayout {
+        id: moreColumn
         anchors.fill: parent
         anchors.margins: 16
         spacing: 10

@@ -188,10 +188,12 @@ Item {
             mouseClick(sw, sw.width / 2, sw.height / 2)
         }
 
-        // 点屏幕中部 → Sheet 弹出（动画到位 + 遮罩）；再次轻点 → 关闭（点面板外语义）；
-        // Sheet 打开暂停控制栏 5s 计时（hideTimer.running 断言），关闭且显示态恢复
-        //（短延迟收敛 5s 语义 → 自动隐藏）。
-        function test_middleTapOpensSheetAndReTapCloses() {
+        // BUG4：点下部热区 → Sheet 弹出（动画到位 + 遮罩）；中部轻点不改变菜单
+        //（BUG4 修复：旧实现任何位置都弹 Sheet，中部点按 Kindle 语义应为空操作，
+        // 与 paged 左右翻页不冲突）；再次轻点（Sheet 打开态任意位置）→ 关闭
+        //（点面板外语义）；Sheet 打开暂停控制栏 5s 计时（hideTimer.running 断言），
+        // 关闭且显示态恢复（短延迟收敛 5s 语义 → 自动隐藏）。
+        function test_hotZoneTapOpensSheetAndReTapCloses() {
             var h = openPage()
             var page = h.page
             // 鼠标锚到顶栏按钮（正文 hover 区之外）：正文 hover 区对鼠标活动的计时
@@ -200,8 +202,12 @@ Item {
             page.controlsHideDelay = 300
             page.sheetOpen = false
             verify(!page.sheetOpen, "初始 Sheet 应关闭")
-            page.handleContentTap(200)   // 屏幕中部轻点
-            tryVerify(function () { return page.sheetOpen }, 3000, "点屏幕中部应弹出 Sheet")
+            // 中部轻点：不改变菜单（BUG4——旧实现此处弹 Sheet）
+            page.handleContentTap(200)
+            wait(100)
+            verify(!page.sheetOpen, "中部轻点不应弹出 Sheet（BUG4）")
+            page.handleContentTap(600)   // 下部热区轻点
+            tryVerify(function () { return page.sheetOpen }, 3000, "点下部热区应弹出 Sheet")
             var sheet = page.bottomSheet
             tryVerify(function () {
                 return Math.abs(sheet.body.y - (page.height - sheet.body.height)) < 2
@@ -211,7 +217,7 @@ Item {
             // Sheet 打开 → 控制栏计时暂停（running 状态精确断言）
             tryVerify(function () { return !page.hideTimer.running }, 3000,
                       "Sheet 打开应暂停控制栏自动隐藏计时")
-            // 再点中部 → 关闭（点面板外语义）
+            // 再轻点（打开态任意位置）→ 关闭（点面板外语义）
             page.handleContentTap(200)
             tryVerify(function () { return !page.sheetOpen }, 3000, "再次轻点应关闭 Sheet")
             tryVerify(function () { return Math.abs(sheet.body.y - page.height) < 2 }, 3000,
@@ -236,8 +242,8 @@ Item {
             var h = openPage()
             var page = h.page
             page.controlsHideDelay = 100000
-            page.handleContentTap(200)
-            tryVerify(function () { return page.sheetOpen }, 3000, "点中部应弹出 Sheet")
+            page.handleContentTap(600)
+            tryVerify(function () { return page.sheetOpen }, 3000, "点下部热区应弹出 Sheet")
             var bar = page.bottomSheet.tabBar
             tryVerify(function () { return bar.items.count === 4 }, 3000, "Sheet 应有 4 个标签")
 
@@ -305,7 +311,7 @@ Item {
             var h = openPage()
             var page = h.page
             page.controlsHideDelay = 100000
-            page.handleContentTap(200)
+            page.handleContentTap(600)
             tryVerify(function () { return page.sheetOpen }, 3000, "Sheet 应弹出")
             var panel = page.bottomSheet.contentLoader.item
             tryVerify(function () { return panel.objectName === "themeSheetPanel" }, 3000,
@@ -407,7 +413,7 @@ Item {
             var page = h.page
             page.controlsHideDelay = 100000
             page.sheetTab = "font"
-            page.handleContentTap(200)
+            page.handleContentTap(600)
             tryVerify(function () { return page.sheetOpen }, 3000, "Sheet 应弹出")
             var panel = page.bottomSheet.contentLoader.item
             tryVerify(function () { return panel.objectName === "fontSheetPanel" }, 3000,
@@ -423,12 +429,11 @@ Item {
             // 字号 20（index 3）
             tryVerify(function () { return panel.sizeItems.itemAt(3) !== null }, 2000,
                       "字号分段应就绪")
-            mouseClick(panel.sizeItems.itemAt(3), 15, 15)
+            mouseClick(panel.sizeItems.itemAt(3), 82, 17)
             tryVerify(function () {
                 return Number(Settings.value("typography/fontSize")) === 20
                     && page.typography.fontSize === 20
             }, 3000, "选字号 20 应写 typography/fontSize 并刷新排版")
-            // 还原默认（思源宋体 VF / 18）
             mouseClick(panel.fontItems.itemAt(0), 20, 15)
             mouseClick(panel.sizeItems.itemAt(2), 15, 15)
             tryVerify(function () {
@@ -444,7 +449,7 @@ Item {
             var page = h.page
             page.controlsHideDelay = 100000
             page.sheetTab = "layout"
-            page.handleContentTap(200)
+            page.handleContentTap(600)
             tryVerify(function () { return page.sheetOpen }, 3000, "Sheet 应弹出")
             var panel = page.bottomSheet.contentLoader.item
             tryVerify(function () { return panel.objectName === "layoutSheetPanel" }, 3000,
@@ -511,7 +516,7 @@ Item {
             page.loadChapter(0)
             wait(100)
             page.sheetTab = "more"
-            page.handleContentTap(200)
+            page.handleContentTap(600)
             tryVerify(function () { return page.sheetOpen }, 3000, "Sheet 应弹出")
             var panel = page.bottomSheet.contentLoader.item
             tryVerify(function () { return panel.objectName === "moreSheetPanel" }, 3000,
@@ -632,6 +637,108 @@ Item {
             mouseClick(page.readerMenu, 30, 10)
             tryVerify(function () { return !page.menuOpen }, 3000, "点击遮罩应关闭菜单")
             h.stack.destroy()
+        }
+    }
+
+    TestCase {
+        name: "ReaderChromeSmoke"
+        // BUG7：阅读页菜单视觉——上半部顶栏不透明易读（透明/半透明背景在图片
+        // 背景模式下不可读）；右上角菜单关闭动画不被 parent visible 立即掐断
+        //（visible 由 overlay 自身 opacity 驱动，淡出期间仍渲染）；Sheet 面板
+        // 内容超高时内部可滚动（ScrollBar 保护，自定义主题过多时管理行可达）。
+        function initTestCase() {
+            Books.doSearch("")
+            Books.setFilter("")
+            Books.setSort(0)
+            if (Books.booksModel.length === 0)
+                for (let f of TestEnv.sourceFiles) Importer.doImport(f)
+        }
+        function findBook(fmt, titlePart) {
+            for (let b of Books.booksModel)
+                if ((b.format || "").toUpperCase() === fmt
+                        && (!titlePart || (b.title || "").indexOf(titlePart) >= 0))
+                    return b
+            return null
+        }
+        function openPage(book) {
+            var b = book ? book : findBook("TXT", null)
+            verify(b !== null, "测试书应已就绪（initTestCase 应已导入）")
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            verify(stack !== null, "测试 StackView 应能创建")
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: b })
+            var page = stack.currentItem
+            verify(page !== null, "ReaderPage 应被 push 进 StackView")
+            tryVerify(function () {
+                return page.chapter && page.chapter.paragraphs
+                    && page.chapter.paragraphs.length > 0
+            }, 3000, "打开书后应加载章节段落")
+            return { stack: stack, page: page }
+        }
+
+        // BUG7：顶栏不透明（背景 alpha=1，未修复为 "transparent"，图片背景模式
+        // 下顶栏文字淹没在图片里）；菜单关闭瞬间 overlay 仍可见（淡出动画 150ms
+        // 不被 parent visible 掐断），淡出完成后才隐藏。
+        function test_topToolbarOpaqueAndMenuFadeOut() {
+            var h = openPage()
+            var page = h.page
+            page.controlsHideDelay = 100000
+            page.sheetOpen = true
+            tryVerify(function () { return page.topToolbar.visible }, 3000, "顶栏应显示")
+            verify(page.topToolbar.color.a === 1,
+                   "顶栏背景应为不透明实色（alpha=" + page.topToolbar.color.a + "，未修复为 transparent）")
+            // 菜单打开：overlay 可见且不透明
+            page.menuOpen = true
+            tryVerify(function () {
+                return page.readerMenu.visible && page.readerMenu.opacity > 0.9
+            }, 3000, "菜单打开时 overlay 应可见且不透明")
+            // 关闭瞬间：淡出动画进行中，overlay 仍可见（未修复 visible 立即消失）
+            page.menuOpen = false
+            verify(page.readerMenu.visible,
+                   "菜单关闭瞬间 overlay 仍应可见（淡出动画不被 parent visible 掐断）")
+            // 淡出结束后隐藏
+            tryVerify(function () { return !page.readerMenu.visible }, 3000,
+                      "菜单淡出完成后应隐藏")
+            h.stack.destroy()
+        }
+
+        // BUG7：Sheet 面板内容超高时内部可滚动（ScrollBar 保护）——8 个自定义
+        // 预设使主题网格远超内容区，panelScroller 可滚到底、管理主题行可达
+        //（未被裁剪不可达）。
+        function test_sheetPanelScrollProtection() {
+            var custom = []
+            for (var i = 0; i < 8; i++)
+                custom.push({ name: "预设" + i, bg: "light", text: "lightTextPrimary",
+                              fontFamily: "思源宋体 VF", fontSize: 18, lineHeight: 1.6 })
+            Settings.setValue("themes/custom", custom)
+            var h = openPage()
+            var page = h.page
+            page.controlsHideDelay = 100000
+            page.sheetTab = "theme"
+            page.sheetOpen = true
+            tryVerify(function () { return page.sheetOpen }, 3000, "Sheet 应弹出")
+            var sheet = page.bottomSheet
+            tryVerify(function () {
+                var panel = sheet.contentLoader.item
+                return panel !== null && panel.themeItems.count === 12
+            }, 3000, "主题面板应显示 4 内置 + 8 自定义")
+            // 面板内容超高：contentHeight 应超过视口高（可滚动保护生效）
+            tryVerify(function () {
+                return sheet.panelScroller !== undefined
+                    && sheet.panelScroller.contentHeight > sheet.panelScroller.height + 10
+            }, 3000, "预设过多时面板内容应超高（contentHeight="
+                    + (sheet.panelScroller ? sheet.panelScroller.contentHeight : -1)
+                    + "，视口=" + (sheet.panelScroller ? sheet.panelScroller.height : -1) + "）")
+            // 滚动到底：管理主题行进入视口（可达性契约，未保护时被裁剪不可达）
+            var fl = sheet.panelScroller
+            fl.contentY = fl.contentHeight - fl.height
+            tryVerify(function () {
+                var panel = sheet.contentLoader.item
+                var y = panel.manageRow.mapToItem(fl, 0, 0).y
+                return y >= 0 && y < fl.height
+            }, 3000, "滚到底后管理主题行应进入视口（可达性契约）")
+            h.stack.destroy()
+            Settings.setValue("themes/custom", [])
         }
     }
 
