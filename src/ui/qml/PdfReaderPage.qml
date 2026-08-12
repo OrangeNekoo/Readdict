@@ -138,8 +138,9 @@ Page {
         page.closing = true
         page.closePollCount = 0
         if (page.renderSettled()) {
-            page.StackView.view.pop()
-            return
+            const win = Window.window
+            if (win && win.goBack) win.goBack()
+            else page.StackView.view.pop()
         }
         closePoll.start()
     }
@@ -149,10 +150,11 @@ Page {
         interval: 50
         repeat: true
         onTriggered: {
-            ++page.closePollCount
             if (page.renderSettled()) {
                 closePoll.stop()
-                page.StackView.view.pop()
+                const win = Window.window
+                if (win && win.goBack) win.goBack()
+                else page.StackView.view.pop()
                 return
             }
             if (page.closePollCount === 1200) // 60s：仅告警，不强制销毁

@@ -136,17 +136,20 @@ Page {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            cellWidth: 190
+            readonly property int columnCount: Math.max(1, Math.floor(width / 200))
+            cellWidth: Math.max(190, Math.floor(width / columnCount))
             cellHeight: 306
             model: Books.booksModel
             delegate: BookCard {
+                width: 180
                 book: modelData
                 onClicked: {
-                    const fmt = (modelData.format ?? "").toUpperCase()
-                    if (fmt === "PDF")
-                        shelf.StackView.view.push("PdfReaderPage.qml", { book: modelData })
-                    else
-                        shelf.StackView.view.push("ReaderPage.qml", { book: modelData })
+                    const win = Window.window
+                    if (win && win.openBook) win.openBook(modelData)
+                    else {
+                        const fmt = (modelData.format ?? "").toUpperCase()
+                        shelf.StackView.view.push(fmt === "PDF" ? "PdfReaderPage.qml" : "ReaderPage.qml", { book: modelData })
+                    }
                 }
             }
             ScrollBar.vertical: ScrollBar {}

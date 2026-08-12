@@ -98,8 +98,12 @@ Page {
         bookmarked: page.currentBookmarked
         onBack: {
             page.menuOpen = false
-            const sv = page.StackView.view
-            if (sv) sv.pop()
+            const win = Window.window
+            if (win && win.goBack) win.goBack()
+            else {
+                const sv = page.StackView.view
+                if (sv) sv.pop()
+            }
         }
         onAa: {
             page.menuOpen = false

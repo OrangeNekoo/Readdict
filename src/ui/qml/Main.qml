@@ -44,7 +44,8 @@ ApplicationWindow {
     property alias fileDialog: fileDialog
     property alias aboutDialog: aboutDialog
 
-    property string currentNavId: ""
+    property string currentNavId: "home"
+    property string returnNavId: "home"
     property bool navVisible: true
     property var currentReading: root.recentReading()
 
@@ -61,8 +62,9 @@ ApplicationWindow {
 
     function syncNav() {
         const top = stack.currentItem
-        root.currentNavId = top ? (top.navId || "") : ""
-        root.navVisible = top !== null && top.navId !== "reader" && top.navId !== "pdf"
+        const id = top ? (top.navId || "") : ""
+        root.currentNavId = id === "home" || id === "shelf" ? id : root.returnNavId
+        root.navVisible = id !== "reader" && id !== "pdf"
     }
 
     readonly property var navPages: {
@@ -74,13 +76,55 @@ ApplicationWindow {
     }
 
     function navigateTo(navId) {
-        if (!root.navPages[navId]) return
+        if (navId !== "home" && navId !== "shelf") {
+            const pageUrl = navId === "settings" ? "SettingsPage.qml"
+                           : navId === "stats" ? "StatsPage.qml"
+                           : navId === "sync" ? "SyncPage.qml" : ""
+            if (pageUrl) root.openAuxiliary(pageUrl)
+            return
+        }
         const top = stack.currentItem
-        if (top && top.navId === navId) return
-        for (let i = stack.depth; i > 1; --i)
+        if (top && top.navId === navId && stack.depth === 1) return
+        while (stack.depth > 1)
             stack.pop(null, StackView.Immediate)
-        if (stack.currentItem && stack.currentItem.navId === navId) return
-        stack.push(root.navPages[navId])
+        if (!stack.currentItem || stack.currentItem.navId !== navId)
+            stack.replace(root.navPages[navId], StackView.Immediate)
+        root.returnNavId = navId
+        root.syncNav()
+    }
+
+    function openAuxiliary(pageUrl) {
+        const pageId = pageUrl === "StatsPage.qml" ? "stats"
+                     : pageUrl === "SyncPage.qml" ? "sync"
+                     : pageUrl === "SettingsPage.qml" ? "settings" : ""
+        if (!pageId || !root.navPages[pageId]) return
+        const top = stack.currentItem
+        if (!top || (top.navId !== "home" && top.navId !== "shelf")) return
+        root.returnNavId = top.navId
+        if (stack.currentItem && stack.currentItem.navId === pageId) return
+        stack.push(pageUrl, {}, StackView.Immediate)
+        root.syncNav()
+    }
+
+    function openBook(book, options) {
+        if (!book) return false
+        const fmt = String(book.format || "").toUpperCase()
+        const supported = ["EPUB", "MOBI", "AZW3", "FB2", "TXT", "MD", "PDF"]
+        if (supported.indexOf(fmt) < 0) return false
+        const top = stack.currentItem
+        if (top && (top.navId === "home" || top.navId === "shelf"))
+            root.returnNavId = top.navId
+        const pageUrl = fmt === "PDF" ? "PdfReaderPage.qml" : "ReaderPage.qml"
+        const props = Object.assign({ book: book }, options || {})
+        stack.push(pageUrl, props, StackView.Immediate)
+        root.syncNav()
+        return true
+    }
+
+    function goBack() {
+        if (stack.depth <= 1) return
+        stack.pop(null, StackView.Immediate)
+        root.syncNav()
     }
 
     // 顶部搜索栏仅在主页/图书馆可见；主页输入搜索词时自动切到图书馆。
@@ -149,18 +193,16 @@ ApplicationWindow {
     function resumeReading() {
         const b = root.currentReading
         if (!b) return
-        const fmt = (b.format ?? "").toUpperCase()
-        stack.push(fmt === "PDF" ? "PdfReaderPage.qml" : "ReaderPage.qml", { book: b })
+        root.openBook(b)
     }
 
     function onShelfMenu(id) {
         if (id === "import") fileDialog.open()
-        else if (id === "stats") stack.push("StatsPage.qml")
-        else if (id === "sync") stack.push("SyncPage.qml")
-        else if (id === "settings") stack.push("SettingsPage.qml")
+        else if (id === "stats") root.openAuxiliary("StatsPage.qml")
+        else if (id === "sync") root.openAuxiliary("SyncPage.qml")
+        else if (id === "settings") root.openAuxiliary("SettingsPage.qml")
         else if (id === "about") aboutDialog.open()
     }
-
     FileDialog {
         id: fileDialog
         title: qsTr("导入电子书")

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Window
 import Readdict.Backend
 import Readdict.UI 1.0
 
@@ -67,7 +68,11 @@ Page {
                 color: "transparent"
                 MouseArea {
                     anchors.fill: parent
-                    onClicked: home.StackView.view.push("StatsPage.qml")
+                    onClicked: {
+                        const win = Window.window
+                        if (win && win.openAuxiliary) win.openAuxiliary("StatsPage.qml")
+                        else home.StackView.view.push("StatsPage.qml")
+                    }
                 }
                 RowLayout {
                     anchors.fill: parent
@@ -103,7 +108,11 @@ Page {
 
     function openBook(b) {
         if (!b) return
-        const fmt = (b.format ?? "").toUpperCase()
-        home.StackView.view.push(fmt === "PDF" ? "PdfReaderPage.qml" : "ReaderPage.qml", { book: b })
+        const win = Window.window
+        if (win && win.openBook) win.openBook(b)
+        else {
+            const fmt = (b.format ?? "").toUpperCase()
+            home.StackView.view.push(fmt === "PDF" ? "PdfReaderPage.qml" : "ReaderPage.qml", { book: b })
+        }
     }
 }

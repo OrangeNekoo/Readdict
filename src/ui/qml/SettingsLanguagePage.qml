@@ -70,6 +70,8 @@ Page {
 
     // B4：返回上一页（设置页）。抽函数暴露供 QML 冒烟测试驱动
     function goBack() {
-        page.StackView.view.pop()
+        const win = Window.window
+        if (win && win.goBack) win.goBack()
+        else page.StackView.view.pop()
     }
 }

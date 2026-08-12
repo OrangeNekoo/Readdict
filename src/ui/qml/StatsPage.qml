@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Window
 import Readdict.Backend
 import Readdict.UI 1.0
 
@@ -49,6 +50,11 @@ Page {
         return t > 0 ? Number(c.count || 0) / t : 0
     }
 
+    function goBack() {
+        const win = Window.window
+        if (win && win.goBack) win.goBack()
+        else page.StackView.view.pop()
+    }
     Component.onCompleted: page.refresh()
 
     ColumnLayout {
@@ -59,7 +65,11 @@ Page {
         RowLayout {
             Button {
                 text: qsTr("返回")
-                onClicked: page.StackView.view.pop()
+                onClicked: {
+                    const win = Window.window
+                    if (win && win.goBack) win.goBack()
+                    else page.StackView.view.pop()
+                }
             }
             Label {
                 text: qsTr("阅读统计")

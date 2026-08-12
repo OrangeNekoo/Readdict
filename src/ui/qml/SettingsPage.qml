@@ -205,10 +205,10 @@ Page {
         }
     }
 
-    // B4：返回上一页（书架）。SyncPage/StatsPage 内联 pop()，此处抽函数暴露供
-    // QML 冒烟测试驱动（返回按钮 onClicked 即此路径，等价于点击）
     function goBack() {
-        page.StackView.view.pop()
+        const win = Window.window
+        if (win && win.goBack) win.goBack()
+        else page.StackView.view.pop()
     }
 
     // B2：刷新封面——同步调用并显示提示（经 Importer.coversRefreshed 联动书架）

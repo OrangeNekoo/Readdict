@@ -17,6 +17,11 @@ import Readdict.UI 1.0
 Page {
     id: page
     title: qsTr("WebDAV 同步")
+    function goBack() {
+        const win = Window.window
+        if (win && win.goBack) win.goBack()
+        else page.StackView.view.pop()
+    }
     // U2：导航页标识（Main 底部导航直达同步页；经设置页推入时高亮跟随）
     property string navId: "sync"
     // 测试/外部句柄（QML 冒烟经此驱动配置与自动同步开关，ShelfPage 同模式）
@@ -44,7 +49,11 @@ Page {
             RowLayout {
                 Button {
                     text: qsTr("返回")
-                    onClicked: page.StackView.view.pop()
+                    onClicked: {
+                        const win = Window.window
+                        if (win && win.goBack) win.goBack()
+                        else page.StackView.view.pop()
+                    }
                 }
                 Label {
                     text: qsTr("WebDAV 同步")

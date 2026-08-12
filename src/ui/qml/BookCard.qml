@@ -40,7 +40,8 @@ Item {
     // 作者小字灰（textSecondary）、进度细条。卡片 180×296（网格 cell 190×306，见 ShelfPage）。
     width: compact ? 96 : 180
     height: compact ? 168 : 296
-    // C5：作者行句柄（冒烟断言有作者显示/无作者隐藏）
+    implicitWidth: width
+    implicitHeight: height
     property alias authorLabel: authorLabel
     // 任务4：出版社行句柄（冒烟断言有出版社显示/无出版社隐藏）
     property alias publisherLabel: publisherLabel

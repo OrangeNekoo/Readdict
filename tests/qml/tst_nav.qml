@@ -148,5 +148,30 @@ Item {
             win.visible = false
             loader.destroy()
         }
+
+        function test_auxiliaryRoutesReturnToOrigin() {
+            var loader = mainComp.createObject(root)
+            var win = loader.item
+            verify(win !== null, "Main.qml 应能加载")
+            tryVerify(function () { return win.navStack.currentItem && win.navStack.currentItem.navId === "home" }, 3000)
+
+            win.onShelfMenu("stats")
+            tryVerify(function () { return win.navStack.currentItem && win.navStack.currentItem.navId === "stats" }, 3000,
+                      "统计菜单应进入统计页")
+            verify(win.navStack.currentItem.goBack !== undefined, "统计页应提供统一返回入口")
+            win.goBack()
+            tryVerify(function () { return win.navStack.currentItem && win.navStack.currentItem.navId === "home" }, 3000,
+                      "统计页返回应回到主页")
+            compare(win.navStack.depth, 1, "辅助页返回后不应残留栈项")
+
+            win.onShelfMenu("settings")
+            tryVerify(function () { return win.navStack.currentItem && win.navStack.currentItem.navId === "settings" }, 3000)
+            win.goBack()
+            tryVerify(function () { return win.navStack.currentItem && win.navStack.currentItem.navId === "home" }, 3000,
+                      "设置页返回应回到主页")
+
+            win.visible = false
+            loader.destroy()
+        }
     }
 }
