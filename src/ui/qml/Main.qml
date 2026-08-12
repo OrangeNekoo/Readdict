@@ -64,7 +64,8 @@ ApplicationWindow {
         const top = stack.currentItem
         const id = top ? (top.navId || "") : ""
         root.currentNavId = id === "home" || id === "shelf" ? id : root.returnNavId
-        root.navVisible = id !== "reader" && id !== "pdf"
+        root.navVisible = id === "home" || id === "shelf"
+        if (!root.navVisible && shelfMenu.opened) shelfMenu.close()
     }
 
     readonly property var navPages: {
@@ -145,7 +146,7 @@ ApplicationWindow {
             if (root.currentNavId === "shelf" && page && page.filterSheet
                     && page.filterSheet.currentScope === 1) {
                 page.refreshFulltextSearch(text)
-            } else {
+            } else if (root.currentNavId === "home" || root.currentNavId === "shelf") {
                 Books.doSearch(text)
             }
         }

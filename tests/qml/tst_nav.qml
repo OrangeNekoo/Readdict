@@ -173,5 +173,23 @@ Item {
             win.visible = false
             loader.destroy()
         }
+        function test_auxiliaryFromShelfHidesMainNavigation() {
+            var loader = mainComp.createObject(root)
+            var win = loader.item
+            verify(win !== null, "Main.qml 应能加载")
+            win.navigateTo("shelf")
+            tryVerify(function () { return win.navStack.currentItem && win.navStack.currentItem.navId === "shelf" }, 3000)
+            win.onShelfMenu("settings")
+            tryVerify(function () { return win.navStack.currentItem && win.navStack.currentItem.navId === "settings" }, 3000,
+                      "图书馆菜单应进入设置页")
+            compare(win.tabBar.visible, false, "辅助页不应显示主导航")
+            compare(win.topSearchBar.visible, false, "辅助页不应显示主搜索栏")
+            win.goBack()
+            tryVerify(function () { return win.navStack.currentItem && win.navStack.currentItem.navId === "shelf" }, 3000,
+                      "设置页返回应回到图书馆")
+            verify(win.tabBar.visible, "返回图书馆后应恢复主导航")
+            win.visible = false
+            loader.destroy()
+        }
     }
 }

@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
 import QtQuick.Pdf
+import QtQuick.Window
 import Readdict.Backend
 import Readdict.UI 1.0
 
