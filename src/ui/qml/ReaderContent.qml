@@ -833,7 +833,8 @@ Flickable {
     // 打开时焦点在弹层内，本组件 Keys 不触发（不干扰输入框）。
     // scroll 模式：↑↓/PageUp/PageDown 滚动一视口页，←/→ 翻章；W 向上滚动、
     // S 向下滚动（A/D 不处理，不切换章节）。
-    // paged 模式：四向 + PageUp/PageDown 均按视口高度整页翻动（←/→ 翻页而非翻章）；
+    // paged 模式：四向 + PageUp/PageDown 均按视口宽度横向整页翻动（页宽=视口宽、
+    // 页沿 x 轴排列、翻页改变 contentX；←/→ 翻页而非翻章）；
     // A 上一页、D 下一页（W/S 不处理，不翻页）。
     // isAutoRepeat（键盘按住自动重复 30-60Hz）：scroll 翻章与 paged 翻章
     // 动作忽略重复事件（连按一次只翻一章/翻一页，不因按住连翻多章）；

@@ -1380,6 +1380,11 @@ Item {
         // 任务1：paged 模式 W/S/A/D 键位分流——A 上一页、D 下一页；
         // W/S 不得被处理（返回 false），且不得翻页（W/S 仅属 scroll 模式）。
         // 旧实现将 paged 的 W/S 也映射为翻页，此处拒绝断言必须红灯。
+        // 复审修复：拒绝断言必须在内部页（第 1 页）执行——首/末页上被误处理的
+        // W/S 会被 pagePrev/pageNext 的边界钳制/换章兜底掩盖成"页不变"假绿；
+        // pageCount>=3 保证第 1 页非首非末，任何误处理的 W/S 都会产生可见位移。
+        // 且同时断言 currentPage 与 contentX 均不变（双重证据，杜绝只查页号漏过
+        // 动画中途中间值）。
         function test_modeSpecificWasdKeys() {
             var book = findBook("longbook")
             verify(book !== null, "longbook 应已导入")
@@ -1390,24 +1395,35 @@ Item {
             Books.currentChapter = 0
             page.loadChapter(0)
             wait(100)
-            tryVerify(function () { return cv.pageCount >= 2
+            tryVerify(function () { return cv.pageCount >= 3
                                       && cv.pageRepeater.count === cv.pageCount }, 3000,
-                      "paged 页面模型应就绪（pageCount=" + cv.pageCount + "）")
+                      "paged 页面模型应就绪且页数≥3（pageCount=" + cv.pageCount + "）")
             cv.contentX = 0
             wait(50)
             compare(cv.currentPage, 0, "paged 初始逻辑页应为 0")
-            // D 下一页
+            // D 下一页 → 进入内部页（第 1 页），wait 等横向动画完全收敛
             verify(cv.handleKey(Qt.Key_D, Qt.NoModifier), "paged D 应被处理（下一页）")
             wait(450)
             compare(cv.currentPage, 1, "D 应翻到第 1 页，实际 " + cv.currentPage)
-            // A 上一页
+            var xInternal = cv.contentX
+            verify(xInternal > 0, "内部页 contentX 应非 0（第 1 页 x=" + xInternal + "）")
+            // W 拒绝：返回 false 且 currentPage/contentX 均不变（内部页上任何
+            // 被误处理的 W 都会向左位移回第 0 页，此处必须保持原值）
+            verify(!cv.handleKey(Qt.Key_W, Qt.NoModifier), "paged W 不应被处理")
+            compare(cv.currentPage, 1, "paged W 不得翻页，实际 currentPage=" + cv.currentPage)
+            compare(cv.contentX, xInternal, "paged W 不得位移，实际 contentX=" + cv.contentX)
+            // S 拒绝：同上（被误处理的 S 会向右位移到第 2 页，必须保持原值）
+            verify(!cv.handleKey(Qt.Key_S, Qt.NoModifier), "paged S 不应被处理")
+            compare(cv.currentPage, 1, "paged S 不得翻页，实际 currentPage=" + cv.currentPage)
+            compare(cv.contentX, xInternal, "paged S 不得位移，实际 contentX=" + cv.contentX)
+            // A 上一页（正例仍通过）
             verify(cv.handleKey(Qt.Key_A, Qt.NoModifier), "paged A 应被处理（上一页）")
             wait(450)
             compare(cv.currentPage, 0, "A 应翻回第 0 页，实际 " + cv.currentPage)
-            // W/S 不得被处理、不得翻页
-            verify(!cv.handleKey(Qt.Key_W, Qt.NoModifier), "paged W 不应被处理")
-            verify(!cv.handleKey(Qt.Key_S, Qt.NoModifier), "paged S 不应被处理")
-            compare(cv.currentPage, 0, "paged W/S 不得翻页，实际 currentPage=" + cv.currentPage)
+            // D 下一页（正例仍通过）
+            verify(cv.handleKey(Qt.Key_D, Qt.NoModifier), "paged D 应被处理（下一页）")
+            wait(450)
+            compare(cv.currentPage, 1, "D 应再翻到第 1 页，实际 " + cv.currentPage)
             h.stack.destroy()
         }
     }
