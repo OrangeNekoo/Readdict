@@ -1,5 +1,7 @@
 #pragma once
 #include <QObject>
+#include <QVariantList>
+
 class QQuickItem;
 
 // C7：Qt 6.7+ 的 Text 移除了 selectByMouse/selectedText 等选择 API（deprecated 后删除），
@@ -11,4 +13,7 @@ class ReaderTextHelper : public QObject {
 public:
     explicit ReaderTextHelper(QObject *parent = nullptr) : QObject(parent) {}
     Q_INVOKABLE void applyLineSpacing(QQuickItem *edit, double factor);
+    // 返回同一 TextEdit 实际布局产生的行边界，坐标相对 TextEdit 左上角。
+    // 每项为 {top: real, bottom: real}，QML 用它在真实行边界分页。
+    Q_INVOKABLE QVariantList lineBreaks(QQuickItem *edit) const;
 };

@@ -277,7 +277,11 @@ qt_add_resources(tst_qml "qml_ui"
         ../src/ui/qml/KdDropdownMenu.qml
         ../src/ui/qml/KdBottomTabs.qml
 )
-add_test(NAME tst_qml COMMAND tst_qml)
+if(APPLE OR UNIX)
+    add_test(NAME tst_qml COMMAND tst_qml -platform offscreen)
+else()
+    add_test(NAME tst_qml COMMAND tst_qml)
+endif()
 
 # D6：三语 .qm 编入 QML 测试资源（:/i18n/readdict_<code>.qm），使 Lang 单例在
 # 测试进程中真实加载翻译；lrelease 目标先于测试产出 qm（qt_add_translations

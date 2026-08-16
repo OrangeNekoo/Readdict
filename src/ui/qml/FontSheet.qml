@@ -25,6 +25,11 @@ Item {
         { text: qsTr("得意黑"), value: "得意黑" }
     ]
     property var sizeSegments: [14, 16, 18, 20, 22, 24]
+    function selectFontSize(size) {
+        size = Number(size)
+        if (fontSheet.sizeSegments.indexOf(size) < 0) return
+        fontSheet.setFontSize(size)
+    }
 
     property alias fontItems: fontRepeater
     property alias sizeItems: sizeRepeater
@@ -121,7 +126,7 @@ Item {
                     }
                     MouseArea {
                         anchors.fill: parent
-                        onClicked: fontSheet.setFontSize(modelData)
+                        onClicked: fontSheet.selectFontSize(modelData)
                     }
                 }
             }

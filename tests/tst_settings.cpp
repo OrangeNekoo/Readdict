@@ -11,6 +11,20 @@ private slots:
         QCOMPARE(s.value("typography/fontSize").toInt(), 18);
         QCOMPARE(s.value("webdav/syncBooks").toBool(), false);
         QCOMPARE(s.value("reading/pageMode").toString(), QString("scroll"));
+        QCOMPARE(s.value("reading/progressDisplay").toString(), QString("pages"));
+        QCOMPARE(s.value("reading/progressScope").toString(), QString("chapter"));
+    }
+    void invalidProgressDisplayFallsBackToPages() {
+        QTemporaryDir dir;
+        const QString path = dir.path() + "/settings.json";
+        {
+            QFile f(path);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("{\"reading\":{\"pageMode\":\"paged\",\"progressDisplay\":\"invalid\"}}");
+        }
+        SettingsStore s(path);
+        QCOMPARE(s.value("reading/progressDisplay").toString(), QString("pages"));
+        QCOMPARE(s.value("reading/pageMode").toString(), QString("paged"));
     }
     void roundTrip() {
         QTemporaryDir dir;

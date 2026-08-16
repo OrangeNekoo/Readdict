@@ -74,14 +74,15 @@ Page {
         anchors.bottomMargin: 24
         anchors.topMargin: 12
         clip: true
-        // 页面级滚动条——内容超出视口时可见，保证小窗口下表单可达
-        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+        // 配置 ScrollView 已创建的附加滚动条实例，避免替换实例后 Material
+        // 样式角落在滚动时残留为灰色方块。
+        ScrollBar.vertical.policy: ScrollBar.AsNeeded
+        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
         ColumnLayout {
             id: syncForm
-            // 单向宽度约束：view 实际宽度 - padding（不依赖 availableWidth，
-            // 该属性在内容尺寸计算前可能为 0）
-            width: Math.max(0, syncScroll.width
-                                - syncScroll.leftPadding - syncScroll.rightPadding)
+            // availableWidth 已扣除垂直滚动条和 padding，避免滚动条出现时内容
+            // 比视口多出一列而触发水平滚动。
+            width: Math.max(0, syncScroll.availableWidth)
             spacing: 12
 
             RowLayout {

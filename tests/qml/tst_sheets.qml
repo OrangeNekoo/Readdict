@@ -4,7 +4,7 @@ import QtTest
 import Readdict.UI 1.0
 
 // U5：阅读页布局/更多 Sheet 的真实组件冒烟。组件经 Loader + qrc 加载，
-// 驱动 KdIconCard、Sheet Repeater 与 requestToc 信号，避免仅检查源码结构。
+// 驱动 KdIconCard、Sheet Repeater 与进度格式选择，避免仅检查源码结构。
 Item {
     id: root
     width: 500; height: 500
@@ -136,24 +136,31 @@ Item {
     TestCase {
         name: "MoreSheetSmoke"
 
-        function test_progressRowAndTocOnly() {
+        function test_progressDisplaySelection() {
             var loader = moreComp.createObject(root)
             loader.width = 400
             loader.height = 300
             var sheet = loader.item
             verify(sheet !== null, "MoreSheet 应能加载")
-            verify(sheet.menuModel === undefined, "MoreSheet 不应再暴露旧 menuModel")
-            verify(sheet.menuItems === undefined, "MoreSheet 不应再暴露旧 menuItems")
-            verify(sheet.progressRow !== undefined, "MoreSheet 应暴露阅读进度行")
-            verify(sheet.requestNotes === undefined, "MoreSheet 不应再暴露笔记信号")
-            verify(sheet.requestSearch === undefined, "MoreSheet 不应再暴露搜索信号")
-            verify(sheet.requestReadAloud === undefined, "MoreSheet 不应再暴露朗读信号")
-            verify(sheet.requestPrevChapter === undefined, "MoreSheet 不应再暴露上一章信号")
-            verify(sheet.requestNextChapter === undefined, "MoreSheet 不应暴露下一章信号")
-            var tocRequested = false
-            sheet.requestToc.connect(function () { tocRequested = true })
-            mouseClick(sheet.progressRow, sheet.progressRow.width / 2, sheet.progressRow.height / 2)
-            verify(tocRequested, "点击阅读进度行应保留 requestToc")
+            compare(sheet.progressDisplay, "pages", "阅读进度默认显示页数")
+            compare(sheet.progressScope, "chapter", "阅读进度默认显示本章")
+            var selected = ""
+            var scopeSelected = ""
+            sheet.setProgressDisplay.connect(function (value) { selected = value })
+            sheet.setProgressScope.connect(function (value) { scopeSelected = value })
+            sheet.progressSelector.selectValue("percent")
+            compare(selected, "percent", "选择百分比应请求保存百分比格式")
+            compare(sheet.progressDisplay, "percent", "选择后组件应立即切换百分比状态")
+            sheet.scopeSelector.selectValue("book")
+            compare(scopeSelected, "book", "选择全书应请求保存进度范围")
+            compare(sheet.progressScope, "book", "选择后组件应立即切换全书范围")
+            sheet.selectProgressDisplay("invalid")
+            compare(sheet.progressDisplay, "percent", "非法进度格式不得改变当前选择")
+            sheet.selectProgressScope("invalid")
+            compare(sheet.progressScope, "book", "非法进度范围不得改变当前选择")
+            sheet.progressPreview = "第 12 / 42 页"
+            compare(sheet.progressPreviewLabel.text, "第 12 / 42 页",
+                    "更多面板应显示当前页数预览")
             loader.destroy()
         }
     }

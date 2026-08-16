@@ -18,6 +18,7 @@ Page {
     property string navId: "stats"
     // 最近一次 Books.stats() 结果（QVariantMap；QML 冒烟经此断言数字正确性）
     property var statsData: ({})
+    property alias backButton: backButton
 
     // 卡片样式：Kindle 次级背景 Token + 默认边框，children 落入 ColumnLayout 排版
     //（内联组件须声明在对象作用域内——qmllint/qmlcachegen 对文件顶层内联组件报语法错）
@@ -62,18 +63,22 @@ Page {
         spacing: 16
 
         RowLayout {
-            Button {
-                text: qsTr("返回")
-                onClicked: {
-                    const win = Window.window
-                    if (win && win.goBack) win.goBack()
-                    else page.StackView.view.pop()
+            Layout.fillWidth: true
+            ToolButton {
+                id: backButton
+                contentItem: KdIcons {
+                    name: "back"
+                    size: 22
+                    color: UITheme.textPrimary
                 }
+                onClicked: page.goBack()
             }
             Label {
-                text: qsTr("阅读统计")
+                text: page.title
                 font.bold: true
-                font.pixelSize: 18
+                font.pixelSize: UITheme.fsPageTitle
+                color: UITheme.textPrimary
+                Layout.leftMargin: 8
             }
         }
 

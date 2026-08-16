@@ -443,16 +443,21 @@ Item {
             Books.setFilter("")
             Books.setSort(0)
             var hasTxt = false
-            for (let b of Books.booksModel)
-                if ((b.format || "").toUpperCase() === "TXT") { hasTxt = true; break }
+            var hasMulti = false
+            for (let b of Books.booksModel) {
+                if ((b.format || "").toUpperCase() === "TXT") hasTxt = true
+                if (b.title === "multibook") hasMulti = true
+            }
             if (!hasTxt)
                 for (let f of TestEnv.sourceFiles) Importer.doImport(f)
+            if (!hasMulti) Importer.doImport(TestEnv.multiSource)
         }
 
-        function openPage() {
-            var book = null
-            for (let b of Books.booksModel)
-                if ((b.format || "").toUpperCase() === "TXT") { book = b; break }
+        function openPage(book) {
+            if (!book) {
+                for (let b of Books.booksModel)
+                    if ((b.format || "").toUpperCase() === "TXT") { book = b; break }
+            }
             verify(book !== null, "测试书应已导入")
             var stack = Qt.createQmlObject(
                 "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
@@ -464,6 +469,8 @@ Item {
             tryVerify(function () { return page.chapter && page.chapter.paragraphs
                                       && page.chapter.paragraphs.length > 0 }, 3000,
                       "打开书后应加载章节段落")
+            page.contentView.restoreScrollY = -1
+            page.contentView.restorePending = false
             return { stack: stack, page: page }
         }
 
@@ -489,6 +496,117 @@ Item {
             tryVerify(function () { return !page.topToolbar.visible }, 2000, "Sheet 关闭时顶栏应隐藏")
             h.stack.destroy()
         }
+        // BUG2：顶部工具栏只承载独立阅读操作；排版与阅读进度均由底部 Sheet 管理，
+        // 不得重新出现重复的 Aa / 布局入口。
+        function test_toolbarHasOnlyIndependentActions() {
+            var h = openPage()
+            var page = h.page
+            page.sheetOpen = true
+            tryVerify(function () { return page.topToolbar.visible }, 2000,
+                      "Sheet 打开时顶栏应显示")
+            compare(page.topToolbar.children.length, 2,
+                    "顶栏应仅有底线与动作行，不得新增重复控件容器")
+            var actionRow = page.topToolbar.children[1]
+            compare(actionRow.children.length, 5,
+                    "顶栏应只保留返回、笔记、书签、搜索、更多五项")
+            h.stack.destroy()
+        }
+        // BUG2：更多面板切换阅读进度格式必须立即刷新左下角 Label，且重开后恢复。
+        function test_progressDisplayPersistsAndUpdatesLabel() {
+            var h = openPage()
+            var page = h.page
+            verify(page.progressLabel.text.indexOf("本章 第 ") === 0,
+                   "本章页数格式应显示当前页数")
+            page.setProgressDisplay("percent")
+            compare(String(Settings.value("reading/progressDisplay")), "percent",
+                    "百分比格式应即时持久化")
+            verify(page.progressLabel.text.indexOf("本章 ") === 0,
+                   "本章百分比格式应显示范围")
+            page.setProgressScope("book")
+            compare(String(Settings.value("reading/progressScope")), "book",
+                    "全书范围应即时持久化")
+            verify(page.progressLabel.text.indexOf("全书 ") === 0,
+                   "全书百分比格式应显示全书范围")
+            h.stack.destroy()
+            var h2 = openPage()
+            compare(h2.page.progressDisplay, "percent", "重开应恢复百分比格式")
+            h2.stack.destroy()
+            Settings.setValue("reading/progressDisplay", "pages")
+        }
+        function test_toolbarIconsAlignWithLibraryLabel() {
+            var h = openPage()
+            var page = h.page
+            page.sheetOpen = true
+            tryVerify(function () { return page.topToolbar.visible }, 2000,
+                      "Sheet 打开时顶栏应显示")
+            verify(page.topToolbar.backIcon !== undefined, "顶栏应暴露返回图标")
+            verify(page.topToolbar.notesIcon !== undefined, "顶栏应暴露笔记图标")
+            var backY = page.topToolbar.backIcon.mapToItem(page.topToolbar, 0, 0).y
+            var notesY = page.topToolbar.notesIcon.mapToItem(page.topToolbar, 0, 0).y
+            verify(Math.abs(backY - notesY) < 1,
+                   "返回图标应与其它图标垂直对齐：back=" + backY + " notes=" + notesY)
+            var label = page.topToolbar.libraryLabel
+            verify(label !== undefined, "返回项应暴露书库文字")
+            var labelCenter = label.mapToItem(page.topToolbar, 0, label.height / 2).y
+            var iconCenter = page.topToolbar.backIcon.mapToItem(page.topToolbar,
+                                                                0, page.topToolbar.backIcon.height / 2).y
+            verify(Math.abs(labelCenter - iconCenter) < 1,
+                   "返回图标中心应与书库文字中心对齐")
+            h.stack.destroy()
+        }
+
+        function test_readStartsAtCurrentScrollPosition() {
+            var h = openPage()
+            var page = h.page
+            page.loadChapter(0)
+            tryVerify(function () { return page.contentView.contentHeight > page.contentView.height }, 5000,
+                      "可滚动文本内容应就绪")
+            wait(350)
+            page.contentView.contentY = Math.min(900,
+                Math.max(1, page.contentView.contentHeight - page.contentView.height))
+            wait(100)
+            Tts.reconfigure("openai", "https://api.openai.com/v1", "", "tts-1", "nova", 1.0)
+            page.startReadAloud()
+            verify(Tts.currentIndex > 0,
+                   "朗读应从当前阅读位置开始，实际句索引=" + Tts.currentIndex)
+            Tts.stop()
+            h.stack.destroy()
+        }
+        function test_readFromAdjacentScrollChapterUsesChapterLocalIndex() {
+            var h = openPage()
+            var page = h.page
+            var multi = null
+            for (let b of Books.booksModel)
+                if (b.title === "multibook") { multi = b; break }
+            verify(multi !== null, "测试应使用多章节书")
+            h.stack.destroy()
+            h = openPage(multi)
+            page = h.page
+            page.loadChapter(0)
+            tryVerify(function () { return page.contentView.scrollModel.length > 100
+                                      && page.contentView.contentHeight > page.contentView.height }, 5000,
+                      "连续章节窗口应完成布局")
+            page.activateChapter(1)
+            tryVerify(function () { return Books.currentChapter === 1
+                                      && Tts.chapter === 1 }, 3000,
+                      "激活下一章应同步阅读与朗读章节")
+            compare(Tts.currentIndex, 0, "切换章节应从章节首句游标开始")
+            tryVerify(function () {
+                if (page.chapter.title !== "第二章") return false
+                var rows = page.contentView.scrollModel
+                for (var i = 0; i < rows.length; ++i) {
+                    if (rows[i].chapterIndex === 1
+                            && String(rows[i].text).indexOf("第二章") >= 0)
+                        return true
+                }
+                return false
+            }, 3000, "跨章后连续窗口中心必须使用新章节正文")
+            wait(100)
+            compare(page.contentView.activeScrollChapter, 1,
+                    "跨章后正文激活章节不得回退")
+            Tts.stop()
+            h.stack.destroy()
+        }
         function test_hiddenControlsTapOpensToolbarAndBackPops() {
             var h = openPage()
             var page = h.page
@@ -500,6 +618,28 @@ Item {
             page.backButton.clicked()
             tryVerify(function () { return h.stack.currentItem.objectName === "shelfMarker" }, 2000,
                       "唤出顶栏后点击返回应回到书架前页")
+            h.stack.destroy()
+        }
+        function test_scrollProgressCountsCurrentChapterOnly() {
+            Settings.setValue("reading/pageMode", "scroll")
+            Settings.setValue("reading/progressDisplay", "pages")
+            var multi = null
+            for (let b of Books.booksModel)
+                if (b.title === "multibook") { multi = b; break }
+            verify(multi !== null, "测试应使用多章节书")
+            var h = openPage(multi)
+            var page = h.page
+            page.loadChapter(0)
+            var cv = page.contentView
+            tryVerify(function () { return cv.scrollModel.length > 100
+                                      && cv.paragraphRepeater.count === cv.scrollModel.length
+                                      && cv.contentHeight > cv.height }, 5000,
+                      "连续章节正文高度应稳定")
+            wait(300)
+            var windowPages = Math.ceil(cv.contentHeight / cv.height)
+            verify(page.visualPageCount > 0, "当前章节页数应有效")
+            verify(page.visualPageCount < windowPages,
+                   "滚动进度总页数不得包含前后缓冲章节")
             h.stack.destroy()
         }
         // 任务5：自定义图片模式文字色——ReaderPage 从 Settings 恢复

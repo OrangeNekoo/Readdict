@@ -44,6 +44,19 @@ private slots:
         c.next(); QCOMPARE(c.currentIndex(), 1);
         c.previous(); QCOMPARE(c.currentIndex(), 0);
     }
+    void startsFromRequestedSentenceIndex() {
+        TtsController c;
+        FakeEngine e;
+        c.setEngine(&e);
+        c.setSentences({"第一句。", "第二句！", "第三句？"});
+        c.setCurrentIndex(1);
+        QCOMPARE(c.currentIndex(), 1);
+        c.play();
+        QCOMPARE(e.spoken, QStringList{"第二句！"});
+        c.stop();
+        c.setCurrentIndex(99);
+        QCOMPARE(c.currentIndex(), 2);
+    }
     void stopsAtEnd() {
         TtsController c;
         c.setSentences({"a.", "b."});

@@ -86,6 +86,14 @@ void TtsController::setSentences(const QStringList &s) {
     emit sentenceChanged(0);
 }
 
+void TtsController::setCurrentIndex(int index) {
+    if (m_sentences.isEmpty()) return;
+    const int bounded = qBound(0, index, m_sentences.size() - 1);
+    if (m_index == bounded) return;
+    m_index = bounded;
+    emit sentenceChanged(m_index);
+}
+
 void TtsController::setChapter(int ch) {
     if (m_chapter == ch) return;
     m_chapter = ch;

@@ -18,8 +18,17 @@ Page {
     // 页内 focus:true 的 ReaderContent（Flickable）获得 activeFocus 接收方向键；
     // 弹层/Dialog 打开时焦点在弹层内，正文 Keys 不触发（不干扰输入框）。
     focus: true
+    Keys.priority: Keys.BeforeItem
+    Keys.onPressed: (event) => {
+        if (page.sheetOpen || page.menuOpen) return
+        if (content.handleKey(event.key, event.modifiers, event.isAutoRepeat))
+            event.accepted = true
+    }
     property var book: ({})
     property var chapter: ({})
+    // scroll 模式相邻章节原始数据（最多当前章前后各一章）；正文委托窗口在
+    // ReaderContent 内按视口裁剪，因此不会全书常驻。
+    property var scrollChapters: []
     property var typography: ({})
     property string bgMode: "light"          // 与 Settings background/mode 同步
     property string bgImagePath: ""          // background/imagePath（图片背景）
@@ -52,6 +61,7 @@ Page {
     property alias backButton: topToolbar.backBtn
     property alias menuButton: topToolbar.menuBtn
     property alias infoDialog: infoDialog
+    property alias progressLabel: progressLabel
     // U4：Kindle 底部 Sheet 工具栏。
     property bool sheetOpen: false
     property string sheetTab: "theme"
@@ -61,6 +71,115 @@ Page {
     // 跟随应用主题深浅，覆盖显式背景选择；关闭后还原显式选择——page.bgMode 未被覆盖）
     property bool autoContinue: true
     property bool darkFollow: false
+    // 左下角阅读进度：格式（页数/百分比）与范围（本章/全书）独立。
+    property string progressDisplay: "pages"
+    property string progressScope: "chapter"
+    property real visualPageRatio: page.progressScope === "book" && page.bookPageTotal > 0
+        ? page.bookPageNumber / page.bookPageTotal
+        : (content.pageMode === "paged"
+            ? (content.pageCount > 0 ? (content.currentPage + 1) / content.pageCount : 0)
+            : content.currentChapterProgressRatio())
+    property int visualPageNumber: page.progressScope === "book" && page.bookPageTotal > 0
+        ? page.bookPageNumber : content.currentChapterPageNumber()
+    property int visualPageCount: page.progressScope === "book" && page.bookPageTotal > 0
+        ? page.bookPageTotal : content.currentChapterPageCount()
+    property string progressText: {
+        const scope = page.progressScope === "book" ? qsTr("全书") : qsTr("本章")
+        if (page.progressDisplay === "percent")
+            return scope + " " + Math.round(page.visualPageRatio * 100) + "%"
+        return scope + " " + qsTr("第 %1 / %2 页").arg(page.visualPageNumber)
+                                           .arg(page.visualPageCount)
+    }
+    property int bookPageNumber: 0
+    property int bookPageTotal: 0
+    property var measuredChapterPages: []
+    property int measureChapterIndex: 0
+    property int measurePageSum: 0
+    property var measureChapter: ({})
+    property var measureView: null
+    function updateBookPageNumber() {
+        if (page.progressScope !== "book" || page.bookPageTotal <= 0) return
+        let prefix = 0
+        const ch = Math.max(0, Number(Books.currentChapter))
+        for (let i = 0; i < ch && i < page.measuredChapterPages.length; ++i)
+            prefix += Number(page.measuredChapterPages[i] || 0)
+        page.bookPageNumber = prefix + content.currentChapterPageNumber()
+    }
+
+    Connections {
+        target: content
+        function onContentYChanged() { page.updateBookPageNumber() }
+        function onCurrentPageChanged() { page.updateBookPageNumber() }
+        function onPageCountChanged() { page.updateBookPageNumber() }
+    }
+
+    Timer {
+        id: measureTimer
+        interval: 50
+        repeat: false
+        onTriggered: page.measureBookStep()
+    }
+
+    Component {
+        id: measureContentComp
+        ReaderContent {
+            visible: false
+            opacity: 0
+            width: page.content ? page.content.width : 0
+            height: page.content ? page.content.height : 0
+            textColor: page.effectiveBg === "dark" ? UITheme.darkTextPrimary : UITheme.lightTextPrimary
+            typography: page.typography
+            pageMode: page.pageMode
+        }
+    }
+    function measureBookPages() {
+        if (!page.book || !page.book.id) return
+        if (!page.measureView) page.measureView = measureContentComp.createObject(page)
+        page.measureChapterIndex = 0
+        page.measurePageSum = 0
+        page.measuredChapterPages = []
+        page.bookPageNumber = 0
+        page.bookPageTotal = 0
+        page.measureBookStep()
+    }
+
+    function measureBookStep() {
+        if (!page.measureView || !page.book || !page.book.id) return
+        const count = Books.chapterCount(page.book.id)
+        if (page.measureChapterIndex >= count) {
+            page.bookPageTotal = page.measurePageSum
+            page.updateBookPageNumber()
+            return
+        }
+        const loaded = Books.loadChapter(page.book.id, page.measureChapterIndex)
+        if (!loaded || loaded.error) {
+            page.measuredChapterPages.push(1)
+            page.measurePageSum += 1
+            page.measureChapterIndex += 1
+            measureTimer.restart()
+            return
+        }
+        const view = page.measureView
+        view.pageMode = page.pageMode
+        view.typography = page.typography
+        view.scrollChapters = [{ index: page.measureChapterIndex,
+                                 title: loaded.title || "", chapter: loaded }]
+        view.activeScrollChapter = page.measureChapterIndex
+        view.scrollFocusChapter = page.measureChapterIndex
+        view.chapter = loaded
+        if (page.pageMode === "paged") {
+            if (view.pageCount <= 0) { measureTimer.restart(); return }
+            page.measuredChapterPages.push(Math.max(1, view.pageCount))
+        } else {
+            if (view.contentHeight <= 0 || view.paragraphRepeater.count <= 0) {
+                measureTimer.restart(); return
+            }
+            page.measuredChapterPages.push(Math.max(1, view.currentChapterPageCount()))
+        }
+        page.measurePageSum += page.measuredChapterPages[page.measuredChapterPages.length - 1]
+        page.measureChapterIndex += 1
+        measureTimer.restart()
+    }
     // U4：当前字族存储 token（FontSheet 高亮/选择）。
     property string fontFamily: ""
     // U4：有效背景模式——darkFollow 开时跟随应用主题（UITheme.isDark 实时绑定），
@@ -106,16 +225,6 @@ Page {
                 if (sv) sv.pop()
             }
         }
-        onAa: {
-            page.menuOpen = false
-            page.sheetOpen = true
-            page.sheetTab = "theme"
-        }
-        onLayout: {
-            page.menuOpen = false
-            page.sheetOpen = true
-            page.sheetTab = "layout"
-        }
         onNotes: notesDlg.open()
         onBookmark: page.toggleBookmark()
         onSearch: searchDlg.open()
@@ -132,9 +241,10 @@ Page {
         anchors.right: parent.right
         anchors.bottom: page.ttsBarVisible ? ttsBar.top : parent.bottom
         chapter: page.chapter
+        scrollChapters: page.scrollChapters
         typography: page.typography
         // 任务5：正文前景色——dark → Kindle 深色系浅字；image → 自定义字体颜色
-        //（background/textColor 恢复值，白名单校验后存于 page.bgTextColor，缺失/
+        //（background/textColor 存储值，白名单校验后存于 page.bgTextColor，缺失/
         // 非法为 "" 走浅色默认）；light/paper/eink 等 → 浅底深字。自定义色只在
         // image 模式生效，不污染其它模式默认色。ReaderContent 的 TextEdit.color
         // 作富文本文档默认前景，纯文本与富文本（无显式色 span）一致继承。
@@ -147,6 +257,7 @@ Page {
         pageMode: page.pageMode
         onRequestNextChapter: page.autoNextChapter()
         onRequestPrevChapter: page.autoPrevChapter()
+        onRequestChapterActivation: (index) => page.activateChapter(index)
         // 任务2：正文宿主真实点击桥接——TapHandler 在 ReaderContent 内（见
         // ReaderContent.contentTapped 注释），视口坐标 y 换算回页面坐标后进
         // handleContentTap 状态机（隐藏态 content.y=0，换算为恒等；Sheet 打开
@@ -154,6 +265,18 @@ Page {
         // 解析），不可写 page.content（id 非父对象属性）。
         // 任务3：x 视口坐标直传（content.x 恒 0），paged 模式左右半屏点击翻页。
         onContentTapped: (x, y) => page.handleContentTap(content.y + y, x)
+    }
+    Label {
+        id: progressLabel
+        anchors.left: parent.left
+        anchors.leftMargin: 16
+        anchors.bottom: page.ttsBarVisible ? ttsBar.top : parent.bottom
+        anchors.bottomMargin: 12
+        visible: !page.sheetOpen && page.loadError.length === 0
+        z: 10
+        text: page.progressText
+        font.pixelSize: UITheme.fsCaption
+        color: page.effectiveBg === "dark" ? UITheme.darkTextSecondary : UITheme.textSecondary
     }
 
     // L4（P0#5）：解析失败错误占位——loadError 非空时盖住内容区：居中错误文案
@@ -554,13 +677,41 @@ Page {
         Settings.setValue("bookmarks/" + page.book.id, list)
         page.syncCurrentBookmark()
     }
+    function ttsForChapter(loaded, index, stopCurrent) {
+        if (stopCurrent) Tts.stop()
+        const all = []
+        try {
+            for (const p of (loaded.paragraphs ?? []))
+                for (const s of ((p ?? {}).sentences ?? [])) all.push(s)
+        } catch (err) {
+            page.loadError = qsTr("章节数据异常，部分内容无法朗读")
+            page.loadErrorIndex = index
+        }
+        Tts.setSentences(all)
+        Tts.setChapter(index)
+    }
+
+    // 连续滚动只驻留当前章节和相邻章节的原始数据；ReaderContent 再把它裁成
+    // 视口前后有限的完整段落委托，避免全书段落进入 QML 委托。
+    function makeScrollChapters(center) {
+        const titles = Books.chapterTitles(page.book.id) || []
+        const first = Math.max(0, center - 1)
+        const last = Math.min(titles.length - 1, center + 1)
+        const result = []
+        for (let index = first; index <= last; ++index) {
+            const isCurrent = index === center && page.chapter && page.chapter.paragraphs
+                && Number(Books.currentChapter) === index
+            const loaded = isCurrent ? page.chapter : Books.loadChapter(page.book.id, index)
+            if (!loaded || loaded.error) continue
+            result.push({ index: index, title: loaded.title || titles[index] || "", chapter: loaded })
+        }
+        return result
+    }
 
     function loadChapter(i) {
         if (!page.book || !page.book.id) return
         const titles = Books.chapterTitles(page.book.id)
         if (!titles || titles.length === 0) {
-            // L4（P0#5）：无章节——探测解析错误（全书解析失败的书 titles 为空，
-            // 若不探测则错误占位永无显示机会）；空文档无错误维持旧行为直接返回
             const probe = Books.loadChapter(page.book.id, 0)
             if (probe && probe.error) {
                 page.loadError = probe.error
@@ -570,12 +721,7 @@ Page {
             return
         }
         i = Math.max(0, Math.min(i, titles.length - 1))
-        // C5：换章先停朗读——否则旧章在途 finished 会在 setSentences 复位游标后
-        // 触发 next() 把游标推到 1，导致新章从第 2 句开始（首句被跳过）
-        Tts.stop()
         const loaded = Books.loadChapter(page.book.id, i)
-        // L4（P0#5）：解析失败上抛 {error} → 置 loadError 显示错误占位（重试经
-        // loadErrorIndex 重调本函数）；空文档无错误维持旧行为空 map 渲染
         if (loaded && loaded.error) {
             page.loadError = loaded.error
             page.loadErrorIndex = i
@@ -583,34 +729,33 @@ Page {
             return
         }
         page.loadError = ""
+        Books.currentChapter = i
         page.chapter = loaded
-        Books.currentChapter = i   // 写时持久化 progress/<bookId>
-        // L6（P1#13）：章节加载成功后上报书架进度——reportProgress 取 max 不 regress：
-        // 前进刷新 progress 与书架，回翻只刷 last_read_at（不 emit，书架模型不重建）
-        Books.reportProgress(page.book.id, i + 1, Books.chapterCount(page.book.id))
-        // C5：拍平本段全部段落句子喂给 Tts（顺序与 ReaderContent 的 sentenceStarts 一致），
-        // 换章复位游标 → 高亮回到首句；Tts.currentIndex 驱动逐句高亮与滚动跟随。
-        // 复审修复：段落可能为 null（解析器异常数据）——null 按空段跳过
-        //（(p ?? {}).sentences ?? []，不抛 TypeError、不破坏句子索引对齐，同
-        // ReaderContent 的 computeSentenceStarts/rebuildPageModel 防御）；
-        // 意外异常（如 sentences 非可迭代）兜底置 loadError 显示可读错误占位
-        //（"异常保持 loadError"分支，loadErrorHost 覆盖内容区 + 重试按钮）。
-        const all = []
-        try {
-            for (const p of (page.chapter.paragraphs ?? []))
-                for (const s of ((p ?? {}).sentences ?? [])) all.push(s)
-        } catch (err) {
-            page.loadError = qsTr("章节数据异常，部分内容无法朗读")
-            page.loadErrorIndex = i
+        page.ttsForChapter(loaded, i, true)
+        page.syncCurrentBookmark()
+        if (page.pageMode === "scroll") {
+            page.scrollChapters = page.makeScrollChapters(i)
+            content.showScrollChapter(i)
         }
-        Tts.setSentences(all)
-        Tts.setChapter(i)
+        content.forceActiveFocus()
+    }
+    // ReaderContent 中线激活的章节同步更新页面章节身份与连续窗口。
+    function activateChapter(i) {
+        if (!page.book || !page.book.id || i === Books.currentChapter) return
+        const titles = Books.chapterTitles(page.book.id) || []
+        if (i < 0 || i >= titles.length) return
+        const loaded = Books.loadChapter(page.book.id, i)
+        if (!loaded || loaded.error) return
+        Books.currentChapter = i
+        page.chapter = loaded
+        Books.reportProgress(page.book.id, i + 1, Books.chapterCount(page.book.id))
+        page.ttsForChapter(loaded, i, true)
+        page.syncCurrentBookmark()
+        page.scrollChapters = page.makeScrollChapters(i)
     }
 
-    // 规格 §7：章末自动续章——ReaderContent 滚动接近底部触发，当前章非末章时换下一章。
-    // 与手动换章（控制栏/目录）同走 loadChapter（含 Tts.stop 复位）；末章直接返回，
-    // 避免 loadChapter 的钳制把读者从章尾拽回本章开头。
-    // U4：自动续章开关（MoreSheet/reading/autoContinue）——关时滚动触底不换章
+    // 规格 §7：滚动路径的连续窗口已在 ReaderContent 内扩展；这条仅是 paged
+    // 末页翻章与无法继续扩展时的兜底。
     function autoNextChapter() {
         if (!page.autoContinue) return
         const titles = Books.chapterTitles(page.book.id)
@@ -618,23 +763,17 @@ Page {
         page.loadChapter(Books.currentChapter + 1)
     }
 
-    // E4 复审：paged 模式 ← 章首回上一章——ReaderContent.pagePrev 在 contentY=0
-    // 时请求翻上一章（与 pageNext 章末翻章对称，修复"章首 ← 死键"）；首章直接
-    // 返回，避免 loadChapter 的钳制把读者从章首重载回本章开头。
     function autoPrevChapter() {
         const titles = Books.chapterTitles(page.book.id)
         if (!titles || Books.currentChapter - 1 < 0) return
         page.loadChapter(Books.currentChapter - 1)
     }
 
-    // 规格 §7：朗读续章——Tts.chapterCompleted（自然读完/下一句越过章末）→ 换下一章
-    // 并继续朗读（新章句子已由 loadChapter 喂给 Tts，play() 从首句发声）；
-    // 末章朗读结束不再自动（停在末章句尾）。
     function continueReadingFromTts(ch) {
         const titles = Books.chapterTitles(page.book.id)
         if (!titles || ch + 1 >= titles.length) return
-        page.loadChapter(ch + 1)   // loadChapter 内部 Tts.stop() 复位游标
-        Tts.play()                 // 新章从首句继续朗读
+        page.loadChapter(ch + 1)
+        Tts.play()
     }
 
     function setFontSize(size) {
@@ -681,6 +820,15 @@ Page {
         Settings.setValue("reading/darkFollow", page.darkFollow)
     }
 
+    function setProgressDisplay(display) {
+        page.progressDisplay = display === "percent" ? "percent" : "pages"
+        Settings.setValue("reading/progressDisplay", page.progressDisplay)
+    }
+    function setProgressScope(scope) {
+        page.progressScope = scope === "book" ? "book" : "chapter"
+        Settings.setValue("reading/progressScope", page.progressScope)
+        if (page.progressScope === "book") page.measureBookPages()
+    }
     // U4/L10：Sheet 底部"保存当前设置"按钮 → 主题面板命名输入 Dialog
     //（保存当前排版/背景快照为主题预设，追加 themes/custom，见 ThemeSheet）
     function onSaveThemeRequested() {
@@ -751,31 +899,34 @@ Page {
     // 旧版 reader/background 键的迁移在 SettingsStore 构造函数预置默认分区时完成
     //（QML 加载前），此处只读新键，不再有迁移分支。
     function backgroundFromSettings() {
-        // L9（P2#33）：四态白名单归一抽至 BackgroundNorm（与 SettingsBackgroundPage 共用）；
-        // 旧版 eink 等非法值归一为 light，且回写 settings.json 使存储值同步归一
         const rawMode = Settings.value("background/mode")
         const mode = BackgroundNorm.norm(rawMode)
-        if (mode !== rawMode)
-            Settings.setValue("background/mode", mode)
+        if (mode !== rawMode) Settings.setValue("background/mode", mode)
         page.bgMode = mode
         page.bgImagePath = Settings.value("background/imagePath") || ""
         const blur = Number(Settings.value("background/blur")) || 0.0
         page.bgBlur = Math.max(0, Math.min(1, blur))
         const bright = Number(Settings.value("background/brightness")) || 1.0
         page.bgBrightness = Math.max(0.5, Math.min(1.5, bright))
-        // 任务5：自定义图片模式字体颜色恢复——白名单校验（UITheme 安全色），
-        // 非法/缺失置空 → 注入绑定回退浅色默认；不回写存储值（仅显示/注入回退）
         const tc = Settings.value("background/textColor")
         page.bgTextColor = UITheme.isSafeImageTextColor(tc) ? UITheme.imageTextColorValue(tc) : ""
     }
 
-    // B10：滚动偏移持久化（章节 + contentY 原子写入，恢复时先 loadChapter 再设 scrollY）
     function saveScroll() {
-        if (!page.book || !page.book.id) return
-        // 恢复未应用前 contentY 仍是 0：此刻写入会把已保存位置覆盖为 0
-        //（含图章章节的收敛窗口内退出即丢位置），跳过本次保存
-        if (content.restorePending) return
-        Books.savePosition(page.book.id, Books.currentChapter, content.contentY)
+        if (!page.book || !page.book.id || content.restorePending) return
+        const candidate = content.scrollAnchor()
+        // 章节刚切换、但旧窗口的委托尚未换出时，candidate 仍指向上一章。
+        // 此时把它持久化会覆盖 Books.currentChapter，重开必然回退；只接受与
+        // 当前激活章节一致的完整锚点。其余过渡态保留章节并清掉陈旧锚点。
+        const anchor = candidate
+            && Number(candidate.chapterIndex) === Books.currentChapter
+            && Number(candidate.chapterIndex) === content.activeScrollChapter
+            ? candidate : null
+        const chapter = anchor ? anchor.chapterIndex : Books.currentChapter
+        const offset = anchor ? Math.max(0, Number(anchor.offsetY) || 0) : 0
+        Books.savePosition(page.book.id, chapter, offset)
+        if (anchor) Settings.setValue("progress/anchor_" + page.book.id, anchor)
+        else Settings.removeValue("progress/anchor_" + page.book.id)
     }
 
     // C7：从 Highlights 加载本书全部划线（打开阅读页/划线变更/笔记列表打开时调用）
@@ -784,17 +935,21 @@ Page {
         page.highlights = Highlights.highlightsForBook(page.book.id)
     }
 
-    // C8：书内搜索跳转——按索引定位章节（标题可能重复/为空，索引最可靠），
-    // loadChapter 后滚动到命中段
     function jumpToSearchHit(hit) {
         if (!hit || hit.chapterIndex === undefined || hit.paragraphIndex === undefined) return
+        content.restoreScrollY = -1
+        content.restoreAnchor = null
+        content.restorePending = false
         page.loadChapter(hit.chapterIndex)
         paraJumpTimer.targetIndex = hit.paragraphIndex
         paraJumpTimer.restart()
     }
 
-    // C8：外部（书架全文搜索入口）定位——同一跳转路径，供 initial* 属性复用
+    // C8：外部（书架全文搜索入口）定位——同一跳转路径，供 initial* 属性复用。
     function jumpToChapterParagraph(ci, pi) {
+        content.restoreScrollY = -1
+        content.restoreAnchor = null
+        content.restorePending = false
         page.loadChapter(ci)
         paraJumpTimer.targetIndex = pi
         paraJumpTimer.restart()
@@ -903,7 +1058,15 @@ Page {
     ]
 
     function startReadAloud() {
-        if (Tts.state !== 1) Tts.play()
+        if (Tts.state === 2) { Tts.play(); return }
+        if (Tts.state === 1) return
+        const position = content.readingPositionAtViewportCenter()
+        if (position.chapterIndex !== Books.currentChapter) {
+            const loaded = Books.loadChapter(page.book.id, position.chapterIndex)
+            if (loaded && !loaded.error) page.ttsForChapter(loaded, position.chapterIndex, false)
+        }
+        Tts.setCurrentIndex(position.sentenceIndex)
+        Tts.play()
     }
 
     function menuAction(act) {
@@ -1021,15 +1184,18 @@ Page {
             onSetAlign: (a) => page.setAlign(a)
         }
     }
-    // 更多标签面板：开关 + 功能菜单入口
     Component {
         id: morePanelComp
         MoreSheet {
             autoContinue: page.autoContinue
             darkFollow: page.darkFollow
+            progressDisplay: page.progressDisplay
+            progressScope: page.progressScope
+            progressPreview: page.progressText
             onSetAutoContinue: (on) => page.setAutoContinue(on)
             onSetDarkFollow: (on) => page.setDarkFollow(on)
-            onRequestToc: tocDialog.open()
+            onSetProgressDisplay: (display) => page.setProgressDisplay(display)
+            onSetProgressScope: (scope) => page.setProgressScope(scope)
         }
     }
 
@@ -1065,23 +1231,29 @@ Page {
         page.backgroundFromSettings()
         const pm = Settings.value("reading/pageMode")
         page.pageMode = (pm === "paged") ? "paged" : "scroll"
-        page.autoContinue = Settings.value("reading/autoContinue") !== false
         page.darkFollow = Settings.value("reading/darkFollow") === true
+        page.autoContinue = Settings.value("reading/autoContinue") !== false
+        const pd = Settings.value("reading/progressDisplay")
+        page.progressDisplay = pd === "percent" ? "percent" : "pages"
+        const ps = Settings.value("reading/progressScope")
+        page.progressScope = ps === "book" ? "book" : "chapter"
         page.fontFamily = String(Settings.value("typography/fontFamily") || "思源宋体 VF")
         const savedBookmarks = Settings.value("bookmarks/" + (page.book ? page.book.id : ""))
         page.bookmarks = Array.isArray(savedBookmarks) ? savedBookmarks.slice() : []
         page.syncCurrentBookmark()
-        // 在内容高度就绪后设置（progress/scroll_<bookId>）。
-        // C8：全文搜索跳转打开时（initialChapter/initialParagraph >= 0）改用目标章节，
-        // 并跳过滚动恢复（恢复会覆盖跳转位置）；段落滚动由 paraJumpTimer 完成。
         const initChapter = page.initialChapter >= 0
             ? page.initialChapter : Books.lastChapter(page.book.id)
         page.loadChapter(initChapter)
+        if (page.progressScope === "book") page.measureBookPages()
         if (page.initialParagraph >= 0) {
             paraJumpTimer.targetIndex = page.initialParagraph
             paraJumpTimer.restart()
         } else {
-            content.restoreScrollY = Books.lastScrollY(page.book.id)
+            const anchor = Settings.value("progress/anchor_" + page.book.id)
+            if (anchor && anchor.chapterIndex !== undefined)
+                content.restoreScrollAnchor(anchor)
+            else
+                content.restoreScrollY = Books.lastScrollY(page.book.id)
         }
         if (page.book && page.book.id) {
             // L5（P0#6）：旧库 chapter_index=0 的划线按章节标题回填 1 起索引（幂等），

@@ -1,6 +1,7 @@
 import QtQuick
 import QtTest
 import Readdict.Backend
+import Readdict.Test 1.0
 
 // D4 冒烟：StatsPage 可加载（卡片网格 + 分类柱条编译检查）；设置页"阅读统计"
 // 按钮 → StackView push StatsPage（生产导航链）；聚合数据正确性：分类分布反映
@@ -32,6 +33,9 @@ Item {
             var loader = statsPageComp.createObject(root)
             verify(loader.item !== null, "StatsPage 应能加载（卡片网格 + 分类柱条编译检查）")
             verify(loader.item.refresh !== undefined, "StatsPage 应暴露 refresh() 测试句柄")
+            verify(loader.item.backButton !== undefined, "StatsPage 应暴露统一返回按钮句柄")
+            verify(loader.item.backButton.contentItem !== undefined,
+                   "统计返回按钮应使用 ToolButton 图标内容")
             loader.destroy()
         }
 

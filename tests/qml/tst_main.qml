@@ -209,6 +209,15 @@ Item {
     }
     TestCase {
         name: "FulltextSmoke"
+        function initTestCase() {
+            Books.doSearch("")
+            Books.setFilter("")
+            Books.setSort(0)
+            var hasSourceBook = false
+            for (let b of Books.booksModel)
+                if (b.title === "zeta") { hasSourceBook = true; break }
+            if (!hasSourceBook) Importer.doImport(TestEnv.sourceFiles[0])
+        }
         function test_shelfFulltextHits() {
             var loader = mainComp.createObject(root)
             loader.width = root.width
@@ -333,40 +342,40 @@ Item {
                    "顶栏应暴露返回/菜单句柄")
             var got = []
             toolbar.back.connect(function () { got.push("back") })
-            toolbar.aa.connect(function () { got.push("aa") })
-            toolbar.layout.connect(function () { got.push("layout") })
             toolbar.notes.connect(function () { got.push("notes") })
             toolbar.bookmark.connect(function () { got.push("bookmark") })
             toolbar.search.connect(function () { got.push("search") })
             toolbar.menu.connect(function () { got.push("menu") })
             var row = toolbar.children[1]
-            verify(row !== undefined && row.children.length === 7, "顶栏应有 7 项按钮")
+            verify(row !== undefined && row.children.length === 5, "顶栏应有 5 项按钮")
             for (var i = 0; i < row.children.length; ++i)
                 row.children[i].clicked()
-            compare(got.join(","), "back,aa,layout,notes,bookmark,search,menu",
-                    "7 项按钮应发对应信号")
+            compare(got.join(","), "back,notes,bookmark,search,menu",
+                    "五个按钮应按返回、笔记、书签、搜索、更多顺序发出操作")
             toolbar.bookmarked = true
-            verify(row.children[4].contentItem.name === "bookmarkFill", "已收藏态应使用实心书签")
+            verify(row.children[2].contentItem.name === "bookmarkFill", "已收藏态应使用实心书签")
             toolbar.bookmarked = false
-            verify(row.children[4].contentItem.name === "bookmark", "未收藏态应使用空心书签")
+            verify(row.children[2].contentItem.name === "bookmark", "未收藏态应使用空心书签")
+            toolbar.width = 240
+            tryVerify(function () { return toolbar.backBtn.width >= 44 }, 2000,
+                      "窄宽度下返回按钮仍应保留 44px 命中区")
+            verify(!toolbar.backBtn.contentItem.children[0].children[1].visible,
+                   "窄宽度下书库文字应隐藏而非压缩按钮命中区")
             loader.destroy()
         }
     }
     TestCase {
-        name: "FontPickerSmoke"
-        // D4：字体切换移入阅读界面——控制栏字体按钮（行尾 children[13]）+ 弹层 4 项
-        //（宋体/黑体/HW/得意黑，value 为存储 token）；阅读页内选择即时生效
-        //（Settings/typography/正文 font.family 同步）；设置页外观卡不再有字体项。
+        // 顶栏书签按钮保持独立动作；字体控制仅位于底部 Sheet。
         function test_toolbarBookmarkButton() {
             var loader = controlsComp.createObject(root)
             var toolbar = loader.item
             verify(toolbar !== null, "KdTopToolbar 应能加载")
             var got = 0
             toolbar.bookmark.connect(function () { ++got })
-            toolbar.children[1].children[4].clicked()
+            toolbar.children[1].children[2].clicked()
             compare(got, 1, "书签按钮应发 bookmark 信号")
             toolbar.bookmarked = true
-            verify(toolbar.children[1].children[4].contentItem.name === "bookmarkFill",
+            verify(toolbar.children[1].children[2].contentItem.name === "bookmarkFill",
                    "书签信号后可由宿主切换实心图标")
             loader.destroy()
         }
@@ -429,6 +438,8 @@ Item {
         // （onCompleted 恢复章节/滚动/计时，onDestruction 保存滚动/结算计时）。
         // 多章节 EPUB fixture（sample.epub，2 章）验证章节恢复；长文本书验证滚动恢复。
         function initTestCase() {
+            // 本组断言连续滚动高度与锚点；显式复位，不能依赖其它测试的 Settings 残留。
+            Settings.setValue("reading/pageMode", "scroll")
             if (TestEnv.epubFixture.length > 0)
                 Importer.doImport(TestEnv.epubFixture)
             if (TestEnv.longSource.length > 0)
@@ -515,6 +526,37 @@ Item {
             tryVerify(function () {
                 return Math.abs(page2.contentView.contentY - savedY) < 1
             }, 5000, "重开应恢复到保存的滚动位置 " + savedY + "，实际 " + page2.contentView.contentY)
+            loader2.destroy()
+        }
+        // BUG3：连续阅读持久化稳定段落锚点。复开后段落相对视口的偏移必须保持，
+        // 不能仅落到同一段落顶部（否则用户会感到跳动）。
+        function test_scrollAnchorRestoreKeepsRelativeOffset() {
+            var book = findBook("TXT", "longbook")
+            if (!book) skip("未导入长文本书")
+            Settings.removeValue("progress/anchor_" + book.id)
+            var loader = openReader(book)
+            var page = loader.item
+            tryVerify(function () { return page.contentView.contentHeight > 2000 }, 5000,
+                      "长文本书内容高度应就绪")
+            // 先耗尽本次打开由旧滚动位置触发的恢复计时器；随后才模拟用户主动滚动。
+            // 否则初始恢复会覆盖 700，测试保存的是错误的顶端锚点。
+            wait(350)
+            page.contentView.contentY = 700
+            wait(100)
+            var saved = page.contentView.scrollAnchor()
+            verify(saved !== null && saved.offsetY > 0,
+                   "保存时应取得含正偏移的稳定段落锚点")
+            loader.destroy()
+            wait(100)
+            var loader2 = openReader(book)
+            var page2 = loader2.item
+            tryVerify(function () {
+                var restored = page2.contentView.scrollAnchor()
+                return restored !== null
+                    && restored.chapterIndex === saved.chapterIndex
+                    && restored.paragraphIndex === saved.paragraphIndex
+                    && Math.abs(restored.offsetY - saved.offsetY) < 2
+            }, 5000, "重开后应恢复到同一段落与相对偏移")
             loader2.destroy()
         }
         // 规格 §7：章末自动续章——滚动接近底部触发 requestNextChapter（ReaderContent 信号层）。

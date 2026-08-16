@@ -6,9 +6,14 @@
 #include <QQuickItem>
 #include <QQuickTextDocument>
 #include <QVariant>
+#include <QAbstractTextDocumentLayout>
+#include <QTextBlock>
 #include <QTextBlockFormat>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTextLayout>
+#include <QTextLine>
+#include <QVariantMap>
 
 namespace {
 // QQuickTextEdit 是 Qt 6.11 的 private 类（无公共头文件），但其 textDocument
@@ -39,4 +44,32 @@ void ReaderTextHelper::applyLineSpacing(QQuickItem *edit, double factor) {
     fmt.setLineHeight(factor * 100.0, QTextBlockFormat::ProportionalHeight);
     // merge 而非 set：只改行距，不覆盖富文本段落自身的其他块属性
     cur.mergeBlockFormat(fmt);
+}
+
+QVariantList ReaderTextHelper::lineBreaks(QQuickItem *edit) const {
+    QVariantList breaks;
+    QQuickTextDocument *qdoc = textDocumentOf(edit);
+    if (!qdoc) return breaks;
+    QTextDocument *doc = qdoc->textDocument();
+    QAbstractTextDocumentLayout *layout = doc ? doc->documentLayout() : nullptr;
+    if (!layout) return breaks;
+
+    qreal previousBottom = -1.0;
+    for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
+        const QTextLayout *textLayout = block.layout();
+        if (!textLayout) continue;
+        const qreal blockTop = layout->blockBoundingRect(block).top();
+        for (int i = 0; i < textLayout->lineCount(); ++i) {
+            const QTextLine line = textLayout->lineAt(i);
+            const qreal top = blockTop + line.y();
+            const qreal bottom = top + line.height();
+            if (bottom <= previousBottom + 0.01) continue;
+            QVariantMap boundary;
+            boundary.insert(QStringLiteral("top"), top);
+            boundary.insert(QStringLiteral("bottom"), bottom);
+            breaks.append(boundary);
+            previousBottom = bottom;
+        }
+    }
+    return breaks;
 }

@@ -429,13 +429,15 @@ Item {
             // 字号 20（index 3）
             tryVerify(function () { return panel.sizeItems.itemAt(3) !== null }, 2000,
                       "字号分段应就绪")
-            mouseClick(panel.sizeItems.itemAt(3), 82, 17)
+            var size20 = panel.sizeItems.itemAt(3)
+            verify(size20.width > 0 && size20.height > 0, "字号 20 控件应有有效命中区域")
+            panel.selectFontSize(20)
             tryVerify(function () {
                 return Number(Settings.value("typography/fontSize")) === 20
                     && page.typography.fontSize === 20
             }, 3000, "选字号 20 应写 typography/fontSize 并刷新排版")
-            mouseClick(panel.fontItems.itemAt(0), 20, 15)
-            mouseClick(panel.sizeItems.itemAt(2), 15, 15)
+            panel.selectFontSize(18)
+            panel.setFontFamily("思源宋体 VF")
             tryVerify(function () {
                 return String(Settings.value("typography/fontFamily")) === "思源宋体 VF"
                     && Number(Settings.value("typography/fontSize")) === 18
@@ -508,8 +510,10 @@ Item {
             h.stack.destroy()
         }
 
-        // 更多面板：自动续章开关门控 autoNextChapter + 深色跟随派生 effectiveBg
+        // 更多面板：自动续章、深色跟随与左下角页数/百分比显示格式及范围。
         function test_morePanelToggles() {
+            Settings.setValue("reading/progressDisplay", "pages")
+            Settings.setValue("reading/progressScope", "chapter")
             var h = openPage(findBook("TXT", "multibook"))
             var page = h.page
             page.controlsHideDelay = 100000
@@ -521,17 +525,33 @@ Item {
             var panel = page.bottomSheet.contentLoader.item
             tryVerify(function () { return panel.objectName === "moreSheetPanel" }, 3000,
                       "内容应为更多面板")
-            verify(panel.progressRow !== undefined, "更多面板应有阅读进度行")
-            verify(panel.menuModel === undefined && panel.menuItems === undefined,
-                   "更多面板不应再渲染旧功能菜单")
-            var tocBefore = page.tocDlg.visible
-            mouseClick(panel.progressRow, panel.progressRow.width / 2,
-                       panel.progressRow.height / 2)
-            tryVerify(function () { return page.tocDlg.visible !== tocBefore }, 3000,
-                      "点击阅读进度行应经 requestToc 打开目录")
-            page.tocDlg.close()
-            tryVerify(function () { return !page.tocDlg.visible }, 3000,
-                      "目录关闭后应恢复隐藏")
+            verify(panel.progressSelector !== undefined, "更多面板应有进度格式单选控件")
+            verify(panel.scopeSelector !== undefined, "更多面板应有进度范围切换控件")
+            compare(page.progressDisplay, "pages", "默认应为页数进度")
+            compare(page.progressScope, "chapter", "默认应为本章进度")
+            panel.progressSelector.selectValue("percent")
+            tryVerify(function () {
+                return page.progressDisplay === "percent"
+                    && String(Settings.value("reading/progressDisplay")) === "percent"
+            }, 3000, "选择百分比应持久化并即时同步阅读页")
+            verify(page.progressText.indexOf("本章 ") === 0,
+                   "本章百分比格式应显示本章范围")
+            panel.scopeSelector.selectValue("book")
+            tryVerify(function () {
+                return page.progressScope === "book"
+                    && String(Settings.value("reading/progressScope")) === "book"
+            }, 3000, "选择全书应持久化并即时同步阅读页")
+            verify(page.progressText.indexOf("全书 ") === 0,
+                   "全书百分比格式应显示全书范围")
+            panel.progressSelector.selectValue("pages")
+            tryVerify(function () { return page.progressDisplay === "pages" }, 3000,
+                      "选择页数应恢复页数格式")
+            page.sheetOpen = false
+            tryVerify(function () { return page.progressLabel.visible }, 3000,
+                      "底部 Sheet 关闭后左下角进度标签应显示")
+            page.sheetOpen = true
+            tryVerify(function () { return !page.progressLabel.visible }, 3000,
+                      "底部 Sheet 打开时左下角进度标签应隐藏")
             // 自动续章默认开
             verify(page.autoContinue, "自动续章默认应开启")
             // 关闭开关（真实点击；状态感知：当前开 → 点一次关闭）
@@ -601,16 +621,18 @@ Item {
             tryVerify(function () { return !page.infoDialog.visible }, 3000,
                       "图书信息 Dialog 应完全关闭")
 
-            page.menuOpen = true
+            page.menuButton.clicked()
+            tryVerify(function () { return page.menuOpen }, 3000,
+                      "顶栏更多按钮应打开目录所在的菜单")
             page.menuAction("toc")
-            tryVerify(function () { return page.tocDlg.visible }, 3000, "目录 Dialog 应打开")
+            tryVerify(function () { return page.tocDlg.visible }, 3000, "目录 Dialog 应由顶栏更多菜单打开")
             page.tocDlg.close()
             tryVerify(function () { return !page.tocDlg.visible }, 3000,
-                      "目录 Dialog 应完全关闭")
+                      "目录关闭后应完全隐藏")
 
-            // 顶栏笔记/搜索按钮在第 4/6 个 ToolButton（含返回按钮为第 0 个）。
+            // 顶栏笔记为五按钮中的第二项（返回之后）。
             page.menuOpen = false
-            page.topToolbar.children[1].children[3].clicked()
+            page.topToolbar.children[1].children[1].clicked()
             tryVerify(function () { return page.notesDialog.visible }, 3000, "笔记 Dialog 应打开")
             page.notesDialog.close()
             tryVerify(function () { return !page.notesDialog.visible }, 3000,

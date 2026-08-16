@@ -50,10 +50,26 @@ void SettingsStore::applyDefaults() {
         m_root.insert("typography", QJsonObject{{"fontFamily", "思源宋体 VF"}, {"fontSize", 18},
                                                 {"lineHeight", 1.6}, {"align", "left"}, {"pageWidth", "normal"}});
     if (!m_root.contains("tts")) m_root.insert("tts", QJsonObject{{"engine", "system"}, {"rate", 1.0}});
-    // E4：阅读选项分区——翻页方式（scroll 竖向连续滚动 / paged 横向分页）。
-    // ReaderPage 打开时读取；设置页/布局 Sheet 可切换（写 reading/pageMode）。
-    if (!m_root.contains("reading"))
-        m_root.insert("reading", QJsonObject{{"pageMode", "scroll"}});
+    // 阅读选项：翻页方式、进度格式/范围与自动续章。范围默认本章，兼容旧配置。
+    if (!m_root.contains("reading")) {
+        m_root.insert("reading", QJsonObject{{"pageMode", "scroll"},
+                                               {"progressDisplay", "pages"},
+                                               {"progressScope", "chapter"},
+                                               {"autoContinue", true},
+                                               {"darkFollow", false}});
+    } else {
+        QJsonObject reading = m_root.value("reading").toObject();
+        const QString progressDisplay = reading.value("progressDisplay").toString();
+        if (progressDisplay != QLatin1String("pages") && progressDisplay != QLatin1String("percent"))
+            reading.insert("progressDisplay", "pages");
+        const QString progressScope = reading.value("progressScope").toString();
+        if (progressScope != QLatin1String("chapter") && progressScope != QLatin1String("book"))
+            reading.insert("progressScope", "chapter");
+        if (!reading.contains("pageMode")) reading.insert("pageMode", "scroll");
+        if (!reading.contains("autoContinue")) reading.insert("autoContinue", true);
+        if (!reading.contains("darkFollow")) reading.insert("darkFollow", false);
+        m_root.insert("reading", reading);
+    }
     if (!m_root.contains("webdav"))
         m_root.insert("webdav", QJsonObject{{"url", ""}, {"user", ""}, {"password", ""},
                                             {"syncSettings", true}, {"syncProgress", true},

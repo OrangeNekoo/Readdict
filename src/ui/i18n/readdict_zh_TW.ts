@@ -228,10 +228,8 @@
         <translation>書庫</translation>
     </message>
     <message>
-        <location filename="../qml/KdTopToolbar.qml" line="65"/>
-        <location filename="../qml/KdTopToolbar.qml" line="65"/>
         <source>布局</source>
-        <translation>佈局</translation>
+        <translation type="vanished">佈局</translation>
     </message>
 </context>
 <context>
@@ -411,28 +409,35 @@ Qt 6.11 · GPL（libmobi）· zlib 授權（minizip）</translation>
         <translation type="vanished">下一章</translation>
     </message>
     <message>
-        <location filename="../qml/MoreSheet.qml" line="33"/>
-        <location filename="../qml/MoreSheet.qml" line="33"/>
+        <location filename="../qml/MoreSheet.qml" line="15"/>
+        <location filename="../qml/MoreSheet.qml" line="89"/>
+        <source>页数</source>
+        <translation>頁數</translation>
+    </message>
+    <message>
+        <location filename="../qml/MoreSheet.qml" line="16"/>
+        <location filename="../qml/MoreSheet.qml" line="89"/>
+        <source>百分比</source>
+        <translation>百分比</translation>
+    </message>
+    <message>
+        <location filename="../qml/MoreSheet.qml" line="44"/>
         <source>自动续章</source>
         <translation>自動續章</translation>
     </message>
     <message>
-        <location filename="../qml/MoreSheet.qml" line="47"/>
-        <location filename="../qml/MoreSheet.qml" line="47"/>
+        <location filename="../qml/MoreSheet.qml" line="58"/>
         <source>深色跟随</source>
         <translation>深色跟隨</translation>
     </message>
     <message>
-        <location filename="../qml/MoreSheet.qml" line="76"/>
-        <location filename="../qml/MoreSheet.qml" line="76"/>
+        <location filename="../qml/MoreSheet.qml" line="83"/>
         <source>阅读进度</source>
         <translation>閱讀進度</translation>
     </message>
     <message>
-        <location filename="../qml/MoreSheet.qml" line="82"/>
-        <location filename="../qml/MoreSheet.qml" line="82"/>
         <source>书中位置</source>
-        <translation>書中位置</translation>
+        <translation type="vanished">書中位置</translation>
     </message>
 </context>
 <context>
@@ -667,6 +672,16 @@ Qt 6.11 · GPL（libmobi）· zlib 授權（minizip）</translation>
         <location filename="../qml/ReaderPage.qml" line="998"/>
         <source>保存当前设置</source>
         <translation>儲存目前設定</translation>
+    </message>
+    <message>
+        <location filename="../qml/ReaderPage.qml" line="77"/>
+        <source>书中 %1%</source>
+        <translation>書中 %1%</translation>
+    </message>
+    <message>
+        <location filename="../qml/ReaderPage.qml" line="83"/>
+        <source>第 %1 / %2 页</source>
+        <translation>第 %1 / %2 頁</translation>
     </message>
 </context>
 <context>

@@ -1,8 +1,7 @@
 # Readdict 阅读分页、连续模式与同步滚动修复设计
 
 - 日期：2026-08-12
-- 状态：已获视觉与交互设计批准，待书面规格审阅
-- 范围：`SyncPage.qml`、阅读页顶栏与进度显示、竖向连续阅读、横向严格分页
+- 状态：已获视觉、交互设计和实现范围批准，进入实现阶段
 - 技术边界：C++17、Qt 6.11.1（Core、Gui、Quick、QuickControls2）；Windows 10/11、Linux、macOS ARM
 - 前序规格：`2026-08-12-kindle-navigation-design.md`
 

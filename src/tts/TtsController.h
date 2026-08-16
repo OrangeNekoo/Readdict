@@ -29,6 +29,7 @@ public:
     // 朗读固定文本（试音）：不改变句子游标，结束后不自动推进（finished 被抑制）。
     Q_INVOKABLE void testVoice(const QString &text);
     Q_INVOKABLE void setSentences(const QStringList &s);   // 当前章全部句子
+    Q_INVOKABLE void setCurrentIndex(int index);            // 定位未开始朗读的句子游标
     Q_INVOKABLE void setChapter(int ch);
     int chapter() const { return m_chapter; }
     int currentIndex() const { return m_index; }

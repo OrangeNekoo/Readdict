@@ -29,8 +29,8 @@ Item {
         function initTestCase() {
             if (Books.booksModel.length === 0)
                 for (let f of TestEnv.sourceFiles) Importer.doImport(f)
-            Importer.doImport(TestEnv.longSource)
-            Importer.doImport(TestEnv.multiSource)
+            if (!findBook("longbook")) Importer.doImport(TestEnv.longSource)
+            if (!findBook("multibook")) Importer.doImport(TestEnv.multiSource)
             // 翻页方式默认竖滚（避免上一用例残留 paged 污染本用例）
             Settings.setValue("reading/pageMode", "scroll")
         }
@@ -59,6 +59,9 @@ Item {
                 return page.chapter && page.chapter.paragraphs
                     && page.chapter.paragraphs.length > 0
             }, 3000, "打开书后应加载章节段落")
+            // 本测试组覆盖连续滚动键盘语义，显式覆盖跨 TestCase 的模式残留。
+            page.pageMode = "scroll"
+            wait(50)
             // E4：取消滚动恢复——恢复 Timer（200ms 收敛后 applyRestore）会在翻页
             // 动画中途把 contentY 拽回保存位置，干扰方向键/翻页断言；本用例
             // 从 0 起翻，显式关闭恢复（restoreScrollY=-1 + restorePending=false，
@@ -138,6 +141,8 @@ Item {
             var titles = Books.chapterTitles(mb.id)
             verify(titles.length >= 3, "multibook 应有 3 章，实际 " + titles.length)
             Books.currentChapter = 0
+            h2.page.autoContinue = true
+            h2.page.setAutoContinue(true)
             h2.page.loadChapter(0)
             wait(100)
             tryVerify(function () { return h2.page.contentView.activeFocus === true }, 3000,
@@ -222,10 +227,13 @@ Item {
             compare(cv.pageMode, "scroll", "本用例应为 scroll 模式")
             Books.currentChapter = 0
             page.loadChapter(0)
+            // 本用例验证单章翻页动画的中断语义；连续窗口边界由专门用例覆盖。
+            cv.scrollChapters = []
+            cv.activeScrollChapter = 0
+            cv.scrollFocusChapter = 0
+            cv.rebuildScrollModel()
             tryVerify(function () { return cv.contentHeight > cv.height * 2 }, 3000,
                       "章 0 内容应远超视口")
-            // 定位到章末阈值带内（距底 < autoNextThreshold=200）——自然翻页到底会续章；
-            // 置位 nextChapterRequested 掩护定位本身不触发 checkAutoNext，再复位
             cv.nextChapterRequested = true
             cv.contentY = cv.contentHeight - cv.height - 60
             cv.nextChapterRequested = false
@@ -257,18 +265,28 @@ Item {
             Books.currentChapter = 0
             page.loadChapter(0)
             wait(100)
+            // 清空宿主输入窗口，确保本用例的 maxY 只对应当前章节。
+            page.scrollChapters = []
+            cv.activeScrollChapter = 0
+            cv.scrollFocusChapter = 0
+            cv.rebuildScrollModel()
+            wait(100)
+            Books.currentChapter = 0
+            cv.activeScrollChapter = 0
+            tryVerify(function () { return cv.scrollModel.length > 0
+                                      && cv.scrollModel[cv.scrollModel.length - 1].chapterIndex === 0 },
+                      3000, "单章测试模型应稳定在第 0 章")
             tryVerify(function () { return cv.contentHeight > cv.height * 2 }, 3000,
                       "章 0 内容应远超视口")
-            // 场景 1：滚动到距底阈值带内（maxY-60，底边界之下仍有一屏未展示）
-            // → 不得换章（未修复：进带即触发 requestNextChapter）
-            cv.nextChapterRequested = false
             cv.contentY = cv.contentHeight - cv.height - 60
             wait(150)
             compare(Books.currentChapter, 0,
                     "阈值带内（未到边界）滚动不得提前换章，实际 currentChapter="
                     + Books.currentChapter)
-            // 场景 2：PageDown 动画到真实底边界 → 换下一章
+            // 场景 2：PageDown 动画到真实底边界 → 换下一章。
+            // 注入结束状态直接检查：动画自然完成后 requestNextChapter 必须发出。
             cv.handleKey(Qt.Key_Down, Qt.NoModifier)
+            wait(450)
             tryVerify(function () { return Books.currentChapter === 1 }, 3000,
                       "到真实底边界 PageDown 应换下一章，实际 currentChapter="
                       + Books.currentChapter)
@@ -318,8 +336,8 @@ Item {
         function initTestCase() {
             if (Books.booksModel.length === 0)
                 for (let f of TestEnv.sourceFiles) Importer.doImport(f)
-            Importer.doImport(TestEnv.longSource)
-            Importer.doImport(TestEnv.multiSource)
+            if (!findBook("longbook")) Importer.doImport(TestEnv.longSource)
+            if (!findBook("multibook")) Importer.doImport(TestEnv.multiSource)
             Settings.setValue("reading/pageMode", "scroll")
         }
         function cleanupTestCase() {
@@ -428,6 +446,19 @@ Item {
             wait(450)
             verify(cv.contentX === 0, "paged 首页 ←/↑ 应兜底不换，实际 " + cv.contentX)
             compare(cv.contentY, 0, "paged 首页 contentY 应恒 0")
+            // WASD 与方向键同义：A/W 上一页，D/S 下一页。
+            cv.handleKey(Qt.Key_D, Qt.NoModifier)
+            wait(450)
+            verify(Math.abs(cv.contentX - w) < 4, "paged D 键应翻到下一页")
+            cv.handleKey(Qt.Key_A, Qt.NoModifier)
+            wait(450)
+            verify(Math.abs(cv.contentX) < 4, "paged A 键应翻回上一页")
+            cv.handleKey(Qt.Key_S, Qt.NoModifier)
+            wait(450)
+            verify(Math.abs(cv.contentX - w) < 4, "paged S 键应翻到下一页")
+            cv.handleKey(Qt.Key_W, Qt.NoModifier)
+            wait(450)
+            verify(Math.abs(cv.contentX) < 4, "paged W 键应翻回上一页")
             h.stack.destroy()
         }
 
@@ -585,9 +616,69 @@ Item {
             h.stack.destroy()
         }
 
-        // 任务3 审查修复：超长段落整体归页后实际 TextEdit 高度可能超过页高，
-        // 被视口裁剪则内容不可达（contentY 恒 0）。修复为每页提供稳定内部
-        // 垂直滚动容器：内容超出页高时页内可滚动到底，内容不丢失。
+        // BUG3：连续模式预取相邻章节，章节中线改变阅读状态时不应将视口复位到顶部。
+        function test_scrollWindowKeepsChapterBoundaryContinuous() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.loadChapter(1)
+            tryVerify(function () { return cv.scrollModel.length > 100 }, 3000,
+                      "连续窗口应同时挂载当前章节及相邻章节")
+            var previous = false
+            var following = false
+            for (var i = 0; i < cv.scrollModel.length; ++i) {
+                if (cv.scrollModel[i].chapterIndex === 0) previous = true
+                if (cv.scrollModel[i].chapterIndex === 2) following = true
+            }
+            verify(previous && following, "连续窗口应包含当前章节的前后章节")
+            tryVerify(function () { return cv.paragraphRepeater.count === cv.scrollModel.length
+                                      && cv.contentHeight > cv.height * 2 }, 3000,
+                      "连续窗口正文布局应完成")
+            var target = -1
+            for (var j = 0; j < cv.paragraphRepeater.count; ++j) {
+                var item = cv.paragraphRepeater.itemAt(j)
+                if (item && item.chapterIndex === 2) { target = j; break }
+            }
+            verify(target >= 0, "下一章段落应已经渲染")
+            var anchor = cv.paragraphRepeater.itemAt(target)
+            cv.contentY = Math.max(0, anchor.y - cv.height / 2)
+            var before = cv.contentY
+            cv.checkChapterActivation()
+            tryVerify(function () { return Books.currentChapter === 2 }, 3000,
+                      "视口中线进入下一章应激活该章节")
+            verify(Math.abs(cv.contentY - before) < 2,
+                   "章节激活不得把连续视口复位到顶部")
+            h.stack.destroy()
+        }
+        function test_scrollChapterBoundaryDoesNotSnapBack() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.loadChapter(0)
+            tryVerify(function () { return cv.scrollModel.length > 100
+                                      && cv.contentHeight > cv.height * 2 }, 5000,
+                      "连续章节窗口应完成布局")
+            var next = -1
+            for (var i = 0; i < cv.paragraphRepeater.count; ++i) {
+                var item = cv.paragraphRepeater.itemAt(i)
+                if (item && item.chapterIndex === 1) { next = i; break }
+            }
+            verify(next >= 0, "下一章段落应驻留")
+            var target = cv.paragraphRepeater.itemAt(next)
+            cv.contentY = Math.max(0, target.y - cv.height / 2)
+            var before = cv.contentY
+            tryVerify(function () { return Books.currentChapter === 1 }, 3000,
+                      "滚动进入下一章应激活下一章")
+            verify(Math.abs(cv.contentY - before) < 2,
+                   "跨章激活不得把视口弹回上一章或顶部")
+            h.stack.destroy()
+        }
+
+        // BUG4：超长段落按实际 TextEdit 行断点拆成多个严格页面；不得提供页内滚动。
         function test_pageContentOverflowIsReachable() {
             var book = findBook("longbook")
             verify(book !== null, "longbook 应已导入")
@@ -595,29 +686,29 @@ Item {
             var page = h.page
             var cv = page.contentView
             page.pageMode = "paged"
-            verify(waitPagesSettled(cv), "页面模型应就绪")
-            // 1500 全角字符超长段：字符估算即超一页（charsPerPage≈1152），
-            // 段落整体归页后实际渲染高度必然超过页高（720）
             var longText = ""
             for (var i = 0; i < 1500; i++) longText += "汉"
-            page.chapter = { title: "overflow", paragraphs: [{ text: longText }] }
+            page.chapter = { title: "strict-pages", paragraphs: [{ text: longText }] }
             verify(waitPagesSettled(cv), "超长段章节页面模型应就绪（pageCount=" + cv.pageCount + "）")
-            compare(cv.pageCount, 1, "超长段应独占一页")
-            var pi = cv.pageRepeater.itemAt(0)
-            verify(pi !== null, "应存在第 0 页")
-            verify(pi.pageScroller !== undefined, "页内应提供垂直滚动容器（未修复时无此句柄）")
-            tryVerify(function () {
-                return pi.pageScroller.contentHeight > pi.pageScroller.height + 50
-            }, 3000, "超长段页内容应超出页高（contentHeight=" + pi.pageScroller.contentHeight
-                    + "，页高=" + pi.pageScroller.height + "）——被裁剪则内容不可达")
-            pi.pageScroller.contentY = pi.pageScroller.contentHeight - pi.pageScroller.height
-            verify(pi.pageScroller.contentY > 50,
-                   "页内应可滚动到底（contentY=" + pi.pageScroller.contentY
-                   + "）——超页高内容不可丢失")
-            compare(cv.contentY, 0, "页内滚动不得改变外层 contentY")
-            verify(cv.contentHeight <= cv.height + 0.5,
-                   "外层 contentHeight 仍应锁视口高（实际 " + cv.contentHeight + "）")
-            pi.pageScroller.contentY = 0
+            verify(cv.pageCount >= 2, "1500 全角字应拆成至少两页，实际 " + cv.pageCount)
+            compare(cv.contentY, 0, "paged 外层 contentY 应固定为 0")
+            for (var p = 0; p < cv.pageCount; p++) {
+                var mapping = cv.pageModel[p]
+                verify(mapping.bottom > mapping.top, "第 " + p + " 页映射必须非空")
+                verify(mapping.bottom - mapping.top <= cv.height + 0.01,
+                       "第 " + p + " 页实际行映射不得超过视口高（范围="
+                       + (mapping.bottom - mapping.top) + "，视口=" + cv.height + "）")
+                if (p > 0) verify(mapping.top >= cv.pageModel[p - 1].bottom - 0.01,
+                                  "页面视觉映射必须单调")
+            }
+            var before = cv.currentPage
+            cv.pageNext(false)
+            wait(450)
+            verify(cv.currentPage > before, "翻页后 currentPage 应推进")
+            compare(cv.contentY, 0, "翻页不得改变 contentY")
+            verify(cv.pageRepeater.itemAt(0) !== null, "应存在页委托句柄")
+            verify(cv.pageRepeater.itemAt(0).pageScroller === undefined,
+                   "页委托不得提供内部纵向 Flickable")
             h.stack.destroy()
         }
 
@@ -721,15 +812,15 @@ Item {
             verify(waitPagesSettled(cv), "页面模型应就绪")
             page.sheetOpen = true
             tryVerify(function () { return page.topToolbar.visible }, 3000, "顶栏应显示")
-            // 书签按钮（RowLayout 子项 5：返回/Aa/布局/笔记/书签/搜索/⋮）
-            var bookmarkBtn = page.topToolbar.children[1].children[4]
+            // 新顶栏结构：返回、笔记、书签、搜索、更多。
+            var bookmarkBtn = page.topToolbar.children[1].children[2]
             verify(bookmarkBtn !== undefined, "顶栏应含书签按钮")
             var bookmarkedBefore = page.currentBookmarked
             mouseClick(bookmarkBtn, bookmarkBtn.width / 2, bookmarkBtn.height / 2)
             tryVerify(function () { return page.currentBookmarked !== bookmarkedBefore }, 3000,
                       "顶栏书签按钮真实点击应生效（不被正文点击桥接吞掉）")
-            // 菜单按钮（子项 6）→ menuOpen 打开；再点 → 关闭
-            var menuBtn = page.topToolbar.children[1].children[6]
+            // 菜单按钮（子项 4）→ menuOpen 打开；再点 → 关闭
+            var menuBtn = page.topToolbar.children[1].children[4]
             verify(menuBtn !== undefined, "顶栏应含菜单按钮")
             mouseClick(menuBtn, menuBtn.width / 2, menuBtn.height / 2)
             tryVerify(function () { return page.menuOpen }, 3000, "菜单按钮应打开菜单")
@@ -919,6 +1010,11 @@ Item {
             var page = h.page
             var cv = page.contentView
             compare(cv.pageMode, "scroll", "本用例应为 scroll 模式")
+            // 直接替换 chapter 不会更新 ReaderPage 传入的相邻章节窗口；清空后让
+            // ReaderContent 走 chapter 回退模型，专门验证 null 段的句索引行为。
+            cv.scrollChapters = []
+            cv.activeScrollChapter = 0
+            cv.scrollFocusChapter = 0
             page.chapter = {
                 title: "scroll-null",
                 paragraphs: [
@@ -929,6 +1025,7 @@ Item {
                     { text: "第五段", sentences: ["第五段"] }
                 ]
             }
+            cv.rebuildScrollModel()
             wait(100)
             var it0 = cv.paragraphRepeater.itemAt(0)
             var it1 = cv.paragraphRepeater.itemAt(1)
@@ -961,11 +1058,9 @@ Item {
             var ow = cv.width
             cv.width = 30   // w < 48
             verify(waitPagesSettled(cv), "窄视口下页面模型应就绪（pageCount=" + cv.pageCount + "）")
-            var pi = cv.pageRepeater.itemAt(0)
-            verify(pi !== null, "应存在第 0 页")
-            verify(pi.pageColumn !== undefined, "页应暴露正文列句柄")
-            verify(pi.pageColumn.width > 0,
-                   "w<48 时正文列宽应 ≥ 1（未修复为负宽 " + pi.pageColumn.width + "）")
+            verify(cv.paragraphItemAt(0) !== null, "应存在第 0 段正文委托")
+            verify(cv.paragraphItemAt(0).width > 0,
+                   "w<48 时共享正文列宽应 ≥ 1（实际 " + cv.paragraphItemAt(0).width + "）")
             cv.width = ow
             h.stack.destroy()
         }

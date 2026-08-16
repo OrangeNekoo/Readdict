@@ -166,11 +166,17 @@ Item {
             verify(page.backButton.visible && btnY >= 0
                    && btnY + page.backButton.height <= page.height,
                    "滚动后返回按钮应固定可见（y=" + btnY + "）")
-            // 必要滚动条：内容超高 → 垂直滚动条策略允许按需出现（AsNeeded）
+            // 只允许纵向滚动：内容超高时纵向按需出现，水平滚动条严格关闭。
             verify(page.syncScroll.ScrollBar.vertical !== null,
                    "页面级垂直滚动条句柄应存在")
-            verify(page.syncScroll.ScrollBar.vertical.policy !== ScrollBar.AlwaysOff,
-                   "垂直滚动条策略应允许按需出现")
+            compare(page.syncScroll.ScrollBar.vertical.policy, ScrollBar.AsNeeded,
+                    "同步页垂直滚动条必须按需显示")
+            verify(page.syncScroll.ScrollBar.horizontal !== null,
+                   "页面级水平滚动条句柄应存在")
+            compare(page.syncScroll.ScrollBar.horizontal.policy, ScrollBar.AlwaysOff,
+                    "同步页必须关闭水平滚动条")
+            verify(page.syncForm.width <= page.syncScroll.availableWidth,
+                   "表单宽度不得超过有效滚动视口")
             loader.destroy()
             host.destroy()
         }
