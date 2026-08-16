@@ -234,6 +234,24 @@ Item {
             cv.rebuildScrollModel()
             tryVerify(function () { return cv.contentHeight > cv.height * 2 }, 3000,
                       "章 0 内容应远超视口")
+            // 任务1：等布局完全收敛——重建在途（含 loadChapter 后延迟到达的
+            // onChapterChanged 重建）时 contentHeight 未稳定，此刻写底部位置会
+            // 被重建钳制/锚点恢复改写（旧实现误借 TTS 复位跟随动画避开该窗口，
+            // 任务1 修复该动画后必须显式等稳定，否则 ↓ 无剩余行程可滚动）
+            var hLast = -1
+            var tStable = new Date().getTime()
+            var settled = false
+            while (new Date().getTime() - tStable < 5000) {
+                var hNow = cv.contentHeight
+                if (cv.paragraphRepeater.count === cv.scrollModel.length
+                        && Math.abs(hNow - hLast) < 0.5) {
+                    wait(80)
+                    if (Math.abs(cv.contentHeight - hNow) < 0.5) { settled = true; break }
+                }
+                hLast = hNow
+                wait(50)
+            }
+            verify(settled, "章 0 单章窗口布局应收敛稳定（contentHeight=" + cv.contentHeight + "）")
             cv.nextChapterRequested = true
             cv.contentY = cv.contentHeight - cv.height - 60
             cv.nextChapterRequested = false
@@ -290,6 +308,115 @@ Item {
             tryVerify(function () { return Books.currentChapter === 1 }, 3000,
                       "到真实底边界 PageDown 应换下一章，实际 currentChapter="
                       + Books.currentChapter)
+            h.stack.destroy()
+        }
+
+        // 任务1：竖向跨章窗口锚点事务——窗口重建/换章不得把视口拉回首屏。
+        // 跨章向下（中线激活换窗）后视口顶部仍停留在原段落（稳定锚点
+        // {chapterIndex, paragraphIndex, offsetY} 恢复），且可继续向上回到上一章；
+        // 从第 1 章向上滚动换窗同样不弹回第 1 章首屏。
+        function test_crossChapterScrollKeepsWindowAnchor() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            compare(cv.pageMode, "scroll", "本用例应为 scroll 模式")
+            function topKey() {
+                var top = cv.contentY + 2
+                for (var i = 0; i < cv.paragraphRepeater.count; ++i) {
+                    var it = cv.paragraphRepeater.itemAt(i)
+                    if (it && it.y + it.height >= top)
+                        return { chapterIndex: Number(it.chapterIndex),
+                                 paragraphIndex: Number(it.paragraphIndex) }
+                }
+                return null
+            }
+            // 委托数与模型同步且内容高度稳定（两次采样一致）后才视为换窗布局落地
+            function waitSettled(timeoutMs) {
+                var t0 = new Date().getTime()
+                var lastH = -1
+                while (new Date().getTime() - t0 < timeoutMs) {
+                    var h = cv.contentHeight
+                    if (cv.paragraphRepeater.count === cv.scrollModel.length
+                            && cv.contentHeight > cv.height * 2
+                            && Math.abs(h - lastH) < 0.5) {
+                        wait(80)
+                        if (Math.abs(cv.contentHeight - h) < 0.5)
+                            return true
+                    }
+                    lastH = h
+                    wait(50)
+                }
+                return false
+            }
+            // —— 场景 1：加载第 0 章，滚到窗口真实底部触发下一章（跨章向下）——
+            Books.currentChapter = 0
+            page.loadChapter(0)
+            wait(100)
+            verify(waitSettled(5000), "第 0 章连续章节窗口应完成布局")
+            // 滚到窗口 [0,1] 真实底部 → 中线进入第 1 章（激活换窗为 [0,1,2]）
+            cv.contentY = cv.contentHeight - cv.height
+            tryVerify(function () { return Books.currentChapter >= 1 }, 3000,
+                      "滚到窗口底部应激活进入下一章，实际 currentChapter=" + Books.currentChapter)
+            verify(waitSettled(5000), "第一次换窗后布局应稳定")
+            // 继续滚到新窗口真实底部（第 2 章末）→ 激活换窗为 [1,2]
+            cv.contentY = cv.contentHeight - cv.height
+            // 激活与窗口重建在 contentY 写入的同步链内完成（锚点捕获→重建→钳制）；
+            // 运行锚点 pendingWindowAnchor 在 16ms 恢复完成前可读——优先采样它
+            //（恢复完成/时序差异下 pending 已清空时，当前顶段即被钳制到锚点位置
+            // 的顶段，退化为采样 topKey，两者一致）。
+            var expect = null
+            for (var s1 = 0; s1 < 5 && !expect; ++s1) {
+                var pa1 = cv.pendingWindowAnchor
+                if (pa1 && pa1.chapterIndex !== undefined) expect = pa1
+                else wait(10)
+            }
+            if (!expect) expect = topKey()
+            verify(expect !== null && expect.chapterIndex !== undefined,
+                   "换窗前应能定位视口顶部段落（即运行锚点段落）")
+            tryVerify(function () { return Books.currentChapter === 2 }, 3000,
+                      "滚到窗口真实底部应换到第 2 章，实际 currentChapter=" + Books.currentChapter)
+            verify(waitSettled(5000), "换窗后布局应稳定")
+            wait(150)
+            var got = topKey()
+            verify(got !== null, "换窗后应能定位视口顶部段落")
+            compare(got.chapterIndex, Number(expect.chapterIndex),
+                    "跨章向下后视口顶段章索引应保持（不得跳回首屏）")
+            compare(got.paragraphIndex, Number(expect.paragraphIndex),
+                    "跨章向下后视口顶段段索引应保持（稳定锚点恢复）")
+            verify(cv.contentY > 0, "跨章向下后视口不得回到首屏（contentY=" + cv.contentY + "）")
+            // 窗口仍可向上回到上一章：向上滚动中线进入第 1 章
+            cv.contentY = cv.height
+            tryVerify(function () { return Books.currentChapter === 1 }, 3000,
+                      "跨章向下后向上滚动应回到上一章，实际 currentChapter=" + Books.currentChapter)
+            // —— 场景 2：从第 1 章向上滚动换窗，同样不弹回首屏 ——
+            Books.currentChapter = 1
+            page.loadChapter(1)
+            wait(100)
+            verify(waitSettled(5000), "第 1 章窗口布局应稳定")
+            // 滚入第 1 章内容后向上滚回：中线进入第 0 章尾部 → 激活换窗
+            cv.contentY = cv.height * 2
+            // 同场景 1：优先采样在途运行锚点，恢复完成则退化为当前顶段（一致）
+            var upExpect = null
+            for (var s2 = 0; s2 < 5 && !upExpect; ++s2) {
+                var pa2 = cv.pendingWindowAnchor
+                if (pa2 && pa2.chapterIndex !== undefined) upExpect = pa2
+                else wait(10)
+            }
+            if (!upExpect) upExpect = topKey()
+            verify(upExpect !== null && upExpect.chapterIndex !== undefined,
+                   "向上换窗前应能定位视口顶部段落（即运行锚点段落）")
+            tryVerify(function () { return Books.currentChapter === 0 }, 3000,
+                      "向上滚回应激活回到第 0 章，实际 currentChapter=" + Books.currentChapter)
+            verify(waitSettled(5000), "向上换窗后布局应稳定")
+            wait(150)
+            var upGot = topKey()
+            verify(upGot !== null, "向上换窗后应能定位视口顶部段落")
+            compare(upGot.chapterIndex, Number(upExpect.chapterIndex),
+                    "向上换窗后视口顶段章索引应保持（不得弹回首屏）")
+            compare(upGot.paragraphIndex, Number(upExpect.paragraphIndex),
+                    "向上换窗后视口顶段段索引应保持（稳定锚点恢复）")
             h.stack.destroy()
         }
 

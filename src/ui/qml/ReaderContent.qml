@@ -40,13 +40,45 @@ Flickable {
     property int scrollFocusParagraph: -1
     property var pendingScrollTarget: null
     property var pendingWindowAnchor: null
+    // 任务1：运行窗口锚点事务的恢复重试计数（防模型切片/未布局时无限自旋；
+    // captureWindowAnchor 重置，windowAnchorTimer 达上限后放弃并保持当前 contentY）
+    property int windowAnchorRetries: 0
+    // 任务1：锚点恢复写 contentY 的瞬间标志——该写入是重建过渡态（视口回到捕获
+    // 位置），不得按视口中线激活换章（否则 → 键等显式换章会被反向拉回旧章）。
+    property bool windowAnchorRestoring: false
+    // 任务1：捕获时的视口位置与内容高度——事务在途且用户主动滚动（内容高度稳定、
+    // contentY 已移动）时重捕获锚点，避免延迟重建用过期锚点把视口拽回旧位置。
+    property double windowAnchorY: -1
+    property double windowAnchorContentHeight: -1
+    // 任务1：ttsForChapter 的 setSentences 游标复位区间标记（ReaderPage 设置）——
+    // setSentences 同步发出 sentenceChanged(0)，那是换章副作用而非朗读推进；该
+    // 复位发生在 onChapterChanged（下一帧）之前，pendingWindowAnchor 尚未捕获，
+    // 只能由本标记在复位区间内拦截 followSentence（否则 300ms 动画把 contentY
+    // 拽回 0 并覆盖运行窗口锚点恢复——跨章跳回首屏的另一来源）。
+    property bool suppressTtsFollow: false
     property int activeScrollChapter: -1
     property int scrollWindowLimit: 180
     signal requestChapterActivation(int index)
     function captureWindowAnchor() {
         if (flick.pageMode !== "scroll" || flick.scrollModel.length === 0) return
-        flick.pendingWindowAnchor = flick.scrollAnchor()
+        // 运行窗口锚点：模型重建前捕获当前视口顶部段落 {chapterIndex, paragraphIndex, offsetY}，
+        // 重建布局完成后由 windowAnchorTimer 恢复同一段落及相对偏移（契约1）。
+        // 重建在途时旧委托已换出且未布局（y=0），scrollAnchor 可能读到空/错误段落——
+        // 已有待恢复锚点（本次事务首次捕获有效）时不得用无效结果覆盖它。
+        var captured = flick.scrollAnchor()
+        if (!captured && flick.pendingWindowAnchor) return
+        flick.pendingWindowAnchor = captured
+        flick.windowAnchorRetries = 0
+        flick.windowAnchorY = flick.contentY
+        flick.windowAnchorContentHeight = flick.contentHeight
         windowAnchorTimer.restart()
+    }
+    // 任务1：显式跳转（目录/搜索/笔记/菜单换章）放弃运行锚点事务——跳转有明确
+    // 目标位置（paraJumpTimer/followSentence），续章式锚点恢复不应与之竞争。
+    function cancelWindowAnchor() {
+        flick.pendingWindowAnchor = null
+        flick.windowAnchorRetries = 0
+        windowAnchorTimer.stop()
     }
     function rebuildScrollModel() {
         if (flick.pageMode === "paged") return
@@ -70,15 +102,29 @@ Flickable {
             }
         }
         flick.scrollRows = rows
+        // 任务1（契约4）：窗口切片优先保留运行锚点段落——锚点行在窗口内时以它为
+        // 焦点（保证切片不把它切掉），找不到才按活动章节焦点计算。
         var focus = -1
-        var desiredChapter = flick.scrollFocusChapter >= 0
-            ? flick.scrollFocusChapter : flick.activeScrollChapter
-        for (var n = 0; n < rows.length; ++n) {
-            if (rows[n].chapterIndex === desiredChapter
-                    && (flick.scrollFocusParagraph < 0
-                        || rows[n].paragraphIndex === flick.scrollFocusParagraph)) {
-                focus = n
-                break
+        var anchor = flick.pendingWindowAnchor
+        if (anchor && anchor.chapterIndex !== undefined) {
+            for (var a = 0; a < rows.length; ++a) {
+                if (rows[a].chapterIndex === Number(anchor.chapterIndex)
+                        && rows[a].paragraphIndex === Number(anchor.paragraphIndex)) {
+                    focus = a
+                    break
+                }
+            }
+        }
+        if (focus < 0) {
+            var desiredChapter = flick.scrollFocusChapter >= 0
+                ? flick.scrollFocusChapter : flick.activeScrollChapter
+            for (var n = 0; n < rows.length; ++n) {
+                if (rows[n].chapterIndex === desiredChapter
+                        && (flick.scrollFocusParagraph < 0
+                            || rows[n].paragraphIndex === flick.scrollFocusParagraph)) {
+                    focus = n
+                    break
+                }
             }
         }
         if (focus < 0) focus = 0
@@ -89,14 +135,16 @@ Flickable {
         flick.computeSentenceStarts()
     }
     function showScrollChapter(index) {
-        flick.pendingWindowAnchor = null
-        windowAnchorTimer.stop()
+        // 任务1（契约2）：运行窗口锚点事务由 captureWindowAnchor/windowAnchorTimer
+        // 统一处理，这里不再无条件清除 pendingWindowAnchor/windowAnchorTimer——
+        // 清除会让跨章换窗后的锚点恢复丢失，重建期间 contentY 被钳回 0（跳回首屏）。
+        // restoreAnchor/restoreScrollY 属初次打开/显式跳转路径，由 ReaderPage 各
+        // 跳转入口自行清除；此处保留 restoreAnchor=null 兜底（无副作用，见契约3）。
         flick.restoreAnchor = null
         flick.activeScrollChapter = Number(index)
         flick.scrollFocusChapter = flick.activeScrollChapter
         flick.scrollFocusParagraph = -1
         flick.rebuildScrollModel()
-        flick.scheduleRestore()
     }
     function scrollAnchor() {
         if (flick.pageMode === "paged" || flick.scrollModel.length === 0) return null
@@ -154,9 +202,13 @@ Flickable {
         scrollTargetTimer.restart()
     }
     onScrollChaptersChanged: {
-        flick.pendingWindowAnchor = null
-        windowAnchorTimer.stop()
-        flick.captureWindowAnchor()
+        // 任务1（契约2）：scrollChapters 变化走同一运行锚点事务——先捕获当前
+        // 视口锚点再重建模型，恢复由 windowAnchorTimer 统一完成；不得先清空
+        // 运行锚点（旧实现清空后重建期间 contentY 钳回 0，视口被拉回首屏）。
+        // 章节变化（loadChapter/activateChapter）已在本 handler 之前的
+        // onChapterChanged 中捕获过同一视口锚点——重建在途时旧委托未布局，
+        // 二次捕获可能读到空/错误段落，已有待恢复锚点时不再重复捕获。
+        if (!flick.pendingWindowAnchor) flick.captureWindowAnchor()
         flick.rebuildScrollModel()
     }
     property var typography: ({})
@@ -328,6 +380,10 @@ Flickable {
     onChapterChanged: {
         flick.stopPageAnimations()
         if (flick.pageMode === "scroll") {
+            // 任务1（契约2）：章节属性变化同样进入运行锚点事务——宿主随后更新
+            // scrollChapters 并触发 onScrollChaptersChanged（同事务，捕获同一视口
+            // 锚点）；这里重建前先捕获，避免重建后旧视口信息丢失。
+            flick.captureWindowAnchor()
             // 宿主随后更新 scrollChapters；不要在此处写入该输入属性，
             // 否则会切断 ReaderPage 的绑定并丢失前后章节窗口。
             flick.activeScrollChapter = Math.max(0, flick.chapterIndex - 1)
@@ -555,6 +611,16 @@ Flickable {
         if (flick.restoreApplied && flick.restoreAppliedY >= 0
                 && Math.abs(flick.contentY - flick.restoreAppliedY) > 1)
             flick.restoreApplied = false
+        // 任务1：事务在途且用户主动滚动（内容高度稳定未塌缩、contentY 已移动）时
+        // 重捕获锚点——offscreen/慢帧下模型重建可能延迟到用户滚动之后，过期锚点
+        // 会把视口拽回旧位置；重建塌缩与恢复写入（windowAnchorRestoring）不重捕获，
+        // 恢复写入本身已按捕获位置钳位。重捕获后继续走激活/自动续章检查。
+        if (!flick.windowAnchorRestoring && flick.pendingWindowAnchor
+                && flick.windowAnchorContentHeight > 0
+                && flick.contentHeight >= flick.windowAnchorContentHeight - 0.5
+                && Math.abs(flick.contentY - flick.windowAnchorY) > 1) {
+            flick.captureWindowAnchor()
+        }
         flick.checkChapterActivation()
         flick.checkAutoNext()
     }
@@ -574,6 +640,13 @@ Flickable {
 
     function checkChapterActivation() {
         if (flick.pageMode === "paged" || flick.scrollModel.length === 0) return
+        // 任务1：仅两类重建过渡态不得按视口中线激活——(a) 锚点恢复写入 contentY
+        // 的瞬间（windowAnchorRestoring，恢复的是捕获位置，非用户滚动）；
+        // (b) 重建塌缩期间（内容高度低于捕获时，contentY 被钳回 0）。其余时刻
+        //（用户滚动到真实位置，即使事务在途）正常激活，保证跨章连续语义。
+        if (flick.windowAnchorRestoring) return
+        if (flick.pendingWindowAnchor && flick.windowAnchorContentHeight > 0
+                && flick.contentHeight < flick.windowAnchorContentHeight - 0.5) return
         var mid = flick.contentY + flick.height / 2
         for (var i = 0; i < rep.count; ++i) {
             var it = rep.itemAt(i)
@@ -618,20 +691,36 @@ Flickable {
     }
     Timer {
         id: windowAnchorTimer
-        interval: 0
+        // 任务1：模型重建在下一帧（polish）才落地，0ms 自旋会在旧委托上恢复导致
+        // 随后重建再钳回 0；改 16ms 并等委托数与模型同步后才按新布局恢复，超限放弃。
+        interval: 16
         repeat: false
         onTriggered: {
             var anchor = flick.pendingWindowAnchor
             if (!anchor) return
             var item = flick.itemForChapterParagraph(Number(anchor.chapterIndex),
                                                       Number(anchor.paragraphIndex))
-            if (!item) {
-                windowAnchorTimer.restart()
+            // 委托未随模型同步（重建在途/锚点段落被窗口切片）→ 有限重试；
+            // 只做钳制，不写入 0，也不无限自旋。
+            if (!item || flick.paragraphRepeater.count !== flick.scrollModel.length) {
+                if (flick.windowAnchorRetries++ < 60) {
+                    windowAnchorTimer.restart()
+                    return
+                }
+                flick.pendingWindowAnchor = null
+                flick.windowAnchorY = -1
+                flick.windowAnchorContentHeight = -1
                 return
             }
-            flick.pendingWindowAnchor = null
+            flick.windowAnchorRestoring = true
             flick.contentY = Math.max(0, Math.min(item.y + Number(anchor.offsetY || 0),
                 Math.max(0, flick.contentHeight - flick.height)))
+            flick.windowAnchorRestoring = false
+            // 任务1：恢复写入完成即清空事务状态——该 contentY 变化触发的章节激活
+            // 在 windowAnchorRestoring 期间已被门控（不把显式换章反向拉回旧章）。
+            flick.pendingWindowAnchor = null
+            flick.windowAnchorY = -1
+            flick.windowAnchorContentHeight = -1
         }
     }
 
@@ -975,7 +1064,20 @@ Flickable {
     // 走 ReaderPage 的 chapterCompleted 路径，此处仅跟踪 playing 状态供 checkAutoNext 判定。
     Connections {
         target: Tts
-        function onSentenceChanged(index) { flick.followSentence(index) }
+        // 任务1：每次换章加载 ttsForChapter 都会调 Tts.setSentences → 同步发出
+        // sentenceChanged(0)。那是游标复位副作用，不是朗读推进；若在此启动
+        // followSentence 的 300ms 动画，会把 contentY 拽回 0（跨章跳回首屏的
+        // 另一来源），并覆盖运行窗口锚点的恢复。注意 setSentences 在换章的同
+        // 一个同步调用栈内发出信号——onChapterChanged 要下一帧才触发、运行锚点
+        // 尚未捕获，仅凭 pendingWindowAnchor 无法拦截；必须由 ReaderPage 在
+        // ttsForChapter 内用 suppressTtsFollow 标记复位区间。朗读会话真实推进
+        //（sentenceChanged 于复位区间外发出）与显式游标移动（TtsBar 跳句/播放
+        // 起始）仍照常跟随；运行锚点事务在途（pendingWindowAnchor 非空）时
+        // 同样跳过跟随，保证恢复写入不被动画覆盖。
+        function onSentenceChanged(index) {
+            if (flick.suppressTtsFollow) return
+            if (!flick.pendingWindowAnchor) flick.followSentence(index)
+        }
         function onStateChanged(state) { flick.ttsActive = state !== 0 }
     }
 

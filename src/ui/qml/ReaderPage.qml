@@ -420,6 +420,11 @@ Page {
                 highlighted: ListView.isCurrentItem
                 onClicked: {
                     page.loadChapter(index)
+                    // 任务1：目录跳转是显式导航，放弃运行锚点事务；随后定位到
+                    // 目标章首段（旧实现经 showScrollChapter→scheduleRestore 落回
+                    // 保存位置/0，窗口重建期又会被钳回 0——改为显式定位）。
+                    content.cancelWindowAnchor()
+                    content.focusScrollParagraph(Number(index), 0)
                     tocDialog.close()
                 }
             }
@@ -687,7 +692,13 @@ Page {
             page.loadError = qsTr("章节数据异常，部分内容无法朗读")
             page.loadErrorIndex = index
         }
+        // 任务1：setSentences 同步发出 sentenceChanged(0)（游标复位副作用，
+        // 非朗读推进）——在复位区间内标记 suppressTtsFollow，ReaderContent 的
+        // onSentenceChanged 据此跳过 followSentence，避免 300ms 跟随动画把
+        // contentY 拽回 0 并覆盖运行窗口锚点恢复（跨章跳回首屏/身份回退）。
+        content.suppressTtsFollow = true
         Tts.setSentences(all)
+        content.suppressTtsFollow = false
         Tts.setChapter(index)
     }
 
@@ -941,6 +952,9 @@ Page {
         content.restoreAnchor = null
         content.restorePending = false
         page.loadChapter(hit.chapterIndex)
+        // 任务1：显式跳转放弃运行锚点事务（目标由 paraJumpTimer 定位），
+        // 续章式锚点恢复不得在跳转后把视口拉回原位置。
+        content.cancelWindowAnchor()
         paraJumpTimer.targetIndex = hit.paragraphIndex
         paraJumpTimer.restart()
     }
@@ -951,6 +965,8 @@ Page {
         content.restoreAnchor = null
         content.restorePending = false
         page.loadChapter(ci)
+        // 任务1：同 jumpToSearchHit——显式跳转放弃运行锚点事务。
+        content.cancelWindowAnchor()
         paraJumpTimer.targetIndex = pi
         paraJumpTimer.restart()
     }
@@ -963,6 +979,8 @@ Page {
         if (ci < 0) return
         notesDlg.close()
         page.loadChapter(ci)
+        // 任务1：同 jumpToSearchHit——显式跳转放弃运行锚点事务。
+        content.cancelWindowAnchor()
         jumpTimer.targetIndex = hl.sentenceIndex
         jumpTimer.restart()
     }
@@ -1074,8 +1092,19 @@ Page {
         switch (act) {
         case "read": page.startReadAloud(); break
         case "toc": tocDialog.open(); break
-        case "prev": page.loadChapter(Books.currentChapter - 1); break
-        case "next": page.loadChapter(Books.currentChapter + 1); break
+        case "prev":
+            page.loadChapter(Books.currentChapter - 1)
+            // 任务1：显式翻章放弃运行锚点事务，并定位到目标章首段——仅取消
+            // 锚点会让视口停在旧偏移（重建钳制后位置随机）；旧实现的
+            // scheduleRestore 会把 contentY 落回保存位置/0，同样不正确。
+            content.cancelWindowAnchor()
+            content.focusScrollParagraph(Number(Books.currentChapter), 0)
+            break
+        case "next":
+            page.loadChapter(Books.currentChapter + 1)
+            content.cancelWindowAnchor()
+            content.focusScrollParagraph(Number(Books.currentChapter), 0)
+            break
         case "info": infoDialog.open(); break
         }
     }
