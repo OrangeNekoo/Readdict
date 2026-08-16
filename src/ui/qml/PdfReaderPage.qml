@@ -17,6 +17,11 @@ Page {
     id: page
     // U2：沉浸页标识（Main 据此隐藏标签/底部导航；返回后恢复）
     property string navId: "pdf"
+    // E4（PDF）：键盘路由前提是页面持有 activeFocus——与 ReaderPage 同模式：
+    // 页面 focus:true 作为焦点候选，Component.onCompleted 与 StackView.onActivated
+    // 分别补首次创建与从其它页返回（pop 回来）时的 focus 恢复；否则 Keys.onPressed
+    // 收不到按键，A/D/方向键翻页失效。
+    focus: true
     property var book: ({})
     property string theme: "auto"
     // false = 宽度适配（fitToWidth），true = 整页适配（fitToViewport）
@@ -113,9 +118,11 @@ Page {
                 color: UITheme.lightTextPrimary
             }
             // 任务2：上一页（仅 Ready 且非首页可用）
+            // 图标经 contentItem 替换按钮默认内容（仓库惯例同 SettingsPage/StatsPage
+            // 的 contentItem: KdIcons），否则图标作为裸子项不参与按钮居中布局
             ToolButton {
                 id: previousPageButton
-                KdIcons { name: "prev"; size: 20; color: UITheme.lightTextPrimary }
+                contentItem: KdIcons { name: "prev"; size: 20; color: UITheme.lightTextPrimary }
                 enabled: pdfDoc.status === PdfDocument.Ready && pdfView.currentPage > 0
                 onClicked: page.previousPage()
             }
@@ -130,15 +137,16 @@ Page {
             // 任务2：下一页（仅 Ready 且非末页可用）
             ToolButton {
                 id: nextPageButton
-                KdIcons { name: "next"; size: 20; color: UITheme.lightTextPrimary }
+                contentItem: KdIcons { name: "next"; size: 20; color: UITheme.lightTextPrimary }
                 enabled: pdfDoc.status === PdfDocument.Ready
                          && pdfView.currentPage < pdfDoc.pageCount - 1
                 onClicked: page.nextPage()
             }
-            // 任务2：更多菜单入口
+            // 任务2：更多菜单入口（非 Ready 时禁用——Error/Loading 下不应打开缩放菜单）
             ToolButton {
                 id: menuButton
-                KdIcons { name: "more"; size: 20; color: UITheme.lightTextPrimary }
+                contentItem: KdIcons { name: "more"; size: 20; color: UITheme.lightTextPrimary }
+                enabled: pdfDoc.status === PdfDocument.Ready
                 onClicked: pdfMenu.open()
             }
         }
@@ -212,9 +220,13 @@ Page {
     }
 
     // 任务2：键盘路由——A/Left/PageUp 前一页，D/Right/PageDown 后一页；
-    // 只在实际处理（Ready 且边界内）后接受键事件，否则交回 Flickable 处理滚动
+    // 只在实际处理（Ready 且边界内）后接受键事件，否则交回 Flickable 处理滚动。
+    // 带修饰键（Ctrl/Cmd/Shift/Alt）的事件一律不吞，交回上层/系统（如 Cmd+A 全选、
+    // Cmd+D、Shift+方向键选区）；自动重复（isAutoRepeat）维持原行为逐次翻页。
     Keys.priority: Keys.BeforeItem
     Keys.onPressed: (event) => {
+        if (event.modifiers & (Qt.ControlModifier | Qt.MetaModifier | Qt.ShiftModifier | Qt.AltModifier))
+            return
         let handled = false
         if (event.key === Qt.Key_Left || event.key === Qt.Key_PageUp || event.key === Qt.Key_A)
             handled = page.previousPage()
@@ -244,16 +256,25 @@ Page {
         pdfView.goToPage(pdfView.currentPage + 1)
         return true
     }
-    // 任务2：缩放菜单动作——宽度适配 / 整页适配 / 重置缩放
+    // 任务2：缩放菜单动作——宽度适配 / 整页适配 / 重置缩放。
+    // Ready 门控：Error/Loading 状态点中菜单项不得触发缩放调用（缩放依赖已加载
+    // 文档的 pagePointSize，非 Ready 调用无意义；按钮 enabled 已拦截，此处防御）
     function onMenu(id) {
+        if (pdfDoc.status !== PdfDocument.Ready) return
         if (id === "fitWidth") { page.fitPage = false; pdfView.scaleToWidth(pdfView.width, pdfView.height) }
         else if (id === "fitPage") { page.fitPage = true; pdfView.scaleToPage(pdfView.width, pdfView.height) }
         else if (id === "reset") { pdfView.resetScale() }
     }
-    // 任务2：重试——清空后重设同一 source，强制重新触发加载
+    // 任务2：重试——改变 source 值强制重新触发加载（PdfDocument 无公开 reload API，
+    // QML 侧唯一重载入口是 source 属性，且值必须变化才会重载）。
+    // 注意不能清空为 ""：空 URL 非法，QQuickPdfDocument::setSource 走 qmlWarning
+    // "Cannot open: "（qquickpdfdocument.cpp 中 m_resolvedSource.isValid() 分支）。
+    // 改用非空但不存在的占位 file URL：合法 URL → QPdfDocument::load 打开失败 →
+    // 静默置 Error（QFile::open 失败路径无控制台警告），随后恢复真实 source 完成重载。
     function retryLoad() {
         const src = page.book.path ? "file://" + page.book.path : ""
-        pdfDoc.source = ""
+        if (src.length === 0) return
+        pdfDoc.source = "file:///__readdict_reload__"
         pdfDoc.source = src
     }
 
@@ -304,6 +325,8 @@ Page {
                 else page.StackView.view.pop()
                 return
             }
+            // 轮询计数：50ms/次，1200 次 = 60s——用于 60s 告警与测试锁定轮询生效
+            page.closePollCount += 1
             if (page.closePollCount === 1200) // 60s：仅告警，不强制销毁
                 console.warn("PdfReaderPage: 渲染 60 秒未稳定，继续等待（书: " + page.book.title + "）")
         }
@@ -319,7 +342,13 @@ Page {
     Component.onCompleted: {
         if (page.book && page.book.id)
             Books.startTracking(page.book.id)  // 阅读计时开始
+        // E4（PDF）：首次创建即获得 activeFocus，方向键翻页立即可用（ReaderPage 同款）
+        page.forceActiveFocus()
     }
+
+    // E4（PDF）：从其它页面返回（StackView pop 回来）时补 focus——onCompleted 只在
+    // 首次创建时执行，返回路径若不在此恢复，键盘路由将失效（ReaderPage 同款）
+    StackView.onActivated: page.forceActiveFocus()
 
     Component.onDestruction: {
         page.flushProgress()   // L9（P2#34）：未落盘的翻页进度兜底写入

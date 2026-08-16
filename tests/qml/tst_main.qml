@@ -122,13 +122,21 @@ Item {
             var src = TestEnv.pdfSource
             if (src.length === 0)
                 skip("未设置 READDICT_REAL_PDF，跳过真实 PDF 加载验证")
-            var loader = pdfReaderComp.createObject(root)
+            // 真实 PDF 加载必须给 Loader 显式非零宽高：0×0 时 scaleToWidth 按
+            // PdfScrollablePageView 内部 root.width 计算 renderScale=0（QML 源码
+            // scaleToWidth 用 root.width 而非参数 width），页面渲染空白、相对变化
+            // 断言失真——显式尺寸让适配按真实阅读区宽度计算（修复 renderScale=0 回归）
+            // 注意：QPdfDocument::load(QString) 对本地文件是同步的——page.book 赋值
+            // 即完成加载并触发 Ready（PdfScrollablePageView.onStatusChanged 同步执行
+            // scaleToWidth）。因此默认 renderScale 必须在设置 book 之前捕获，
+            // 否则捕获到的已是适配后的值，相对变化断言失去判别力。
+            var loader = pdfReaderComp.createObject(root, { width: 800, height: 1000 })
             var page = loader.item
             verify(page !== null, "PdfReaderPage 应能加载")
+            var initialScale = page.pdfView.renderScale // 默认 renderScale=1
             page.book = { id: 999001, title: "真实PDF", path: src }
             var doc = page.pdfDocument
             verify(doc !== null, "PdfReaderPage 应暴露 pdfDocument")
-            var initialScale = page.pdfView.renderScale // 默认 renderScale=1
             tryVerify(function () { return doc.status === PdfDocument.Ready }, 15000,
                       "真实 PDF 应加载为 Ready，实际 " + doc.status)
             verify(doc.pageCount > 0, "加载的 PDF 应有页数")
@@ -165,7 +173,9 @@ Item {
                 skip("未设置 READDICT_REAL_PDF，跳过 PDF 进度恢复验证")
             var id = 999002 // 独立 bookId，避免与 test_pdfLoadsRealSource 的 999001 互相污染
             Settings.setValue("progress/pdf_" + id, 3)
-            var loader = pdfReaderComp.createObject(root)
+            // 同 test_pdfLoadsRealSource：0×0 Loader 下 scaleToWidth 按 root.width=0
+            // 计算 renderScale=0，页面渲染空白（Image.Ready 断言必然失败），须显式尺寸
+            var loader = pdfReaderComp.createObject(root, { width: 800, height: 1000 })
             var page = loader.item
             page.book = { id: id, title: "真实PDF", path: src }
             tryVerify(function () { return page.pdfDocument.status === PdfDocument.Ready }, 15000,
@@ -201,14 +211,19 @@ Item {
                       "初始页应渲染完成")
             // 触发重渲染并立即请求关闭：渲染进入在途（Loading）的瞬间调用 requestClose，
             // 锁定轮询等待真实生效——closePollCount 增长 + 渲染稳定前页面不被销毁。
-            // 注：30MB PDF 单页渲染在本机 <100ms，先 goToPage 再在同一事件循环内调
-            // requestClose 可稳定命中 Loading 窗口（status 非 Ready 即进入轮询分支）。
+            // 先等 goToPage 触发的渲染稳定，再单独触发高倍率重渲染：若两步在同一事件
+            // 循环内连续执行，两次加载会合并/竞态，实测可能只剩 14ms 级小渲染——renderScale
+            // 10（约 6120×7920px）的渲染未真正发生，closePoll（50ms）首个 tick 已见稳定态，
+            // closePollCount 恒为 0 导致断言误报（该用例此前从未在真实 PDF 下运行）。
+            // 待稳定后单独触发的 scale-10 渲染实测约 171ms，远大于 50ms tick 周期，窗口必然命中。
             page.pdfView.goToPage(5)
-            page.pdfView.renderScale = 6 // 高倍率重渲染，加大 Loading 窗口
-            // Loading 窗口在 goToPage 同一事件循环内同步进入（实测稳定命中 status=Loading）；
+            tryVerify(function () { return page.pdfView.status === Image.Ready }, 15000,
+                      "goToPage 渲染应先稳定，实际 " + page.pdfView.status)
+            page.pdfView.renderScale = 10 // 高倍率重渲染，加大 Loading 窗口
+            // Loading 窗口在 renderScale 同一事件循环内同步进入（实测稳定命中 status=Loading）；
             // 若渲染太快已 Ready 则测试失败而非跳过——轮询锁定必须是必然路径
             verify(page.pdfView.status !== Image.Ready,
-                   "goToPage 后应立即进入 Loading 渲染窗口（status=" + page.pdfView.status + "）")
+                   "renderScale 后应立即进入 Loading 渲染窗口（status=" + page.pdfView.status + "）")
             page.requestClose()
             verify(page.closing === true, "requestClose 应置 closing 防重入")
             // 锁定等待逻辑真实生效：closePoll 轮询计数增长 + 渲染稳定前页面不被销毁
@@ -221,6 +236,54 @@ Item {
                       "渲染应最终稳定，实际 " + page.pdfView.status)
             verify(page.pdfView !== undefined && page.pdfView.currentPage === 5,
                    "渲染稳定后页面仍应存活（未被提前销毁）")
+            stack.destroy()
+        }
+        // E4（PDF）：生产键盘焦点链路——不直接调用 previousPage/nextPage，真实按键经
+        // QtTest keyClick 走生产 Keys.onPressed 路由。前提是 push（生产路径）后页面
+        // 持有 activeFocus（focus:true + Component.onCompleted forceActiveFocus，与
+        // ReaderPage 同款）；无真实 PDF 明确 skip（与其它真实 PDF 用例一致）。
+        // 同时覆盖审查项：带修饰键（Ctrl）的事件不吞——Ctrl+D 不得翻页。
+        function test_pdfKeyNavChangesPageWithActiveFocus() {
+            var src = TestEnv.pdfSource
+            if (src.length === 0)
+                skip("未设置 READDICT_REAL_PDF，跳过真实 PDF 键盘导航验证")
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            verify(stack !== null, "测试 StackView 应能创建")
+            var id = 999006 // 独立 bookId，避免与其它 PDF 用例互相污染
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/PdfReaderPage.qml",
+                       { book: { id: id, title: "键盘PDF", path: src } })
+            var page = stack.currentItem
+            verify(page !== null, "PdfReaderPage 应被 push 进 StackView")
+            tryVerify(function () { return page.pdfDocument.status === PdfDocument.Ready }, 15000,
+                      "真实 PDF 应加载为 Ready")
+            // 焦点前提：页面必须持有 activeFocus，生产 Keys.onPressed 才收得到按键
+            tryVerify(function () { return page.activeFocus === true }, 3000,
+                      "push 后 PdfReaderPage 应持有 activeFocus，实际 " + page.activeFocus)
+            tryVerify(function () { return page.pdfView.currentPage === 0 }, 5000,
+                      "初始应在第 0 页，实际 " + page.pdfView.currentPage)
+            // 真实 D 键 → 下一页（生产按键链路，非函数直调）
+            keyClick(Qt.Key_D)
+            tryVerify(function () { return page.pdfView.currentPage === 1 }, 5000,
+                      "真实 D 键应前进到第 1 页，实际 " + page.pdfView.currentPage)
+            // 真实 A 键 → 上一页
+            keyClick(Qt.Key_A)
+            tryVerify(function () { return page.pdfView.currentPage === 0 }, 5000,
+                      "真实 A 键应回到第 0 页，实际 " + page.pdfView.currentPage)
+            // 方向键同链路
+            keyClick(Qt.Key_Right)
+            tryVerify(function () { return page.pdfView.currentPage === 1 }, 5000,
+                      "真实 Right 应前进到第 1 页，实际 " + page.pdfView.currentPage)
+            keyClick(Qt.Key_Left)
+            tryVerify(function () { return page.pdfView.currentPage === 0 }, 5000,
+                      "真实 Left 应回到第 0 页，实际 " + page.pdfView.currentPage)
+            // 修饰键不吞：Ctrl+D 不应翻页（键盘路由放行带修饰键事件）
+            keyClick(Qt.Key_D, Qt.ControlModifier)
+            tryVerify(function () { return page.pdfView.currentPage === 0 }, 3000,
+                      "Ctrl+D 不应翻页，实际 " + page.pdfView.currentPage)
+            // 渲染稳定后销毁，避免 QtPdfQuick 拆除竞态崩溃
+            tryVerify(function () { return page.pdfView.status === Image.Ready }, 15000,
+                      "首页渲染应完成，实际 " + page.pdfView.status)
             stack.destroy()
         }
     }
