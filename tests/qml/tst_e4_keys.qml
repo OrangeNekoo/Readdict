@@ -838,6 +838,42 @@ Item {
                    "跨章激活不得把视口弹回上一章或顶部")
             h.stack.destroy()
         }
+        // BUG：真实连续滚动跨章后，下一次鼠标滚动应继续推进，不得必须先按 A/D。
+        // 该测试使用生产 mouseDrag 路径而非直接写 contentY，覆盖 Flickable 的实际手势。
+        // 拖动方向：正文 0.78H 处向上拖至 0.22H（dy 为负 = 手指上移 = 内容下滚），
+        // 单次位移约 0.56 视口高；首章 100 段 ≈ 5 视口高，10 次内应跨入下一章。
+        function test_mouseScrollContinuesAcrossChaptersWithoutKeyboard() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.loadChapter(0)
+            tryVerify(function () { return cv.scrollModel.length > 100
+                                      && cv.paragraphRepeater.count === cv.scrollModel.length
+                                      && cv.contentHeight > cv.height * 2 }, 5000,
+                      "连续窗口正文应完成布局")
+            var reachedNext = false
+            for (var i = 0; i < 40; ++i) {
+                mouseDrag(cv, 8, cv.height * 0.78, 8, -cv.height * 0.56,
+                          Qt.LeftButton, Qt.NoModifier, 30)
+                wait(120)
+                if (Books.currentChapter >= 1) { reachedNext = true; break }
+            }
+            verify(reachedNext, "连续鼠标滚动应跨入下一章")
+            // 等跨章后的窗口重建/锚点恢复收敛（委托数与模型同步），再做下一次
+            // 真实拖动，排除重建在途对 contentY 的干扰
+            tryVerify(function () { return cv.paragraphRepeater.count === cv.scrollModel.length },
+                      3000, "跨章后窗口应完成重建")
+            var before = cv.contentY
+            mouseDrag(cv, 8, cv.height * 0.78, 8, -cv.height * 0.56,
+                      Qt.LeftButton, Qt.NoModifier, 30)
+            wait(150)
+            verify(cv.contentY > before + 1,
+                   "跨章后下一次鼠标滚动仍应推进，不能依赖 A/D 键")
+            h.stack.destroy()
+        }
+
 
         // BUG4：超长段落按实际 TextEdit 行断点拆成多个严格页面；不得提供页内滚动。
         function test_pageContentOverflowIsReachable() {
