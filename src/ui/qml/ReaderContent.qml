@@ -831,8 +831,10 @@ Flickable {
     // 避免 quicktest harness 合成键盘事件不可靠——同 C7 选择注入取舍）。
     // 修饰键不拦截（Ctrl/Cmd/Shift 组合留给系统与文本选择）；弹层/Dialog
     // 打开时焦点在弹层内，本组件 Keys 不触发（不干扰输入框）。
-    // scroll 模式：↑↓/PageUp/PageDown 滚动一视口页，←/→ 翻章；
-    // paged 模式：四向 + PageUp/PageDown 均按视口高度整页翻动（←/→ 翻页而非翻章）。
+    // scroll 模式：↑↓/PageUp/PageDown 滚动一视口页，←/→ 翻章；W 向上滚动、
+    // S 向下滚动（A/D 不处理，不切换章节）。
+    // paged 模式：四向 + PageUp/PageDown 均按视口高度整页翻动（←/→ 翻页而非翻章）；
+    // A 上一页、D 下一页（W/S 不处理，不翻页）。
     // isAutoRepeat（键盘按住自动重复 30-60Hz）：scroll 翻章与 paged 翻章
     // 动作忽略重复事件（连按一次只翻一章/翻一页，不因按住连翻多章）；
     // scroll 翻页/paged 翻页是内容位移动作，重复无害（同拖拽滚动语义）。
@@ -840,11 +842,9 @@ Flickable {
         if (modifiers !== Qt.NoModifier) return false
         if (flick.pageMode === "paged") {
             switch (key) {
-            case Qt.Key_Up: case Qt.Key_PageUp: case Qt.Key_Left:
-            case Qt.Key_W: case Qt.Key_A:
+            case Qt.Key_Up: case Qt.Key_PageUp: case Qt.Key_Left: case Qt.Key_A:
                 flick.pagePrev(isAutoRepeat); return true
-            case Qt.Key_Down: case Qt.Key_PageDown: case Qt.Key_Right:
-            case Qt.Key_S: case Qt.Key_D:
+            case Qt.Key_Down: case Qt.Key_PageDown: case Qt.Key_Right: case Qt.Key_D:
                 flick.pageNext(isAutoRepeat); return true
             }
             return false
@@ -854,9 +854,9 @@ Flickable {
             flick.scrollPage(-1, isAutoRepeat); return true
         case Qt.Key_Down: case Qt.Key_PageDown: case Qt.Key_S:
             flick.scrollPage(1, isAutoRepeat); return true
-        case Qt.Key_Left: case Qt.Key_A:
+        case Qt.Key_Left:
             if (!isAutoRepeat) flick.requestPrevChapter(); return true
-        case Qt.Key_Right: case Qt.Key_D:
+        case Qt.Key_Right:
             if (!isAutoRepeat) flick.requestNextChapter(); return true
         }
         return false

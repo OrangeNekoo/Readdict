@@ -489,6 +489,49 @@ Item {
                       "滚到真实底边界应换下一章，实际 currentChapter=" + Books.currentChapter)
             h.stack.destroy()
         }
+
+        // 任务1：scroll 模式 W/S/A/D 键位分流——W 向上滚动、S 向下滚动；
+        // A/D 不得被处理（返回 false），且不得切换章节（A/D 仅属 paged 模式）。
+        // 旧实现将 scroll 的 A/D 映射为显式上一/下一章，此处拒绝断言必须红灯。
+        function test_modeSpecificWasdKeys() {
+            var book = findBook("longbook")
+            verify(book !== null, "longbook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            compare(cv.pageMode, "scroll", "本用例应为 scroll 模式")
+            tryVerify(function () { return cv.contentHeight > cv.height * 2 }, 3000,
+                      "longbook 内容应远超视口")
+            cv.contentY = 0
+            var pageH = cv.height
+            // S 向下滚动一视口页
+            verify(cv.handleKey(Qt.Key_S, Qt.NoModifier), "scroll S 应被处理（向下滚动）")
+            wait(450)
+            verify(Math.abs(cv.contentY - pageH) < 4,
+                   "S 应滚动一视口页，实际 contentY=" + cv.contentY + "（期望 " + pageH + "）")
+            // W 向上滚动回顶
+            verify(cv.handleKey(Qt.Key_W, Qt.NoModifier), "scroll W 应被处理（向上滚动）")
+            wait(450)
+            verify(Math.abs(cv.contentY) < 4,
+                   "W 应回滚到顶部，实际 contentY=" + cv.contentY)
+            h.stack.destroy()
+
+            // A/D 不得被处理、不得切换章节——用多章书在中间章（1）验证
+            var mb = findBook("multibook")
+            verify(mb !== null, "multibook 应已导入")
+            var h2 = openPage(mb)
+            var p2 = h2.page
+            var cv2 = p2.contentView
+            var titles = Books.chapterTitles(mb.id)
+            verify(titles.length >= 3, "multibook 应有 3 章，实际 " + titles.length)
+            Books.currentChapter = 1
+            p2.loadChapter(1)
+            wait(100)
+            verify(!cv2.handleKey(Qt.Key_A, Qt.NoModifier), "scroll A 不应被处理")
+            verify(!cv2.handleKey(Qt.Key_D, Qt.NoModifier), "scroll D 不应被处理")
+            compare(Books.currentChapter, 1, "scroll A/D 不得切换章节")
+            h2.stack.destroy()
+        }
     }
 
     TestCase {
@@ -607,19 +650,16 @@ Item {
             wait(450)
             verify(cv.contentX === 0, "paged 首页 ←/↑ 应兜底不换，实际 " + cv.contentX)
             compare(cv.contentY, 0, "paged 首页 contentY 应恒 0")
-            // WASD 与方向键同义：A/W 上一页，D/S 下一页。
+            // A/D 与方向键同义：D 下一页、A 上一页；W/S 不处理且不得翻页（任务1 分流）。
             cv.handleKey(Qt.Key_D, Qt.NoModifier)
             wait(450)
             verify(Math.abs(cv.contentX - w) < 4, "paged D 键应翻到下一页")
             cv.handleKey(Qt.Key_A, Qt.NoModifier)
             wait(450)
             verify(Math.abs(cv.contentX) < 4, "paged A 键应翻回上一页")
-            cv.handleKey(Qt.Key_S, Qt.NoModifier)
-            wait(450)
-            verify(Math.abs(cv.contentX - w) < 4, "paged S 键应翻到下一页")
-            cv.handleKey(Qt.Key_W, Qt.NoModifier)
-            wait(450)
-            verify(Math.abs(cv.contentX) < 4, "paged W 键应翻回上一页")
+            verify(!cv.handleKey(Qt.Key_S, Qt.NoModifier), "paged S 键不应被处理")
+            verify(!cv.handleKey(Qt.Key_W, Qt.NoModifier), "paged W 键不应被处理")
+            verify(Math.abs(cv.contentX) < 4, "paged W/S 不得翻页（contentX 应保持 0）")
             h.stack.destroy()
         }
 
@@ -1335,6 +1375,40 @@ Item {
             loader2.destroy()
             loader.destroy()
             Settings.setValue("reading/pageMode", "scroll")
+        }
+
+        // 任务1：paged 模式 W/S/A/D 键位分流——A 上一页、D 下一页；
+        // W/S 不得被处理（返回 false），且不得翻页（W/S 仅属 scroll 模式）。
+        // 旧实现将 paged 的 W/S 也映射为翻页，此处拒绝断言必须红灯。
+        function test_modeSpecificWasdKeys() {
+            var book = findBook("longbook")
+            verify(book !== null, "longbook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.pageMode = "paged"
+            Books.currentChapter = 0
+            page.loadChapter(0)
+            wait(100)
+            tryVerify(function () { return cv.pageCount >= 2
+                                      && cv.pageRepeater.count === cv.pageCount }, 3000,
+                      "paged 页面模型应就绪（pageCount=" + cv.pageCount + "）")
+            cv.contentX = 0
+            wait(50)
+            compare(cv.currentPage, 0, "paged 初始逻辑页应为 0")
+            // D 下一页
+            verify(cv.handleKey(Qt.Key_D, Qt.NoModifier), "paged D 应被处理（下一页）")
+            wait(450)
+            compare(cv.currentPage, 1, "D 应翻到第 1 页，实际 " + cv.currentPage)
+            // A 上一页
+            verify(cv.handleKey(Qt.Key_A, Qt.NoModifier), "paged A 应被处理（上一页）")
+            wait(450)
+            compare(cv.currentPage, 0, "A 应翻回第 0 页，实际 " + cv.currentPage)
+            // W/S 不得被处理、不得翻页
+            verify(!cv.handleKey(Qt.Key_W, Qt.NoModifier), "paged W 不应被处理")
+            verify(!cv.handleKey(Qt.Key_S, Qt.NoModifier), "paged S 不应被处理")
+            compare(cv.currentPage, 0, "paged W/S 不得翻页，实际 currentPage=" + cv.currentPage)
+            h.stack.destroy()
         }
     }
 }
