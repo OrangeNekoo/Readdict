@@ -49,6 +49,73 @@ Item {
             verify(loader.item !== null, "PdfReaderPage 应能加载（QtQuick.Pdf import + PdfScrollablePageView 编译检查）")
             loader.destroy()
         }
+        // 任务2 控制层测试（无需真实 PDF）：稳定句柄、页码指示、菜单开关、
+        // Loading/Error 覆盖状态。锁定 PdfReaderPage 必须暴露导航/菜单/状态句柄。
+        function test_pdfReaderControlsExposeNavigationAndMenu() {
+            var loader = pdfReaderComp.createObject(root)
+            var page = loader.item
+            verify(page !== null, "PdfReaderPage 应能加载")
+            // 稳定测试句柄：前后页、页码、菜单入口、菜单本体、错误/重试、加载指示
+            verify(page.previousPageButton !== undefined, "应暴露 previousPageButton")
+            verify(page.nextPageButton !== undefined, "应暴露 nextPageButton")
+            verify(page.menuButton !== undefined, "应暴露 menuButton")
+            verify(page.pageLabel !== undefined, "应暴露 pageLabel")
+            verify(page.pdfMenu !== undefined, "应暴露 pdfMenu")
+            verify(page.retryButton !== undefined, "应暴露 retryButton")
+            verify(page.errorLabel !== undefined, "应暴露 errorLabel")
+            verify(page.loadingIndicator !== undefined, "应暴露 loadingIndicator")
+            verify(page.pageLabel.text.length > 0,
+                   "页码指示应非空，实际 '" + page.pageLabel.text + "'")
+            // 无文档（status Null）时 loading 与 error 都不应显示
+            verify(!page.loadingIndicator.visible, "Null 状态不应显示 loading")
+            verify(!page.errorLabel.visible, "Null 状态不应显示 error")
+            // 菜单开关：点击更多打开，close() 关闭
+            page.menuButton.clicked()
+            tryVerify(function () { return page.pdfMenu.visible }, 3000, "点击更多应打开菜单")
+            page.pdfMenu.close()
+            tryVerify(function () { return !page.pdfMenu.visible }, 3000, "close() 应关闭菜单")
+            loader.destroy()
+        }
+        // 任务2 Error 状态：坏源进入 PdfDocument.Error，显示 pdfDoc.error 与重试按钮，
+        // 重试保持同一 source 并重新触发加载。
+        function test_pdfErrorShowsMessageAndRetry() {
+            var loader = pdfReaderComp.createObject(root)
+            var page = loader.item
+            page.book = { id: 999004, title: "坏PDF", path: "/nonexistent/pdf.pdf" }
+            var doc = page.pdfDocument
+            tryVerify(function () { return doc.status === PdfDocument.Error }, 15000,
+                      "坏源应进入 Error，实际 " + doc.status)
+            verify(page.errorLabel.visible, "Error 时应显示错误信息")
+            compare(page.errorLabel.text, doc.error, "错误文本应显示 pdfDoc.error")
+            verify(page.retryButton.visible, "Error 时应显示重试按钮")
+            var srcBefore = doc.source
+            page.retryButton.clicked()
+            compare(doc.source, srcBefore, "重试应保持同一 source")
+            loader.destroy()
+        }
+        // 任务2 Loading 状态覆盖：坏源常瞬跳 Error，若捕获到 Loading 窗口则断言
+        // loadingIndicator 可见；无真实 PDF 无法稳定捕获时记录观测状态（句柄已在
+        // test_pdfReaderControlsExposeNavigationAndMenu 锁定，真实 Loading 由
+        // test_pdfLoadsRealSource 在 READDICT_REAL_PDF 下覆盖）。
+        function test_pdfLoadingStateCoverage() {
+            var loader = pdfReaderComp.createObject(root)
+            var page = loader.item
+            var seenLoading = false
+            page.book = { id: 999005, title: "加载PDF", path: "/nonexistent/pdf.pdf" }
+            var doc = page.pdfDocument
+            var log = []
+            for (var i = 0; i < 25; ++i) {
+                log.push(doc.status)
+                if (doc.status === PdfDocument.Loading) { seenLoading = true; break }
+                if (doc.status === PdfDocument.Error) break
+                QTest.qWait(20)
+            }
+            if (seenLoading)
+                verify(page.loadingIndicator.visible, "Loading 状态应显示 loadingIndicator")
+            else
+                console.log("未捕获 Loading 窗口，观测状态序列=" + log.join(","))
+            loader.destroy()
+        }
         // 真实 PDF 加载验证：TestEnv.pdfSource 为空（未设 READDICT_REAL_PDF）时跳过；
         // 否则加载真实文件并等待 PdfDocument Ready，确认 QtPdf 渲染管线可用
         function test_pdfLoadsRealSource() {
@@ -61,9 +128,30 @@ Item {
             page.book = { id: 999001, title: "真实PDF", path: src }
             var doc = page.pdfDocument
             verify(doc !== null, "PdfReaderPage 应暴露 pdfDocument")
+            var initialScale = page.pdfView.renderScale // 默认 renderScale=1
             tryVerify(function () { return doc.status === PdfDocument.Ready }, 15000,
                       "真实 PDF 应加载为 Ready，实际 " + doc.status)
             verify(doc.pageCount > 0, "加载的 PDF 应有页数")
+            // 任务2：Ready 时应先 scaleToWidth 适配阅读区宽度（默认 renderScale=1 右侧留白）；
+            // 断言 renderScale 相对 Ready 前默认值发生改变（适配后按页宽缩放）
+            tryVerify(function () { return page.pdfView.renderScale !== initialScale }, 5000,
+                      "Ready 后应 scaleToWidth 改变 renderScale，实际 " + page.pdfView.renderScale)
+            // 任务2：页码指示应显示 第 1 / N 页
+            tryVerify(function () {
+                return page.pageLabel.text.indexOf("1 / " + doc.pageCount) >= 0
+            }, 5000, "页码指示应显示 第 1 / N 页，实际 '" + page.pageLabel.text + "'")
+            // 任务2：后一页/前一页按钮可用性边界（第 0 页：前页禁用，后页可用）
+            tryVerify(function () { return page.pdfView.currentPage === 0 }, 5000,
+                      "初始应在第 0 页，实际 " + page.pdfView.currentPage)
+            verify(page.previousPageButton.enabled === false, "第 0 页时前一页应禁用")
+            verify(page.nextPageButton.enabled === true, "第 0 页时后一页应可用")
+            // 任务2：下一页推进、上一页回退
+            page.nextPageButton.clicked()
+            tryVerify(function () { return page.pdfView.currentPage === 1 }, 5000,
+                      "点击下一页应前进到第 1 页，实际 " + page.pdfView.currentPage)
+            page.previousPageButton.clicked()
+            tryVerify(function () { return page.pdfView.currentPage === 0 }, 5000,
+                      "点击上一页应回到第 0 页，实际 " + page.pdfView.currentPage)
             // 30MB 大 PDF 首帧渲染可能仍在进行：等渲染完成再销毁，避免 QtPdfQuick 拆除竞态崩溃
             tryVerify(function () { return page.pdfView.status === Image.Ready }, 15000,
                       "首页渲染应完成，实际 " + page.pdfView.status)
