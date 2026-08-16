@@ -993,6 +993,9 @@ Page {
     // restart 为空操作）；鼠标从正文移到控制栏的过程中最后一次 onPositionChanged
     // 已重置计时，按钮操作在 5s 内保持可见。
     // acceptedButtons: Qt.NoButton 不拦截任何点击（正文选择/按钮点击照常透传）。
+    // 任务2：同因"hover 路由到最顶层项"，正文内 HoverHandler 收不到悬停——本处把
+    // 每次位置变化转发给 content.notifyEdgeHintHover（paged 左右约 15% 热区判定在
+    // ReaderContent 内），驱动边缘翻页提示重新显示/重启闲置计时（契约2）。
     MouseArea {
         anchors.top: page.sheetOpen ? topToolbar.bottom : parent.top
         anchors.left: parent.left
@@ -1004,6 +1007,8 @@ Page {
             // 只在显示态重置（restart 会启动停止态的计时器，隐藏态禁止——见 handleContentTap 注释）
             if (page.controlsVisible)
                 hideControlsTimer.restart()
+            if (content.pageMode === "paged")
+                content.notifyEdgeHintHover(mouseX)
         }
     }
 

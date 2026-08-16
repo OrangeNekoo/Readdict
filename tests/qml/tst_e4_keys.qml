@@ -11,7 +11,8 @@ import Readdict.Test 1.0
 // 分页职责；pageModel 由稳定单向估算（字符串长度/段落边界/视口几何）生成，无振荡。
 // 键盘注入：多数用例直接调用 contentView.handleKey（Keys.onPressed 委托同一函数，
 // 状态机单元级驱动）；任务2 起 test_activeFocusAndProductionKeys 用 QtTest keyClick
-// 真实按键走生产 Keys.onPressed → handleKey 链路（先断言 content 持有 activeFocus），
+// 真实按键走生产 Keys.onPressed → handleKey 链路（先断言 content 持有 activeFocus，
+// scroll 段翻页/翻章，paged 段 →/←/D/A 翻页并 wait(450) 等动画收敛），
 // 两者互补，交互证据不依赖单一函数调用。
 // 动画收敛：翻页动画 300ms，每次按键后 wait(450) 等动画完全结束再断言/再按
 //（tryVerify 会在动画中途通过，紧接着的按键会基于中途位置计算页号 → 误判，
@@ -154,6 +155,39 @@ Item {
             tryVerify(function () { return Books.currentChapter === 0 }, 3000,
                       "真实 ← 键应翻回上一章，实际 currentChapter=" + Books.currentChapter)
             h2.stack.destroy()
+
+            // 任务2：paged 生产焦点链路回归——真实 →/←/D/A 键经 QtTest keyClick 走
+            // 生产 Keys.onPressed → handleKey → pageNext/pagePrev；每次按键后
+            // wait(450) 等横向动画完全收敛再断言/再按（动画中途值不作断言依据，
+            // 同文件内注入用例的 wait 约定）。
+            var h3 = openPage(mb)
+            var p3 = h3.page
+            var cv3 = p3.contentView
+            p3.pageMode = "paged"
+            Books.currentChapter = 0
+            p3.loadChapter(0)
+            wait(100)
+            tryVerify(function () { return cv3.pageCount >= 2
+                                      && cv3.pageRepeater.count === cv3.pageCount }, 3000,
+                      "paged 页面模型应就绪（pageCount=" + cv3.pageCount + "）")
+            cv3.contentX = 0
+            wait(50)
+            compare(cv3.currentPage, 0, "paged 初始逻辑页应为 0")
+            tryVerify(function () { return cv3.activeFocus === true }, 3000,
+                      "paged 下正文也应持有 activeFocus")
+            keyClick(Qt.Key_Right)
+            wait(450)
+            compare(cv3.currentPage, 1, "真实 → 键应翻到第 1 页，实际 " + cv3.currentPage)
+            keyClick(Qt.Key_Left)
+            wait(450)
+            compare(cv3.currentPage, 0, "真实 ← 键应翻回第 0 页，实际 " + cv3.currentPage)
+            keyClick(Qt.Key_D)
+            wait(450)
+            compare(cv3.currentPage, 1, "真实 D 键应翻到第 1 页（A/D 对照），实际 " + cv3.currentPage)
+            keyClick(Qt.Key_A)
+            wait(450)
+            compare(cv3.currentPage, 0, "真实 A 键应翻回第 0 页（A/D 对照），实际 " + cv3.currentPage)
+            h3.stack.destroy()
         }
 
         // 任务2（拖动阈值）：正文真实拖拽滚动（按下+位移超阈值+松开）不应误触发
@@ -844,6 +878,9 @@ Item {
         // 提示可见；翻页驱动 pageAnimX 动画且 currentPage 同步；焦点保持（方向键
         // 仍可用）；中部点击不翻页不唤出；顶部/底部热区唤出菜单而非翻页（菜单
         // 唤出与分页点击不冲突）。
+        // 任务2（契约2）：进入 paged 模式箭头即可见；注入短 edgeHintHideDelay 后
+        // 闲置到期两箭头隐藏；mouseMove 到左右约 15% 热区重新显示并重启计时；
+        // 鼠标停留不移动 Timer 仍可到期隐藏；箭头纯视觉不拦截边缘点击。
         function test_pagedEdgeClickPagesAndHints() {
             var book = findBook("multibook")
             verify(book !== null, "multibook 应已导入")
@@ -851,6 +888,12 @@ Item {
             var page = h.page
             var cv = page.contentView
             page.pageMode = "paged"
+            // 任务2："进入 paged 模式即显示"在页面模型就绪前立即断言——waitPagesSettled
+            // 最长 5s，可能超过默认 edgeHintHideDelay（3s）让箭头先行隐藏。
+            verify(cv.prevPageHint !== undefined && cv.nextPageHint !== undefined,
+                   "paged 应暴露左右边缘翻页提示句柄")
+            verify(cv.prevPageHint.visible && cv.nextPageHint.visible,
+                   "进入 paged 模式边缘翻页提示应可见")
             Books.currentChapter = 0
             page.loadChapter(0)
             verify(waitPagesSettled(cv), "章 0 页面模型应就绪（pageCount=" + cv.pageCount + "）")
@@ -862,12 +905,28 @@ Item {
             cv.contentX = 0
             wait(50)
             compare(cv.currentPage, 0, "初始逻辑页应为 0")
-            // 边缘翻页提示可见（BUG4 可视反馈：paged 左右边缘显示前后翻页提示）
-            verify(cv.prevPageHint !== undefined && cv.nextPageHint !== undefined,
-                   "paged 应暴露左右边缘翻页提示句柄")
-            verify(cv.prevPageHint.visible && cv.nextPageHint.visible,
-                   "paged 模式边缘翻页提示应可见")
-            // 右边缘真实点击 → 下一页（pageNext → pageAnimX 动画）
+            // 任务2：闲置隐藏 + 边缘热区显现——注入短 edgeHintHideDelay（300ms），
+            // 等待到期断言隐藏；mouseMove 到左/右约 15% 热区断言显现（并重启计时）；
+            // 鼠标停留不移动时 Timer 仍可到期隐藏。
+            cv.edgeHintHideDelay = 300
+            cv.showEdgeHints()
+            wait(500)
+            verify(!cv.prevPageHint.visible && !cv.nextPageHint.visible,
+                   "闲置到期后左右翻页提示应隐藏")
+            // 左边缘热区（x≈2% 宽）移动 → 重新显示
+            mouseMove(cv, 20, cv.height / 2)
+            tryVerify(function () { return cv.prevPageHint.visible && cv.nextPageHint.visible },
+                      3000, "左热区鼠标移动应重新显示翻页提示")
+            // 右边缘热区（x≈98% 宽）移动 → 保持显示并重启计时
+            mouseMove(cv, cv.width - 20, cv.height / 2)
+            tryVerify(function () { return cv.prevPageHint.visible && cv.nextPageHint.visible },
+                      3000, "右热区鼠标移动应重新显示翻页提示")
+            // 停留不移动：Timer 仍可到期隐藏（鼠标停在右热区，无新移动）
+            wait(500)
+            verify(!cv.prevPageHint.visible && !cv.nextPageHint.visible,
+                   "停留不移动时闲置 Timer 仍应到期隐藏提示")
+            // 右边缘真实点击 → 下一页（pageNext → pageAnimX 动画；提示纯视觉，
+            // 隐藏/显隐切换均不拦截点击，契约1）
             var w = cv.width
             mouseClick(cv, cv.width - 20, cv.height / 2, Qt.LeftButton)
             tryVerify(function () { return cv.pageAnimationX.running === true }, 3000,

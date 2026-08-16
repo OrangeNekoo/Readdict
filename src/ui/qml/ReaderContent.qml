@@ -458,6 +458,13 @@ Flickable {
         flick.contentX = 0
         flick.contentY = 0
         flick.currentPage = 0
+        // 任务2：进入 paged 模式箭头即可见并启动闲置计时（契约2）；离开 paged
+        // 立即隐藏并停表（scroll 模式无边缘翻页提示）。
+        if (flick.pageMode === "paged") flick.showEdgeHints()
+        else {
+            flick.edgeHintsVisible = false
+            edgeHintHideTimer.stop()
+        }
         flick.schedulePageMeasure()
     }
     onTypographyChanged: flick.schedulePageMeasure()
@@ -1384,9 +1391,34 @@ Flickable {
     // 视口固定：x 叠加 contentX（同 selBar 模式；paged 下 contentY 恒 0）；
     // z 低于选择工具条（selBar/colorBar z:10）。仅 paged 模式显示；Sheet/菜单
     // 打开时被全页遮罩盖住，无需额外显隐联动。
+    // 任务2（契约2）：闲置隐藏状态机——进入 paged 模式（onPageModeChanged）即显示
+    // 并启动 edgeHintHideTimer；到期后两箭头隐藏；鼠标在视口左右约 15% 热区移动时
+    // 重新显示并重启计时（悬停由 ReaderPage 的 C3 NoButton MouseArea 上报——Qt 把
+    // hover 路由给最顶层项，正文内 HoverHandler 收不到，见 ReaderPage C3 注释）；
+    // 鼠标停留不移动时 Timer 仍可到期隐藏。测试注入短 edgeHintHideDelay 验证显隐。
+    property int edgeHintHideDelay: 3000
+    property bool edgeHintsVisible: false
+    function showEdgeHints() {
+        if (flick.pageMode !== "paged") return
+        flick.edgeHintsVisible = true
+        edgeHintHideTimer.restart()
+    }
+    // 任务2：视口悬停上报（ReaderPage C3 MouseArea 每次位置变化调用）——命中
+    // 左右约 15% 热区即重新显示并重启计时；中部移动不干预（Timer 照常到期隐藏）。
+    function notifyEdgeHintHover(vx) {
+        if (flick.pageMode !== "paged") return
+        if (vx <= flick.width * 0.15 || vx >= flick.width * 0.85)
+            flick.showEdgeHints()
+    }
+    Timer {
+        id: edgeHintHideTimer
+        interval: flick.edgeHintHideDelay
+        repeat: false
+        onTriggered: flick.edgeHintsVisible = false
+    }
     Rectangle {
         id: prevEdgeHint
-        visible: flick.pageMode === "paged"
+        visible: flick.pageMode === "paged" && flick.edgeHintsVisible
         x: flick.contentX + 10
         y: flick.contentY + flick.height / 2 - prevEdgeHint.height / 2
         width: 36
@@ -1403,7 +1435,7 @@ Flickable {
     }
     Rectangle {
         id: nextEdgeHint
-        visible: flick.pageMode === "paged"
+        visible: flick.pageMode === "paged" && flick.edgeHintsVisible
         x: flick.contentX + flick.width - nextEdgeHint.width - 10
         y: flick.contentY + flick.height / 2 - nextEdgeHint.height / 2
         width: 36
