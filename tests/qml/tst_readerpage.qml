@@ -532,6 +532,9 @@ Item {
             compare(h2.page.progressDisplay, "percent", "重开应恢复百分比格式")
             h2.stack.destroy()
             Settings.setValue("reading/progressDisplay", "pages")
+            // 任务3：对称复位本书范围（与 display 同模式）——全书测量已可完成，
+            // 残留 book 范围会让后续用例的视觉页数变成全书值（本用例只锁持久化）
+            Settings.setValue("reading/progressScope", "chapter")
         }
         function test_toolbarIconsAlignWithLibraryLabel() {
             var h = openPage()
@@ -676,6 +679,201 @@ Item {
             // 清理 Settings（不影响同 TestCase 其它用例）
             Settings.setValue("background/mode", "light")
             Settings.setValue("background/textColor", "")
+        }
+    }
+
+    // 任务3：全书视觉进度测量——总页数 = 各章真实视觉页数之和；前序章偏移；
+    // 测量未完成时只显示安全全书值（绝不用本章 N/M 冒充）；排版/视口变化后
+    // 旧测量立即失效并重新测量。fixture：multibook 三章（100/60/60 段）。
+    TestCase {
+        name: "BookProgressMeasure"
+
+        function initTestCase() {
+            Books.doSearch("")
+            Books.setFilter("")
+            Books.setSort(0)
+            var hasMulti = false
+            for (let b of Books.booksModel)
+                if (b.title === "multibook") { hasMulti = true; break }
+            if (!hasMulti) Importer.doImport(TestEnv.multiSource)
+            Settings.setValue("reading/pageMode", "scroll")
+            Settings.setValue("reading/progressDisplay", "pages")
+            Settings.setValue("reading/progressScope", "chapter")
+        }
+
+        function cleanup() {
+            Settings.setValue("reading/progressScope", "chapter")
+            Settings.setValue("reading/progressDisplay", "pages")
+            Settings.setValue("reading/pageMode", "scroll")
+            Settings.setValue("typography/fontSize", 18)
+            root.width = 1100   // 视口宽度用例失败路径也复位，避免污染后续用例
+        }
+
+        function openMulti() {
+            var multi = null
+            for (let b of Books.booksModel)
+                if (b.title === "multibook") { multi = b; break }
+            verify(multi !== null, "测试应使用多章节书")
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            verify(stack !== null, "测试 StackView 应能创建")
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: multi })
+            var page = stack.currentItem
+            verify(page !== null, "ReaderPage 应被 push 进 StackView")
+            tryVerify(function () {
+                return page.chapter && page.chapter.paragraphs
+                    && page.chapter.paragraphs.length > 0
+            }, 3000, "打开书后应加载章节段落")
+            page.contentView.restoreScrollY = -1
+            page.contentView.restorePending = false
+            return { stack: stack, page: page, book: multi }
+        }
+
+        // 契约1/2：全书总页数 = measuredChapterPages 各章真实视觉页数之和（数组与
+        // 章节数等长），且大于当前章页数；visualPageCount/Number 同步为全书值。
+        function test_bookTotalEqualsChapterSum() {
+            var h = openMulti()
+            var page = h.page
+            page.loadChapter(0)
+            tryVerify(function () { return page.chapter.paragraphs.length > 0 }, 3000,
+                      "首章应加载")
+            var chapterCount = Books.chapterCount(h.book.id)
+            verify(chapterCount >= 3, "multibook 应至少三章，实际 " + chapterCount)
+            page.setProgressScope("book")
+            tryVerify(function () { return page.bookPageTotal > 0 }, 10000,
+                      "全书测量应在限时内完成")
+            compare(page.measuredChapterPages.length, chapterCount,
+                    "测量数组长度应等于章节数")
+            var sum = 0
+            for (var i = 0; i < page.measuredChapterPages.length; ++i)
+                sum += page.measuredChapterPages[i]
+            compare(page.bookPageTotal, sum, "全书总页数应等于各章视觉页数之和")
+            var chapterPages = page.contentView.currentChapterPageCount()
+            verify(page.bookPageTotal > chapterPages,
+                   "全书总页数应大于当前章页数，全书=" + page.bookPageTotal
+                   + " 本章=" + chapterPages)
+            compare(page.visualPageCount, page.bookPageTotal,
+                    "visualPageCount 应等于全书总页数")
+            compare(page.visualPageNumber, page.bookPageNumber,
+                    "visualPageNumber 应等于全书页号")
+            verify(page.progressLabel.text.indexOf("全书 第 ") === 0,
+                   "全书页数格式应显示全书范围")
+            h.stack.destroy()
+        }
+
+        // 契约1：bookPageNumber = 前序章节页数之和 + 当前章实际页号；加载第二章后
+        // 全书页号大于本章页号并带前序页数偏移。
+        function test_bookPageNumberCarriesPrefixOffset() {
+            var h = openMulti()
+            var page = h.page
+            page.loadChapter(0)
+            tryVerify(function () { return page.chapter.paragraphs.length > 0 }, 3000,
+                      "首章应加载")
+            page.setProgressScope("book")
+            tryVerify(function () { return page.bookPageTotal > 0 }, 10000,
+                      "全书测量应在限时内完成")
+            tryVerify(function () {
+                return page.bookPageNumber === page.contentView.currentChapterPageNumber()
+            }, 3000, "第一章全书页号应等于本章页号（无前序偏移）")
+            var ch0Pages = page.measuredChapterPages[0]
+            verify(ch0Pages > 0, "第一章应有测量页数")
+            page.loadChapter(1)
+            tryVerify(function () { return Books.currentChapter === 1 }, 3000,
+                      "应切到第二章")
+            tryVerify(function () {
+                return page.bookPageNumber === ch0Pages
+                       + page.contentView.currentChapterPageNumber()
+            }, 3000, "第二章全书页号应带前序章页数偏移")
+            verify(page.bookPageNumber > page.contentView.currentChapterPageNumber(),
+                   "全书页号应大于本章页号（带前序偏移）")
+            h.stack.destroy()
+        }
+
+        // 契约3：progressScope=book 且全书尚未测量完成时，visual 三值只返回显式
+        // 安全全书值（0/0/0），绝不调用当前章数值——"全书"标签不得显示本章 N/M。
+        // measureInterval 注入放大未完成窗口（生产 50ms，测试 1000ms）保证确定性。
+        function test_incompleteMeasurementShowsSafeValues() {
+            var h = openMulti()
+            var page = h.page
+            verify(page.contentView.currentChapterPageCount() > 0,
+                   "前置：当前章应有真实页数")
+            page.measureInterval = 1000
+            page.setProgressScope("book")
+            wait(30)   // 绑定传播；1000ms 定时器尚未触发，测量必然未完成
+            verify(page.bookPageTotal === 0, "测量未完成时全书总数应为 0")
+            compare(page.visualPageNumber, 0, "测量未完成不得显示本章页号")
+            compare(page.visualPageCount, 0, "测量未完成不得显示本章页数")
+            compare(page.visualPageRatio, 0, "测量未完成比率应为 0")
+            verify(page.progressLabel.text.indexOf("全书 第 0 / 0 页") === 0,
+                   "测量未完成应显示安全全书占位，实际 " + page.progressLabel.text)
+            verify(page.progressLabel.text.indexOf("第 " + page.contentView.currentChapterPageCount()
+                                                   + " /") < 0,
+                   "测量未完成不得显示当前章 N/M")
+            // 恢复默认间隔重测：最终指标为真实全书值
+            page.measureInterval = 50
+            page.measureBookPages()
+            tryVerify(function () { return page.bookPageTotal > 0 }, 10000,
+                      "恢复默认间隔后全书测量应完成")
+            compare(page.visualPageCount, page.bookPageTotal,
+                    "完成后 visualPageCount 应等于全书总页数")
+            verify(page.progressLabel.text.indexOf("全书 第 0 / 0 页") < 0,
+                   "完成后全书标签应显示真实页数")
+            h.stack.destroy()
+        }
+
+        // 契约1/2（paged 分支）：横向分页模式下全书总页数同样 = 各章 pageCount
+        // 之和（隐藏视图重建 pageModel 走 16ms 页面定时器，须按目标章采纳），
+        // 且大于当前章页数——覆盖 paged 测量采纳路径不被残留 pageCount 污染。
+        function test_bookTotalEqualsChapterSumInPagedMode() {
+            Settings.setValue("reading/pageMode", "paged")
+            var h = openMulti()
+            var page = h.page
+            compare(page.pageMode, "paged", "应处于横向分页模式")
+            page.setProgressScope("book")
+            tryVerify(function () { return page.bookPageTotal > 0 }, 10000,
+                      "paged 全书测量应在限时内完成")
+            var chapterCount = Books.chapterCount(h.book.id)
+            compare(page.measuredChapterPages.length, chapterCount,
+                    "测量数组长度应等于章节数")
+            var sum = 0
+            for (var i = 0; i < page.measuredChapterPages.length; ++i)
+                sum += page.measuredChapterPages[i]
+            compare(page.bookPageTotal, sum, "paged 全书总页数应等于各章 pageCount 之和")
+            var chapterPages = page.contentView.currentChapterPageCount()
+            verify(page.bookPageTotal > chapterPages,
+                   "paged 全书总页数应大于当前章页数，全书=" + page.bookPageTotal
+                   + " 本章=" + chapterPages)
+            h.stack.destroy()
+        }
+
+        // 契约5：字号/视口宽度变化 → 测量代次立即重启（旧全书值失效），最终
+        // 指标重新稳定；测量结果数组与章节数重新等长。
+        function test_layoutChangeRestartsMeasurement() {
+            var h = openMulti()
+            var page = h.page
+            page.setProgressScope("book")
+            tryVerify(function () { return page.bookPageTotal > 0 }, 10000,
+                      "首次全书测量应完成")
+            var gen1 = page.measureGeneration
+            verify(gen1 > 0, "测量代次应已推进")
+            // 字号变化 → 重启代次并重新稳定
+            page.setFontSize(22)
+            tryVerify(function () { return page.measureGeneration > gen1 }, 3000,
+                      "字号变化应重启测量代次")
+            tryVerify(function () {
+                return page.bookPageTotal > 0 && page.measureGeneration > gen1
+            }, 10000, "字号变化后全书测量应重新完成")
+            compare(page.measuredChapterPages.length, Books.chapterCount(h.book.id),
+                    "重新测量后数组应与章节数等长")
+            // 视口宽度变化 → 同样重启代次并重新稳定
+            var gen2 = page.measureGeneration
+            root.width = 900
+            tryVerify(function () { return page.measureGeneration > gen2 }, 3000,
+                      "视口宽度变化应重启测量代次")
+            tryVerify(function () { return page.bookPageTotal > 0 }, 10000,
+                      "视口宽度变化后全书测量应重新完成")
+            root.width = 1100
+            h.stack.destroy()
         }
     }
 

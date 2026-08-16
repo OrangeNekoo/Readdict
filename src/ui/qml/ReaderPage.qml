@@ -74,15 +74,17 @@ Page {
     // 左下角阅读进度：格式（页数/百分比）与范围（本章/全书）独立。
     property string progressDisplay: "pages"
     property string progressScope: "chapter"
-    property real visualPageRatio: page.progressScope === "book" && page.bookPageTotal > 0
-        ? page.bookPageNumber / page.bookPageTotal
+    property real visualPageRatio: page.progressScope === "book"
+        ? (page.bookPageTotal > 0 ? page.bookPageNumber / page.bookPageTotal : 0)
         : (content.pageMode === "paged"
             ? (content.pageCount > 0 ? (content.currentPage + 1) / content.pageCount : 0)
             : content.currentChapterProgressRatio())
-    property int visualPageNumber: page.progressScope === "book" && page.bookPageTotal > 0
-        ? page.bookPageNumber : content.currentChapterPageNumber()
-    property int visualPageCount: page.progressScope === "book" && page.bookPageTotal > 0
-        ? page.bookPageTotal : content.currentChapterPageCount()
+    property int visualPageNumber: page.progressScope === "book"
+        ? (page.bookPageTotal > 0 ? page.bookPageNumber : 0)
+        : content.currentChapterPageNumber()
+    property int visualPageCount: page.progressScope === "book"
+        ? (page.bookPageTotal > 0 ? page.bookPageTotal : 0)
+        : content.currentChapterPageCount()
     property string progressText: {
         const scope = page.progressScope === "book" ? qsTr("全书") : qsTr("本章")
         if (page.progressDisplay === "percent")
@@ -97,6 +99,16 @@ Page {
     property int measurePageSum: 0
     property var measureChapter: ({})
     property var measureView: null
+    // 任务3：测量代次/目标章节状态——measureGeneration 每轮自增并随 Timer 校验，
+    // 旧代次回调直接丢弃；measureTarget 记录本次目标章节对象，页数只在目标章节
+    // 实际布局完成、对应模型稳定后采纳（契约2/4），杜绝采纳前一章异步残留。
+    property int measureGeneration: 0
+    property int measureTimerGeneration: -1
+    property int measureRetries: 0
+    property real measureLastHeight: -1
+    property var measureTarget: null
+    // 任务3：测量轮询间隔注入点（测试放大"测量未完成"窗口；生产 50ms）
+    property int measureInterval: 50
     function updateBookPageNumber() {
         if (page.progressScope !== "book" || page.bookPageTotal <= 0) return
         let prefix = 0
@@ -111,13 +123,27 @@ Page {
         function onContentYChanged() { page.updateBookPageNumber() }
         function onCurrentPageChanged() { page.updateBookPageNumber() }
         function onPageCountChanged() { page.updateBookPageNumber() }
+        // 任务3（契约1）：换章后即使 contentY/currentPage 未变（如两章都停在
+        // 页首），全书页号也必须按新章前序偏移重算
+        function onChapterChanged() { page.updateBookPageNumber() }
+        // 任务3（契约5）：内容视口尺寸变化后旧全书测量立即失效并重新测量
+        function onWidthChanged() { if (page.progressScope === "book") page.measureBookPages() }
+        function onHeightChanged() { if (page.progressScope === "book") page.measureBookPages() }
     }
+    // 任务3（契约5）：排版/阅读模式变化后重新测量。测量过程只写隐藏测量视图的
+    // typography/pageMode（子对象属性），不会回触发本处理器（无环）。
+    onTypographyChanged: { if (page.progressScope === "book") page.measureBookPages() }
+    onPageModeChanged: { if (page.progressScope === "book") page.measureBookPages() }
 
     Timer {
         id: measureTimer
-        interval: 50
+        interval: page.measureInterval
         repeat: false
-        onTriggered: page.measureBookStep()
+        onTriggered: {
+            // 契约4：旧代次 Timer 触发必须丢弃
+            if (page.measureTimerGeneration !== page.measureGeneration) return
+            page.measureBookStep()
+        }
     }
 
     Component {
@@ -125,8 +151,10 @@ Page {
         ReaderContent {
             visible: false
             opacity: 0
-            width: page.content ? page.content.width : 0
-            height: page.content ? page.content.height : 0
+            // 任务3：content 为本组件 id（词法解析）。旧实现写 page.content——
+            // id 非父对象属性，测量视图恒为 0×0，正文永不布局、测量永不完成。
+            width: content.width
+            height: content.height
             textColor: page.effectiveBg === "dark" ? UITheme.darkTextPrimary : UITheme.lightTextPrimary
             typography: page.typography
             pageMode: page.pageMode
@@ -135,12 +163,22 @@ Page {
     function measureBookPages() {
         if (!page.book || !page.book.id) return
         if (!page.measureView) page.measureView = measureContentComp.createObject(page)
+        page.measureGeneration += 1
         page.measureChapterIndex = 0
         page.measurePageSum = 0
         page.measuredChapterPages = []
+        page.measureRetries = 0
+        page.measureLastHeight = -1
+        page.measureTarget = null
+        // 契约3：旧全书值立即失效（未完成时 visual 只返回安全全书值）
         page.bookPageNumber = 0
         page.bookPageTotal = 0
         page.measureBookStep()
+    }
+
+    function scheduleMeasureStep() {
+        page.measureTimerGeneration = page.measureGeneration
+        measureTimer.restart()
     }
 
     function measureBookStep() {
@@ -151,34 +189,80 @@ Page {
             page.updateBookPageNumber()
             return
         }
-        const loaded = Books.loadChapter(page.book.id, page.measureChapterIndex)
-        if (!loaded || loaded.error) {
+        // 契约4：无布局/尺寸为零等经重试预算兜底——按 1 页继续完成，不死循环
+        if (page.measureRetries >= 16) {
             page.measuredChapterPages.push(1)
             page.measurePageSum += 1
             page.measureChapterIndex += 1
-            measureTimer.restart()
+            page.measureRetries = 0
+            page.measureLastHeight = -1
+            page.measureTarget = null
+            page.scheduleMeasureStep()
             return
         }
         const view = page.measureView
-        view.pageMode = page.pageMode
-        view.typography = page.typography
-        view.scrollChapters = [{ index: page.measureChapterIndex,
-                                 title: loaded.title || "", chapter: loaded }]
-        view.activeScrollChapter = page.measureChapterIndex
-        view.scrollFocusChapter = page.measureChapterIndex
-        view.chapter = loaded
-        if (page.pageMode === "paged") {
-            if (view.pageCount <= 0) { measureTimer.restart(); return }
-            page.measuredChapterPages.push(Math.max(1, view.pageCount))
-        } else {
-            if (view.contentHeight <= 0 || view.paragraphRepeater.count <= 0) {
-                measureTimer.restart(); return
+        const target = page.measureChapterIndex
+        if (!page.measureTarget) {
+            // 契约2：每章开始测量先清空隐藏视图旧 pageModel/pageCount，记录本次
+            // 目标章节；失败/空章按 1 页继续
+            view.pageModel = []
+            view.pageCount = 0
+            view.contentX = 0
+            view.contentY = 0
+            const loaded = Books.loadChapter(page.book.id, target)
+            if (!loaded || loaded.error) {
+                page.measuredChapterPages.push(1)
+                page.measurePageSum += 1
+                page.measureChapterIndex += 1
+                page.measureRetries = 0
+                page.scheduleMeasureStep()
+                return
             }
-            page.measuredChapterPages.push(Math.max(1, view.currentChapterPageCount()))
+            page.measureTarget = loaded
+            page.measureChapter = loaded
+            view.pageMode = page.pageMode
+            view.typography = page.typography
+            view.scrollChapters = [{ index: target,
+                                     title: loaded.title || "", chapter: loaded }]
+            view.activeScrollChapter = target
+            view.scrollFocusChapter = target
+            view.chapter = loaded
+            page.measureRetries = 0
+            page.measureLastHeight = -1
+            page.scheduleMeasureStep()
+            return
         }
-        page.measurePageSum += page.measuredChapterPages[page.measuredChapterPages.length - 1]
+        // 契约2：只在目标章节实际布局完成、对应模型稳定后采纳页数。
+        // 目标章节判定用模型内容而非对象身份：scroll 行自带 chapterIndex（全部
+        // 等于目标章）；paged 的 pageCount/pageModel 已在同一同步块内清空后才赋
+        // 新章，故 pageCount>0 必为清空后重建的目标章结果（Timer 不会插入同步
+        // 块），前一章异步残留不可能被采纳。
+        let value = -1
+        if (page.pageMode === "paged") {
+            if (view.pageCount > 0 && view.pageModel.length === view.pageCount)
+                value = view.pageCount
+        } else {
+            const rows = view.scrollModel || []
+            let rowsOk = rows.length > 0
+            for (let i = 0; rowsOk && i < rows.length; ++i)
+                if (Number(rows[i].chapterIndex) !== target) rowsOk = false
+            if (rowsOk && view.paragraphRepeater.count === rows.length
+                    && view.contentHeight > 0)
+                value = view.currentChapterPageCount()
+        }
+        if (value <= 0 || value !== page.measureLastHeight) {
+            if (value > 0) page.measureLastHeight = value
+            page.measureRetries += 1
+            page.scheduleMeasureStep()
+            return
+        }
+        page.measuredChapterPages.push(Math.max(1, value))
+        page.measurePageSum += value
         page.measureChapterIndex += 1
-        measureTimer.restart()
+        page.measureRetries = 0
+        page.measureLastHeight = -1
+        page.measureTarget = null
+        page.scheduleMeasureStep()
     }
     // U4：当前字族存储 token（FontSheet 高亮/选择）。
     property string fontFamily: ""
