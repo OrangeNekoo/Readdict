@@ -26,6 +26,9 @@ Rectangle {
     property alias searchIcon: searchIcon
     property alias menuText: menuText
     property alias bookmarkName: bookmarkIcon.name
+    // 任务3：五个 ToolButton 的可观察句柄（悬停背景边界冒烟测试经此断言
+    // background 几何等于按钮自身；无此句柄外部只能依赖 children 下标）。
+    property list<Item> topToolbarButtons: [backBtn, notesBtn, bookmarkBtn, searchBtn, menuBtn]
 
     Rectangle {
         anchors.bottom: parent.bottom
@@ -44,6 +47,15 @@ Rectangle {
             id: backBtn
             Layout.minimumWidth: 44
             Layout.fillWidth: true
+            // 任务3：按钮级本地背景——Material 默认 ToolButton 背景是样式注入的
+            // Ripple 圆墨（居中/随悬停激活，绘制范围不受按钮边界约束）；此处
+            // 显式提供 Rectangle，anchors.fill 严格等于按钮，悬停高亮只画在按钮
+            // 矩形内（复用 UITheme.bgSecondary 悬停 token，同 ReaderShell 菜单行）。
+            background: Rectangle {
+                anchors.fill: parent
+                radius: 0
+                color: parent.hovered ? UITheme.bgSecondary : "transparent"
+            }
             contentItem: Item {
                 implicitWidth: backRow.implicitWidth
                 implicitHeight: 20
@@ -71,8 +83,14 @@ Rectangle {
             onClicked: bar.back()
         }
         ToolButton {
+            id: notesBtn
             Layout.fillWidth: true
             Layout.minimumWidth: 44
+            background: Rectangle {
+                anchors.fill: parent
+                radius: 0
+                color: parent.hovered ? UITheme.bgSecondary : "transparent"
+            }
             contentItem: Item {
                 implicitWidth: 20
                 implicitHeight: 20
@@ -87,7 +105,13 @@ Rectangle {
             onClicked: bar.notes()
         }
         ToolButton {
+            id: bookmarkBtn
             Layout.fillWidth: true
+            background: Rectangle {
+                anchors.fill: parent
+                radius: 0
+                color: parent.hovered ? UITheme.bgSecondary : "transparent"
+            }
             contentItem: Item {
                 property string name: bookmarkIcon.name
                 implicitWidth: 20
@@ -103,8 +127,14 @@ Rectangle {
             onClicked: bar.bookmark()
         }
         ToolButton {
+            id: searchBtn
             Layout.fillWidth: true
             Layout.minimumWidth: 44
+            background: Rectangle {
+                anchors.fill: parent
+                radius: 0
+                color: parent.hovered ? UITheme.bgSecondary : "transparent"
+            }
             contentItem: Item {
                 implicitWidth: 20
                 implicitHeight: 20
@@ -122,6 +152,11 @@ Rectangle {
             id: menuBtn
             Layout.minimumWidth: 44
             Layout.fillWidth: true
+            background: Rectangle {
+                anchors.fill: parent
+                radius: 0
+                color: parent.hovered ? UITheme.bgSecondary : "transparent"
+            }
             contentItem: Item {
                 implicitWidth: 20
                 implicitHeight: 20

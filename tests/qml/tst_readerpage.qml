@@ -496,6 +496,55 @@ Item {
             tryVerify(function () { return !page.topToolbar.visible }, 2000, "Sheet 关闭时顶栏应隐藏")
             h.stack.destroy()
         }
+        // 任务3：顶栏悬停背景必须限制在按钮边界内——五个按钮显式提供按钮级
+        // background（x/y=0、宽高=按钮自身），悬停前后几何不变；不得使用 Material
+        // 默认样式注入的 Ripple 圆墨背景（QML 类名 QQuickMaterialRipple，居中绘制、
+        // 随悬停激活、几何与按钮无关，红灯期此检查失败）。
+        function test_hoverBackgroundMatchesButtonBounds() {
+            var h = openPage()
+            var page = h.page
+            page.sheetOpen = true
+            tryVerify(function () { return page.topToolbar.visible }, 2000,
+                      "Sheet 打开时顶栏应显示")
+            var buttons = page.topToolbar.topToolbarButtons
+            verify(buttons !== undefined && buttons.length === 5,
+                   "顶栏应暴露五个按钮句柄，实际="
+                   + (buttons === undefined ? "undefined" : buttons.length))
+            for (const button of buttons) {
+                verify(button.background !== null, "按钮应有显式 background")
+                // 契约：背景必须是按钮自身显式提供的本地 Rectangle
+                verify(String(button.background).indexOf("Rectangle") >= 0,
+                       "背景应为显式 Rectangle，实际=" + button.background)
+                compare(button.background.x, 0, "背景应贴齐按钮左缘")
+                compare(button.background.y, 0, "背景应贴齐按钮上缘")
+                compare(button.background.width, button.width, "背景宽应等于按钮宽")
+                compare(button.background.height, button.height, "背景高应等于按钮高")
+            }
+            // 打开后 RowLayout 仍在重排（返回按钮宽随书库文字显隐变化），先等布局
+            // 稳定再采集几何，避免把布局收敛误判为悬停几何变化。
+            wait(400)
+            // 悬停前后几何不变（悬停反馈只画在按钮矩形内，不外扩阴影）。
+            // offscreen 平台 useHoverEffects=false 默认 hoverEnabled=false，
+            // 显式开启以走真实悬停路径验证几何不变契约。
+            var btn = buttons[2]
+            btn.hoverEnabled = true
+            var geo = [btn.background.x, btn.background.y,
+                       btn.background.width, btn.background.height]
+            mouseMove(btn, btn.width / 2, btn.height / 2)
+            // QtTest 首次移动只同步指针位置，需再次移动才投递 hover enter
+            mouseMove(btn, btn.width / 2, btn.height / 2)
+            tryVerify(function () { return btn.hovered }, 2000, "鼠标悬停按钮应生效")
+            wait(50)
+            compare(btn.background.x, geo[0], "悬停中背景 x 不变")
+            compare(btn.background.y, geo[1], "悬停中背景 y 不变")
+            compare(btn.background.width, geo[2], "悬停中背景宽不变")
+            compare(btn.background.height, geo[3], "悬停中背景高不变")
+            mouseMove(page.topToolbar, 2, 2)
+            tryVerify(function () { return !btn.hovered }, 2000, "移出按钮后应取消悬停")
+            compare(btn.background.width, geo[2], "移出后背景宽不变")
+            compare(btn.background.height, geo[3], "移出后背景高不变")
+            h.stack.destroy()
+        }
         // BUG2：顶部工具栏只承载独立阅读操作；排版与阅读进度均由底部 Sheet 管理，
         // 不得重新出现重复的 Aa / 布局入口。
         function test_toolbarHasOnlyIndependentActions() {
