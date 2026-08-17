@@ -307,6 +307,52 @@ Item {
                       "首页渲染应完成，实际 " + page.pdfView.status)
             stack.destroy()
         }
+        // 任务1：PDF 双方向——scroll 使用 PdfMultiPageView（multi，多页连续竖向），
+        // paged 使用 PdfScrollablePageView（single，单页横向分页）；setPageMode 写回
+        // reading/pageMode，切换方向保留当前页。确定性文本 PDF 夹具（TestEnv.textPdfSource，
+        // 两页 A4）任何环境可跑，不依赖 READDICT_REAL_PDF。
+        function test_pdfSupportsVerticalAndHorizontalModes() {
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            verify(stack !== null, "测试 StackView 应能创建")
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/PdfReaderPage.qml",
+                       { book: { id: 999111, title: "双方向PDF", path: TestEnv.textPdfSource } })
+            var page = stack.currentItem
+            verify(page !== null, "PdfReaderPage 应被 push 进 StackView")
+            var doc = page.pdfDocument
+            tryVerify(function () { return doc.status === PdfDocument.Ready }, 15000,
+                      "文本 PDF 应加载为 Ready，实际 " + doc.status)
+            // scroll 方向：multi（PdfMultiPageView 连续竖向）
+            page.setPageMode("scroll")
+            tryVerify(function () { return page.pdfViewKind === "multi" }, 3000,
+                      "scroll 应使用 multi（PdfMultiPageView），实际 " + page.pdfViewKind)
+            tryVerify(function () { return page.pdfView.currentPage === 0 }, 3000,
+                      "multi 初始应在第 0 页，实际 " + page.pdfView.currentPage)
+            compare(String(Settings.value("reading/pageMode")), "scroll",
+                    "setPageMode(scroll) 应写回 reading/pageMode")
+            // multi 模式翻到第 1 页
+            page.nextPage()
+            tryVerify(function () { return page.pdfView.currentPage === 1 }, 5000,
+                      "multi 下一页应到第 1 页，实际 " + page.pdfView.currentPage)
+            // 切到 paged：single（PdfScrollablePageView 横向分页）且页码保留
+            page.setPageMode("paged")
+            tryVerify(function () { return page.pdfViewKind === "single" }, 3000,
+                      "paged 应使用 single（PdfScrollablePageView），实际 " + page.pdfViewKind)
+            tryVerify(function () { return page.pdfView.currentPage === 1 }, 5000,
+                      "切到 paged 应保留第 1 页，实际 " + page.pdfView.currentPage)
+            compare(String(Settings.value("reading/pageMode")), "paged",
+                    "setPageMode(paged) 应写回 reading/pageMode")
+            // 再切回 scroll：页码仍保留
+            page.setPageMode("scroll")
+            tryVerify(function () { return page.pdfViewKind === "multi" }, 3000,
+                      "应能切回 multi，实际 " + page.pdfViewKind)
+            tryVerify(function () { return page.pdfView.currentPage === 1 }, 5000,
+                      "切回 scroll 应保留第 1 页，实际 " + page.pdfView.currentPage)
+            // 渲染稳定后销毁，避免 QtPdfQuick 拆除竞态崩溃
+            tryVerify(function () { return page.renderSettled() }, 15000,
+                      "渲染应稳定再销毁，实际 status=" + page.pdfView.status)
+            stack.destroy()
+        }
         // 任务4：文本 PDF 朗读——确定性夹具（TestEnv.textPdfSource，两页各两句）：
         // 生产 keyClick(D) 翻页、共享壳层菜单朗读、手动翻页停止 TTS 会话、
         // 读完一页自动续读下一有文本页、末页耗尽停 TTS 并显示提示。

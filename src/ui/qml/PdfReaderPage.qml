@@ -7,7 +7,10 @@ import QtQuick.Window
 import Readdict.Backend
 import Readdict.UI 1.0
 
-// PDF 阅读页（B9）：QtQuick.Pdf 的 PdfScrollablePageView 单页滚动视图。
+// PDF 阅读页（B9）：双方向视图——scroll 用 QtQuick.Pdf 的 PdfMultiPageView
+//（多页连续竖向），paged 用 PdfScrollablePageView（单页横向分页），方向沿用
+// EPUB 的 reading/pageMode 设置键。两视图常驻按方向切换可见性，TTS/进度/
+// 书签/页码/缩放统一经 pdfView 代理访问活动视图。
 // 注意：Qt 6.7 起 QML 模块由 QtPdf 更名为 QtQuick.Pdf，PdfScrollablePageView
 // 不再自带 source，须外置 PdfDocument 绑定 document；缩放 API 由 scaleMode
 // 枚举改为 scaleToWidth/scaleToPage 方法。
@@ -30,9 +33,23 @@ Page {
     property string theme: "auto"
     // false = 宽度适配（fitToWidth），true = 整页适配（fitToViewport）
     property bool fitPage: false
-    // 暴露给测试/上层：文档状态、页数、页码跳转（B10 进度恢复经此 goToPage）
+    // 任务1：PDF 双方向——scroll=PdfMultiPageView（多页连续竖向）/ paged=
+    // PdfScrollablePageView（单页横向分页），沿用 EPUB 的 reading/pageMode
+    // 设置键（SettingsBackgroundPage/ReaderPage 同键，双入口一致）。两视图常驻，
+    // 按方向切换可见性，文档不销毁，TTS/书签/进度状态不重置。
+    property string pageMode: {
+        const m = String(Settings.value("reading/pageMode") || "")
+        return (m === "scroll" || m === "paged") ? m : "scroll"
+    }
+    // 活动视图标识与对象句柄：multi=PdfMultiPageView，single=PdfScrollablePageView
+    property string pdfViewKind: page.pageMode === "scroll" ? "multi" : "single"
+    property var activePdfView: page.pageMode === "scroll" ? multiView : singleView
+    // 方向切换待恢复页：setPageMode 先存当前页，切换活动视图后 goToPage 恢复
+    property int pendingRestorePage: -1
+    // 暴露给测试/上层：文档状态、页数、页码跳转（B10 进度恢复经此 goToPage）；
+    // pdfView 是统一活动视图代理（currentPage/goToPage/renderScale/status/边距）
     property alias pdfDocument: pdfDoc
-    property alias pdfView: pdfView
+    property alias pdfView: pdfViewProxy
     // 任务4：共享壳层与 PDF 适配器（统一契约，ReaderShell 只读此对象）；
     // 目录 Dialog（页码目录）与底部左下页码指示句柄。
     property alias readerShell: readerShell
@@ -82,10 +99,15 @@ Page {
         // 重试/重载（restoreDone 已 true）只刷新文本不重复恢复。
         onStatusChanged: (status) => {
             if (status === PdfDocument.Ready) {
+                // 首次与重载统一按当前 fitPage 缩放活动视图（文档换源时两视图均
+                // 内部 resetScale 回 1，需恢复适配；方向切换后也在 setPageMode 重算）
+                page.applyFitModeToActiveView()
                 if (!page.restoreDone && page.book.id) {
-                    pdfView.scaleToWidth(pdfView.width, pdfView.height)
                     const saved = Number(Settings.value("progress/pdf_" + page.book.id)) || 0
-                    if (saved > 0) pdfView.goToPage(saved)
+                    // 方向切换待恢复页优先（先于文档就绪切换方向时不丢失目标页）
+                    const target = page.pendingRestorePage >= 0 ? page.pendingRestorePage : saved
+                    page.pendingRestorePage = -1
+                    if (target > 0) page.pdfView.goToPage(target)
                     page.restoreDone = true
                     page.recordProgress()
                 }
@@ -106,10 +128,36 @@ Page {
         }
     }
 
-    PdfScrollablePageView {
-        id: pdfView
+    // 任务1：scroll 方向——PdfMultiPageView 多页连续竖向（官方组件，内部 TableView
+    // 竖向滚动；窄页由委托 anchors.centerIn 自动居中，无需边距 API）。
+    PdfMultiPageView {
+        id: multiView
+        visible: page.pageMode === "scroll"
         // 任务4：随壳层状态让位——Sheet 打开时顶栏 40px 下移正文；TtsBar 显示时
         // 底部 46px 上收（与 ReaderPage 对 ReaderContent 的锚定同语义）。
+        anchors.top: parent.top
+        anchors.topMargin: readerShell.sheetOpen ? readerShell.topToolbar.height : 0
+        // 隐藏方向置 0×0：TableView 无视口不创建委托 → 不产生后台逐页渲染。
+        width: page.pageMode === "scroll" ? parent.width : 0
+        height: (page.pageMode === "scroll" ? parent.height : 0)
+                - (page.ttsBarVisible ? readerShell.ttsBar.height : 0)
+        document: pdfDoc
+        // 阅读进度：当前页变化仅置 dirty，2s 合并 Timer 触发才写 settings.json 的
+        // progress/pdf_<bookId> + books.progress（页码/总页数，含 last_read_at）；
+        // 同时重提取当前页文本（朗读能力随页变化）并同步书签高亮。
+        onCurrentPageChanged: page.viewCurrentPageChanged(this)
+        // 轻点：切换壳层显隐状态（唤出顶栏/Sheet 或关闭——ReaderPage 同款交互）；
+        // 页面上 Qt 内部 TapHandler（链接/文本选择）接管处例外，边缘/间隙仍可唤出。
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+            onTapped: readerShell.handleTap(0, 0)
+        }
+    }
+
+    // 任务1：paged 方向——PdfScrollablePageView 单页横向分页（原单视图逻辑）。
+    PdfScrollablePageView {
+        id: singleView
+        visible: page.pageMode === "paged"
         anchors.top: parent.top
         anchors.topMargin: readerShell.sheetOpen ? readerShell.topToolbar.height : 0
         anchors.left: parent.left
@@ -117,22 +165,46 @@ Page {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: page.ttsBarVisible ? readerShell.ttsBar.height : 0
         document: pdfDoc
-        // 阅读进度：当前页变化仅置 dirty，2s 合并 Timer 触发才写 settings.json 的
-        // progress/pdf_<bookId> + books.progress（页码/总页数，含 last_read_at）；
-        // 同时重提取当前页文本（朗读能力随页变化）并同步书签高亮。
-        onCurrentPageChanged: {
-            if (!page.restoreDone) return
-            page.progressDirty = true
-            progressFlush.restart()
-            page.refreshPageText()
-            page.syncPdfBookmarkState()
-        }
+        onCurrentPageChanged: page.viewCurrentPageChanged(this)
         // 单点：切换壳层显隐状态（唤出顶栏/Sheet 或关闭——ReaderPage 同款交互）；
         // 缩放切换由壳层 Sheet 的 PDF 专属缩放面板承担（旧双击切换收编，见 onZoom）。
         TapHandler {
             acceptedButtons: Qt.LeftButton
             onTapped: readerShell.handleTap(0, 0)
         }
+    }
+
+    // 任务1：统一 PDF 视图代理——TTS/进度/书签/页码/缩放一律经此访问活动视图，
+    // 不绑定具体视图 id。status 兼容两视图（single=Image status，multi=
+    // currentPageRenderingStatus）；renderScale 双向透传（写回活动视图）；
+    // contentWidth/contentX/边距供整页居中计算使用。
+    QtObject {
+        id: pdfViewProxy
+        property var view: page.activePdfView
+        property int currentPage: view && view.currentPage !== undefined ? view.currentPage : -1
+        property real renderScale: view && view.renderScale !== undefined ? view.renderScale : 1
+        onRenderScaleChanged: {
+            // 写回透传：外部（测试/未来 UI）赋值代理 renderScale 时转发活动视图；
+            // 活动视图自身缩放变化时二者相等，不构成回路。
+            const v = page.activePdfView
+            if (v && v.renderScale !== undefined && page.pdfView.renderScale !== v.renderScale)
+                v.renderScale = page.pdfView.renderScale
+        }
+        property int status: {
+            const v = page.activePdfView
+            if (!v) return Image.Null
+            return v.status !== undefined ? v.status : v.currentPageRenderingStatus
+        }
+        property real width: view ? view.width : 0
+        property real height: view ? view.height : 0
+        property real contentWidth: view && view.contentWidth !== undefined ? view.contentWidth : 0
+        property real contentX: view && view.contentX !== undefined ? view.contentX : 0
+        property real leftMargin: view && view.leftMargin !== undefined ? view.leftMargin : 0
+        property real rightMargin: view && view.rightMargin !== undefined ? view.rightMargin : 0
+        function goToPage(p) { if (page.activePdfView) page.activePdfView.goToPage(p) }
+        function scaleToWidth(w, h) { if (page.activePdfView) page.activePdfView.scaleToWidth(w, h) }
+        function scaleToPage(w, h) { if (page.activePdfView) page.activePdfView.scaleToPage(w, h) }
+        function resetScale() { if (page.activePdfView) page.activePdfView.resetScale() }
     }
 
     // ---- 任务4：PDF 专属缩放面板（经壳层 Sheet 承载；壳层菜单"图书信息"
@@ -290,6 +362,59 @@ Page {
         if (handled) event.accepted = true
     }
 
+    // 任务1：方向切换——只接受 scroll/paged；先存当前页，写回 reading/pageMode，
+    // 切换活动视图后恢复原页（两视图常驻不销毁文档，TTS/书签/进度状态不重置；
+    // 手动切换按既有契约停止当前页朗读会话）。
+    function setPageMode(mode) {
+        if (mode !== "scroll" && mode !== "paged") return
+        if (page.pageMode === mode) return
+        page.pendingRestorePage = page.pdfView.currentPage >= 0 ? page.pdfView.currentPage : 0
+        page.stopPdfTts()
+        Settings.setValue("reading/pageMode", mode)
+        page.pageMode = mode
+        page.applyFitModeToActiveView()
+        page.restoreAfterSwitch()
+    }
+
+    // 按当前 fitPage 状态缩放活动视图；文档未就绪跳过，Ready 处理器与方向切换
+    // 都会重算。缩放直接用文档页尺寸计算再写 renderScale，**不**走视图的
+    // scaleToWidth/scaleToPage：PdfMultiPageView 的 scaleToWidth 依赖内部
+    // firstPagePointSize 绑定，文档刚 Ready 时该绑定可能仍是 (1,1) 占位值
+    //（绑定求值滞后于 onStatusChanged），会算出 renderScale=视图宽度 的巨值，
+    // 页面渲染尺寸达数十万像素、永不完成（QQuickPixmapReader 卡死 → 销毁死锁）。
+    function applyFitModeToActiveView() {
+        const view = page.activePdfView
+        if (!view || pdfDoc.status !== PdfDocument.Ready) return
+        const pageSize = pdfDoc.pagePointSize(0)
+        if (pageSize.width <= 0 || pageSize.height <= 0) return
+        view.renderScale = page.fitPage
+            ? Math.min(view.width / pageSize.width, view.height / pageSize.height)
+            : view.width / pageSize.width
+    }
+
+    // 切换活动视图后恢复保存页（文档未就绪时 PdfMultiPageView 走内部 pendingRow
+    // 延迟跳转，Ready 后仍会落在目标页）。
+    function restoreAfterSwitch() {
+        const target = page.pendingRestorePage
+        page.pendingRestorePage = -1
+        if (target < 0) return
+        page.pdfView.goToPage(target)
+    }
+
+    // 当前页变化分发：只响应活动视图（隐藏视图的页码变化不驱动进度/文本/书签），
+    // Ready 前的恢复期不写进度（restoreDone 门控，防覆盖保存值）。
+    // 注意：页码必须用视图自身的 view.currentPage——pdfView 代理是绑定属性，在
+    // 信号处理器同步链内尚未重求值（读到旧页），而视图原始属性在 jump() 内已更新。
+    function viewCurrentPageChanged(view) {
+        if (view !== page.activePdfView) return
+        if (!page.restoreDone) return
+        const current = view.currentPage
+        page.progressDirty = true
+        progressFlush.restart()
+        page.refreshPageText(current)
+        page.syncPdfBookmarkState(current)
+    }
+
     // 任务2：前一页——仅 Ready 且非首页时 goToPage(currentPage-1)，成功返回 true；
     // 任务4：手动翻页必须停止本页活动朗读会话（旧页不得继续发声）。
     function previousPage() {
@@ -311,9 +436,9 @@ Page {
     // 文档的 pagePointSize，非 Ready 调用无意义）。
     function onZoom(id) {
         if (pdfDoc.status !== PdfDocument.Ready) return
-        if (id === "fitWidth") { page.fitPage = false; pdfView.scaleToWidth(pdfView.width, pdfView.height) }
-        else if (id === "fitPage") { page.fitPage = true; pdfView.scaleToPage(pdfView.width, pdfView.height) }
-        else if (id === "reset") { pdfView.resetScale() }
+        if (id === "fitWidth") { page.fitPage = false; page.applyFitModeToActiveView() }
+        else if (id === "fitPage") { page.fitPage = true; page.applyFitModeToActiveView() }
+        else if (id === "reset") { page.pdfView.resetScale() }
     }
     // 任务2：重试——改变 source 值强制重新触发加载（PdfDocument 无公开 reload API，
     // QML 侧唯一重载入口是 source 属性，且值必须变化才会重载）。
@@ -354,8 +479,9 @@ Page {
         }
     }
     // 刷新当前页句子/朗读能力：Ready 且页合法时提取，否则清空（非 Ready 不读文本）
-    function refreshPageText() {
-        const s = page.extractPageText(pdfView.currentPage)
+    function refreshPageText(pageIndex) {
+        const idx = (pageIndex !== undefined) ? pageIndex : page.pdfView.currentPage
+        const s = page.extractPageText(idx)
         page.pdfSentences = s
         page.pdfCanReadAloud = s.length > 0
     }
@@ -415,8 +541,9 @@ Page {
     }
 
     // ---- 任务4：书签（bookmarks/pdf_<bookId> 页索引数组）----
-    function syncPdfBookmarkState() {
-        page.currentBookmarked = page.pdfBookmarks.indexOf(pdfView.currentPage) >= 0
+    function syncPdfBookmarkState(pageIndex) {
+        const idx = (pageIndex !== undefined) ? pageIndex : page.pdfView.currentPage
+        page.currentBookmarked = page.pdfBookmarks.indexOf(idx) >= 0
     }
     function togglePdfBookmark() {
         if (!page.book || !page.book.id || pdfDoc.status !== PdfDocument.Ready) return
@@ -442,10 +569,15 @@ Page {
         page.recordProgress()
     }
 
-    // 无在途渲染：image.status 为 Ready（渲染完成）/ Error / Null（无渲染任务）时安全
+    // 无在途渲染：活动视图 status 为 Ready（渲染完成）/ Error / Null（无渲染任务）时
+    // 安全（single=Image.status，multi=currentPageRenderingStatus，代理统一）。
     function renderSettled() {
-        const s = pdfView.status
-        return s === Image.Ready || s === Image.Error || s === Image.Null
+        const views = [multiView, singleView]
+        for (const v of views) {
+            const s = v.status !== undefined ? v.status : v.currentPageRenderingStatus
+            if (s !== Image.Ready && s !== Image.Error && s !== Image.Null) return false
+        }
+        return true
     }
 
     // 关闭阅读页：先停止本页朗读会话，再等渲染线程空闲 pop（文档销毁撞在途
@@ -581,7 +713,8 @@ Page {
         id: readerShell
         anchors.fill: parent
         reader: pdfReaderAdapter
-        contentItem: pdfView
+        // 任务1：正文宿主随方向切换（壳层仅对 contentItem 做 forceActiveFocus）
+        contentItem: page.activePdfView
         bookmarked: page.currentBookmarked
         // 返回导航：停止朗读会话后走渲染安全关闭（requestClose 内含竞态防护）
         onBackRequested: page.requestClose()
