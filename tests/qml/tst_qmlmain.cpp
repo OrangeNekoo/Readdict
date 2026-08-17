@@ -8,8 +8,12 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QFont>
 #include <QGuiApplication>
 #include <QImage>
+#include <QPainter>
+#include <QPdfWriter>
+#include <QPageSize>
 #include <QQuickStyle>
 #include <QStringList>
 #include <QTemporaryDir>
@@ -89,6 +93,40 @@ static bool writeCoverEpub(const QString &zipPath) {
     return ok;
 }
 
+// 任务4：确定性 PDF 夹具——QPdfWriter+QPainter 生成两页含可提取文本的 PDF
+//（每页两个句子，供 ReaderText.splitSentences 切分后朗读）与一页仅图片的 PDF
+//（只绘制 QImage、绝不 drawText，getAllText 为空 → 朗读禁用）。不依赖
+// READDICT_REAL_PDF 环境变量，任何环境都能确定性跑通文本/图片 PDF 朗读用例。
+static bool writeTextPdf(const QString &path) {
+    QPdfWriter writer(path);
+    writer.setPageSize(QPageSize(QPageSize::A4));
+    writer.setResolution(300);
+    QPainter painter(&writer);
+    if (!painter.isActive()) return false;
+    QFont font = painter.font();
+    font.setFamily(QStringLiteral("PingFang SC"));
+    font.setPointSize(24);
+    painter.setFont(font);
+    painter.drawText(120, 180, QString::fromUtf8("第一页第一句，用于PDF文本朗读验证。第一页第二句，紧随其后。"));
+    writer.newPage();
+    painter.drawText(120, 180, QString::fromUtf8("第二页第一句，属于第二页内容。第二页第二句，读完即停。"));
+    painter.end();
+    return QFile::exists(path);
+}
+
+static bool writeImagePdf(const QString &path) {
+    QPdfWriter writer(path);
+    writer.setPageSize(QPageSize(QPageSize::A4));
+    writer.setResolution(300);
+    QPainter painter(&writer);
+    if (!painter.isActive()) return false;
+    QImage img(400, 400, QImage::Format_RGB32);
+    img.fill(QColor(0x3a, 0x7d, 0xbd));
+    painter.drawImage(120, 120, img);   // 仅图片：不得调用 drawText
+    painter.end();
+    return QFile::exists(path);
+}
+
 // 仅测试进程可见：在临时目录预生成 TXT 源书，QML 侧经 Importer.doImport 导入。
 class TestEnv : public QObject {
     Q_OBJECT
@@ -116,6 +154,10 @@ class TestEnv : public QObject {
     // B2：带真实封面的 EPUB（标题取 OPF 元数据"封面刷新书"）——
     // 封面刷新冒烟：导入 → cover 改回占位 → refreshCovers 恢复真实封面
     Q_PROPERTY(QString coverEpubSource READ coverEpubSource CONSTANT)
+    // 任务4：确定性 PDF 夹具（QPdfWriter 生成，全平台可跑）——
+    // 两页含可提取文本（每页两句）供朗读/续读用例；一页仅图片供朗读禁用用例
+    Q_PROPERTY(QString textPdfSource READ textPdfSource CONSTANT)
+    Q_PROPERTY(QString imagePdfSource READ imagePdfSource CONSTANT)
 public:
     explicit TestEnv(const QString &workDir, QObject *parent = nullptr) : QObject(parent) {
         QDir srcDir(workDir + "/src");
@@ -191,6 +233,15 @@ public:
         const QString coverEpubPath = srcDir.filePath("coverepub.epub");
         if (writeCoverEpub(coverEpubPath))
             m_coverEpubSource = QUrl::fromLocalFile(coverEpubPath).toString();
+        // 任务4：确定性 PDF 夹具（文本 PDF 两页、图片 PDF 一页，见 writeTextPdf）。
+        // 与 pdfSource() 同约定返回裸路径（PdfReaderPage 侧拼 "file://" 前缀，
+        // 见 test_pdfLoadsRealSource 注释；不能给 file:// URL 否则双重前缀报 Error）
+        const QString textPdfPath = srcDir.filePath("text_pdf_fixture.pdf");
+        if (writeTextPdf(textPdfPath))
+            m_textPdfSource = textPdfPath;
+        const QString imagePdfPath = srcDir.filePath("image_pdf_fixture.pdf");
+        if (writeImagePdf(imagePdfPath))
+            m_imagePdfSource = imagePdfPath;
     }
     QStringList sourceFiles() const { return m_files; }
     // B1：删除冒烟断言书库文件真实消失（QML 侧无文件系统 API）
@@ -214,6 +265,8 @@ public:
     QString backgroundImage() const { return m_backgroundImage; }
     QString deleteSource() const { return m_deleteSource; }
     QString coverEpubSource() const { return m_coverEpubSource; }
+    QString textPdfSource() const { return m_textPdfSource; }
+    QString imagePdfSource() const { return m_imagePdfSource; }
 private:
     QStringList m_files;
     QString m_longSource;
@@ -222,6 +275,8 @@ private:
     QString m_backgroundImage;
     QString m_deleteSource;
     QString m_coverEpubSource;
+    QString m_textPdfSource;
+    QString m_imagePdfSource;
 };
 
 int main(int argc, char *argv[]) {

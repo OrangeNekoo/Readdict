@@ -53,18 +53,31 @@ Item {
             verify(loader.item !== null, "PdfReaderPage 应能加载（QtQuick.Pdf import + PdfScrollablePageView 编译检查）")
             loader.destroy()
         }
-        // 任务2 控制层测试（无需真实 PDF）：稳定句柄、页码指示、菜单开关、
-        // Loading/Error 覆盖状态。锁定 PdfReaderPage 必须暴露导航/菜单/状态句柄。
+        // 任务2 控制层测试（无需真实 PDF）：稳定句柄、页码指示、Loading/Error 覆盖。
+        // 任务4：PDF 已接入共享壳层——顶栏/菜单/TtsBar 均为 ReaderShell 同一对象，
+        // 上/下一项经适配器标签（"上一页/下一页"）；错误/重试/加载指示仍为本页句柄。
         function test_pdfReaderControlsExposeNavigationAndMenu() {
             var loader = pdfReaderComp.createObject(root)
             var page = loader.item
             verify(page !== null, "PdfReaderPage 应能加载")
-            // 稳定测试句柄：前后页、页码、菜单入口、菜单本体、错误/重试、加载指示
-            verify(page.previousPageButton !== undefined, "应暴露 previousPageButton")
-            verify(page.nextPageButton !== undefined, "应暴露 nextPageButton")
-            verify(page.menuButton !== undefined, "应暴露 menuButton")
-            verify(page.pageLabel !== undefined, "应暴露 pageLabel")
-            verify(page.pdfMenu !== undefined, "应暴露 pdfMenu")
+            // 共享壳层：readerShell 暴露且顶栏/TtsBar/菜单为本页同一对象
+            verify(page.readerShell !== undefined, "应暴露 readerShell")
+            verify(page.readerShell.topToolbar !== undefined, "应暴露共享顶栏 topToolbar")
+            verify(page.readerShell.ttsBar !== undefined, "应暴露共享 TtsBar ttsBar")
+            verify(page.readerShell.menuItem("read") !== null, "共享菜单应有朗读项")
+            verify(page.readerShell.menuItem("prev") !== null, "共享菜单应有上一项")
+            verify(page.readerShell.menuItem("next") !== null, "共享菜单应有下一项")
+            compare(page.readerShell.menuItem("prev").text, "上一页",
+                    "prev 标签应为上一页（适配器提供，非固定章节文案）")
+            compare(page.readerShell.menuItem("next").text, "下一页",
+                    "next 标签应为下一页（适配器提供，非固定章节文案）")
+            // 适配器句柄：统一契约成员可见（canReadAloud/原因/能力位/标签/动作）
+            verify(page.readerAdapter !== undefined, "应暴露 readerAdapter")
+            verify(page.readerAdapter.canReadAloud !== undefined, "适配器应有 canReadAloud")
+            verify(page.readerAdapter.readAloudUnavailableReason !== undefined,
+                   "适配器应有 readAloudUnavailableReason")
+            verify(page.readerAdapter.previousLabel !== undefined, "适配器应有 previousLabel")
+            // 错误/重试/加载指示句柄（任务4 保留，非顶栏/菜单/TTS 逻辑）
             verify(page.retryButton !== undefined, "应暴露 retryButton")
             verify(page.errorLabel !== undefined, "应暴露 errorLabel")
             verify(page.loadingIndicator !== undefined, "应暴露 loadingIndicator")
@@ -73,11 +86,12 @@ Item {
             // 无文档（status Null）时 loading 与 error 都不应显示
             verify(!page.loadingIndicator.visible, "Null 状态不应显示 loading")
             verify(!page.errorLabel.visible, "Null 状态不应显示 error")
-            // 菜单开关：点击更多打开，close() 关闭
-            page.menuButton.clicked()
-            tryVerify(function () { return page.pdfMenu.visible }, 3000, "点击更多应打开菜单")
-            page.pdfMenu.close()
-            tryVerify(function () { return !page.pdfMenu.visible }, 3000, "close() 应关闭菜单")
+            // 菜单开关：openMenu() 打开，triggerMenuAction 关闭（共享壳层状态机）
+            page.readerShell.openMenu()
+            tryVerify(function () { return page.readerShell.menuOpen }, 3000, "openMenu() 应打开菜单")
+            page.readerShell.triggerMenuAction("info")
+            tryVerify(function () { return !page.readerShell.menuOpen }, 3000,
+                      "triggerMenuAction 应关闭菜单")
             loader.destroy()
         }
         // 任务2 Error 状态：坏源进入 PdfDocument.Error，显示 pdfDoc.error 与重试按钮，
@@ -152,18 +166,18 @@ Item {
             tryVerify(function () {
                 return page.pageLabel.text.indexOf("1 / " + doc.pageCount) >= 0
             }, 5000, "页码指示应显示 第 1 / N 页，实际 '" + page.pageLabel.text + "'")
-            // 任务2：后一页/前一页按钮可用性边界（第 0 页：前页禁用，后页可用）
+            // 任务2：后一页/前一页可用性边界（第 0 页：前页禁用，后页可用）
             tryVerify(function () { return page.pdfView.currentPage === 0 }, 5000,
                       "初始应在第 0 页，实际 " + page.pdfView.currentPage)
-            verify(page.previousPageButton.enabled === false, "第 0 页时前一页应禁用")
-            verify(page.nextPageButton.enabled === true, "第 0 页时后一页应可用")
-            // 任务2：下一页推进、上一页回退
-            page.nextPageButton.clicked()
+            verify(page.readerAdapter.canGoPrevious === false, "第 0 页时上一页应禁用")
+            verify(page.readerAdapter.canGoNext === true, "第 0 页时下一页应可用")
+            // 任务4：下一页推进、上一页回退经共享壳层菜单 prev/next 动作（适配器分发）
+            page.readerShell.triggerMenuAction("next")
             tryVerify(function () { return page.pdfView.currentPage === 1 }, 5000,
-                      "点击下一页应前进到第 1 页，实际 " + page.pdfView.currentPage)
-            page.previousPageButton.clicked()
+                      "菜单下一页应前进到第 1 页，实际 " + page.pdfView.currentPage)
+            page.readerShell.triggerMenuAction("prev")
             tryVerify(function () { return page.pdfView.currentPage === 0 }, 5000,
-                      "点击上一页应回到第 0 页，实际 " + page.pdfView.currentPage)
+                      "菜单上一页应回到第 0 页，实际 " + page.pdfView.currentPage)
             // 30MB 大 PDF 首帧渲染可能仍在进行：等渲染完成再销毁，避免 QtPdfQuick 拆除竞态崩溃
             tryVerify(function () { return page.pdfView.status === Image.Ready }, 15000,
                       "首页渲染应完成，实际 " + page.pdfView.status)
@@ -289,6 +303,118 @@ Item {
             tryVerify(function () { return page.pdfView.status === Image.Ready }, 15000,
                       "首页渲染应完成，实际 " + page.pdfView.status)
             stack.destroy()
+        }
+        // 任务4：文本 PDF 朗读——确定性夹具（TestEnv.textPdfSource，两页各两句）：
+        // 生产 keyClick(D) 翻页、共享壳层菜单朗读、手动翻页停止 TTS 会话、
+        // 读完一页自动续读下一有文本页、末页耗尽停 TTS 并显示提示。
+        // 不依赖 READDICT_REAL_PDF，任何环境确定性可跑。
+        function test_textPdfCanReadAloud() {
+            Tts.stop()
+            Tts.reconfigure("openai", "https://api.openai.com/v1", "", "tts-1", "nova", 1.0)
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            verify(stack !== null, "测试 StackView 应能创建")
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/PdfReaderPage.qml",
+                       { book: { id: 999101, title: "文本PDF", path: TestEnv.textPdfSource } })
+            var page = stack.currentItem
+            verify(page !== null, "PdfReaderPage 应被 push 进 StackView")
+            var doc = page.pdfDocument
+            tryVerify(function () { return doc.status === PdfDocument.Ready }, 15000,
+                      "文本 PDF 应加载为 Ready，实际 " + doc.status)
+            compare(doc.pageCount, 2, "文本 PDF 应为两页")
+            tryVerify(function () { return page.readerAdapter.canReadAloud === true }, 3000,
+                      "有文本页应可朗读，实际 " + page.readerAdapter.canReadAloud)
+            compare(page.readerAdapter.readAloudUnavailableReason, "",
+                    "有文本时不可用原因应为空")
+            // 共享壳层顶栏/菜单对象存在（任务4 契约）
+            verify(page.readerShell !== undefined, "应暴露 readerShell")
+            verify(page.readerShell.topToolbar !== undefined, "应暴露共享顶栏")
+            tryVerify(function () { return page.readerShell.menuItem("read").enabled === true },
+                      3000, "有文本页朗读菜单项应可用")
+            // 页码目录：菜单目录项打开页标签对话框（适配器 openContents），可关闭
+            page.readerShell.triggerMenuAction("toc")
+            tryVerify(function () { return page.tocDlg.visible }, 3000,
+                      "目录菜单项应打开页码目录")
+            page.tocDlg.close()
+            tryVerify(function () { return !page.tocDlg.visible }, 3000,
+                      "目录对话框应可关闭")
+            // 生产 keyClick 翻页（E4 链路，不直调函数）
+            tryVerify(function () { return page.activeFocus === true }, 3000,
+                      "PDF 页应持有 activeFocus")
+            keyClick(Qt.Key_D)
+            tryVerify(function () { return page.pdfView.currentPage === 1 }, 5000,
+                      "生产 D 键应前进到第 1 页，实际 " + page.pdfView.currentPage)
+            keyClick(Qt.Key_A)
+            tryVerify(function () { return page.pdfView.currentPage === 0 }, 5000,
+                      "生产 A 键应回到第 0 页，实际 " + page.pdfView.currentPage)
+            // 菜单朗读：适配器经 Tts.setSentences/setChapter/setCurrentIndex/play 启动会话
+            page.readerShell.triggerMenuAction("read")
+            tryVerify(function () { return Tts.state === 1 }, 3000,
+                      "菜单朗读应启动 TTS 会话，实际 state=" + Tts.state)
+            verify(page.readerShell.ttsBar.visible, "朗读中应显示 TtsBar")
+            // 手动翻页停止旧会话：朗读中 D 键翻页 → 页变且 TTS 停止、TtsBar 隐藏
+            keyClick(Qt.Key_D)
+            tryVerify(function () { return page.pdfView.currentPage === 1 }, 5000,
+                      "朗读中 D 键应翻到第 1 页，实际 " + page.pdfView.currentPage)
+            tryVerify(function () { return Tts.state === 0 }, 3000,
+                      "手动翻页应停止 TTS，实际 state=" + Tts.state)
+            tryVerify(function () { return !page.readerShell.ttsBar.visible }, 3000,
+                      "停止后 TtsBar 应隐藏")
+            // 回到第 0 页重新朗读：读完两句 → chapterCompleted → 自动续读下一有文本页
+            keyClick(Qt.Key_A)
+            tryVerify(function () { return page.pdfView.currentPage === 0 }, 5000,
+                      "A 键应回到第 0 页")
+            page.readerShell.triggerMenuAction("read")
+            tryVerify(function () { return Tts.state === 1 }, 3000,
+                      "第 0 页应可重新朗读，实际 state=" + Tts.state)
+            // 读完第 0 页两句 → 自动续读第 1 页（有文本）→ 仍在播放
+            Tts.next()
+            Tts.next()
+            tryVerify(function () { return page.pdfView.currentPage === 1 }, 5000,
+                      "读完一页应自动续读下一页，实际 " + page.pdfView.currentPage)
+            tryVerify(function () { return Tts.state === 1 }, 3000,
+                      "续读页应继续播放，实际 state=" + Tts.state)
+            // 末页耗尽：读完第 1 页两句 → 无后续文本页 → 停 TTS、不翻页、显示提示
+            Tts.next()
+            Tts.next()
+            tryVerify(function () { return Tts.state === 0 }, 3000,
+                      "末页读完应停 TTS，实际 state=" + Tts.state)
+            compare(page.pdfView.currentPage, 1, "无后续文本页时不应再翻页")
+            tryVerify(function () { return page.ttsExhaustedHint === true }, 3000,
+                      "耗尽后应显示无可朗读文本提示")
+            verify(!page.readerShell.ttsBar.visible, "停止后 TtsBar 应隐藏")
+            stack.destroy()
+        }
+        // 任务4：图片 PDF 朗读禁用——确定性夹具（TestEnv.imagePdfSource，一页仅图片）：
+        // canReadAloud=false、原因精确"当前 PDF 无可朗读文本"、朗读菜单项 disabled、
+        // Tts 保持 idle、TtsBar 隐藏；triggerMenuAction("read") 不启动 TTS。
+        function test_imagePdfDisablesReadAloud() {
+            Tts.stop()
+            Tts.reconfigure("openai", "https://api.openai.com/v1", "", "tts-1", "nova", 1.0)
+            var loader = pdfReaderComp.createObject(root, { width: 800, height: 1000 })
+            var page = loader.item
+            verify(page !== null, "PdfReaderPage 应能加载")
+            page.book = { id: 999102, title: "图片PDF", path: TestEnv.imagePdfSource }
+            var doc = page.pdfDocument
+            tryVerify(function () { return doc.status === PdfDocument.Ready }, 15000,
+                      "图片 PDF 应加载为 Ready，实际 " + doc.status)
+            compare(doc.pageCount, 1, "图片 PDF 应为一页")
+            tryVerify(function () { return page.readerAdapter.canReadAloud === false }, 3000,
+                      "仅图片页不应可朗读，实际 " + page.readerAdapter.canReadAloud)
+            compare(page.readerAdapter.readAloudUnavailableReason, "当前 PDF 无可朗读文本",
+                    "不可用原因应精确为'当前 PDF 无可朗读文本'")
+            tryVerify(function () { return page.readerShell.menuItem("read").enabled === false },
+                      3000, "朗读菜单项应 disabled")
+            compare(Tts.state, 0, "图片 PDF 不应启动 TTS")
+            verify(!page.readerShell.ttsBar.visible, "TtsBar 应隐藏")
+            // 禁用朗读的 read 动作不得启动 TTS（壳层 capability 门控）
+            page.readerShell.triggerMenuAction("read")
+            compare(Tts.state, 0, "禁用朗读的 read 动作不应启动 TTS")
+            verify(!page.readerShell.ttsBar.visible, "禁用朗读的 read 动作不应显示 TtsBar")
+            // 单页 PDF：上一/下一页均不可用
+            verify(page.readerAdapter.canGoPrevious === false, "单页时上一页应禁用")
+            verify(page.readerAdapter.canGoNext === false, "单页时下一页应禁用")
+            loader.destroy()
         }
     }
     TestCase {

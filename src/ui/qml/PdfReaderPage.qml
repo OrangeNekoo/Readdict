@@ -10,9 +10,13 @@ import Readdict.UI 1.0
 // PDF 阅读页（B9）：QtQuick.Pdf 的 PdfScrollablePageView 单页滚动视图。
 // 注意：Qt 6.7 起 QML 模块由 QtPdf 更名为 QtQuick.Pdf，PdfScrollablePageView
 // 不再自带 source，须外置 PdfDocument 绑定 document；缩放 API 由 scaleMode
-// 枚举改为 scaleToWidth/scaleToPage 方法（双击在两者间切换）。
-// 阅读进度独立键 progress/pdf_<bookId>（存页码），与文本书的
-// progress/<bookId>（存章节索引）区分——B10 进度恢复按 format 分流读取。
+// 枚举改为 scaleToWidth/scaleToPage 方法。
+// 任务4：接入共享壳层 ReaderShell——顶栏/菜单/TtsBar/底部 Sheet 全部由壳层
+// 持有（删除本页独立顶栏、KdDropdownMenu 与 TTS 条逻辑）；本页保留 Qt PDF
+// 宽度适配、缩放（经壳层 Sheet 的 PDF 专属缩放面板）、页进度、文本提取朗读
+// 与 renderSettled/requestClose 竞态防护。阅读进度独立键 progress/pdf_<bookId>
+//（存页码），与文本书的 progress/<bookId>（存章节索引）区分——B10 进度恢复
+// 按 format 分流读取；书签键 bookmarks/pdf_<bookId>（存页索引数组）。
 Page {
     id: page
     // U2：沉浸页标识（Main 据此隐藏标签/底部导航；返回后恢复）
@@ -29,16 +33,17 @@ Page {
     // 暴露给测试/上层：文档状态、页数、页码跳转（B10 进度恢复经此 goToPage）
     property alias pdfDocument: pdfDoc
     property alias pdfView: pdfView
-    // 任务2：暴露给测试的稳定句柄——QML 原生 id 仅组件内词法可见，
-    // 外部测试须经 alias 才能以 page.<handle> 访问。
-    property alias previousPageButton: previousPageButton
-    property alias nextPageButton: nextPageButton
-    property alias menuButton: menuButton
+    // 任务4：共享壳层与 PDF 适配器（统一契约，ReaderShell 只读此对象）；
+    // 目录 Dialog（页码目录）与底部左下页码指示句柄。
+    property alias readerShell: readerShell
+    property alias readerAdapter: pdfReaderAdapter
+    property alias tocDlg: tocDialog
     property alias pageLabel: pageLabel
-    property alias pdfMenu: pdfMenu
     property alias retryButton: retryButton
     property alias errorLabel: errorLabel
     property alias loadingIndicator: loadingIndicator
+    // 本属性透传壳层门控供 pdfView 锚点/页码指示/Toast 使用（ReaderPage 同款）
+    property alias ttsBarVisible: readerShell.ttsBarVisible
     // B10：恢复完成前不写进度——Ready 后首次 currentPageChanged(0) 不得覆盖保存值
     property bool restoreDone: false
     // L9（P2#34）：翻页进度节流——currentPageChanged 只置 dirty，2s 合并 Timer 触发
@@ -51,128 +56,135 @@ Page {
     property bool closing: false
     property int closePollCount: 0
 
+    // ---- 任务4：PDF 文本朗读会话状态 ----
+    // 当前页句子（ReaderText.splitSentences 切分结果，仅供 TTS；只读模式保持只读）
+    property var pdfSentences: []
+    // 当前页是否可朗读（有文本层）：驱动适配器 canReadAloud 与壳层朗读项 enabled
+    property bool pdfCanReadAloud: false
+    // 活动会话归属：仅本页 startPdfReadAloud 启动、且未被手动翻页/目录跳转/返回/
+    // Error/外部停止打断的朗读会话，才处理 Tts.chapterCompleted（防旧页继续发声）。
+    property bool ttsSessionActive: false
+    property int ttsSessionChapter: -1
+    // 耗尽提示：末页读完后置位（Toast 显示"后续 PDF 页面无可朗读文本"），4s 自动消失
+    property bool ttsExhaustedHint: false
+    // state→0 且未收到 chapterCompleted 的过渡标记：外部停止（TtsBar ⏹）经 0ms
+    // Timer 清理会话；chapterCompleted 同步到达时取消（续读路径不清理）。
+    property bool ttsPendingStop: false
+    // 书签（bookmarks/pdf_<bookId> 页索引数组，与文本书 bookmarks/<bookId> 区分）
+    property var pdfBookmarks: []
+    property bool currentBookmarked: false
+
     PdfDocument {
         id: pdfDoc
         source: book.path ? "file://" + book.path : ""
         // 文档就绪后：先按可用阅读区宽度适配（否则默认 renderScale=1 窄页右侧留白），
-        // 再跳转到保存页（progress/pdf_<bookId>），最后放开进度写入
+        // 再跳转到保存页（progress/pdf_<bookId>），放开进度写入并提取首页文本；
+        // 重试/重载（restoreDone 已 true）只刷新文本不重复恢复。
         onStatusChanged: (status) => {
-            if (status !== PdfDocument.Ready || page.restoreDone || !page.book.id) return
-            pdfView.scaleToWidth(pdfView.width, pdfView.height)
-            const saved = Number(Settings.value("progress/pdf_" + page.book.id)) || 0
-            if (saved > 0) pdfView.goToPage(saved)
-            page.restoreDone = true
-            page.recordProgress()
+            if (status === PdfDocument.Ready) {
+                if (!page.restoreDone && page.book.id) {
+                    pdfView.scaleToWidth(pdfView.width, pdfView.height)
+                    const saved = Number(Settings.value("progress/pdf_" + page.book.id)) || 0
+                    if (saved > 0) pdfView.goToPage(saved)
+                    page.restoreDone = true
+                    page.recordProgress()
+                }
+                page.refreshPageText()
+                return
+            }
+            if (status === PdfDocument.Error) {
+                page.stopPdfTts()          // Error 必须停止活动会话（旧页不得继续发声）
+                page.pdfSentences = []
+                page.pdfCanReadAloud = false
+                return
+            }
+            // Loading/Unloading/Null：文本暂不可用
+            page.pdfSentences = []
+            page.pdfCanReadAloud = false
         }
     }
 
     PdfScrollablePageView {
         id: pdfView
-        anchors.fill: parent
-        anchors.topMargin: 44
+        // 任务4：随壳层状态让位——Sheet 打开时顶栏 40px 下移正文；TtsBar 显示时
+        // 底部 46px 上收（与 ReaderPage 对 ReaderContent 的锚定同语义）。
+        anchors.top: parent.top
+        anchors.topMargin: readerShell.sheetOpen ? readerShell.topToolbar.height : 0
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: page.ttsBarVisible ? readerShell.ttsBar.height : 0
         document: pdfDoc
         // 阅读进度：当前页变化仅置 dirty，2s 合并 Timer 触发才写 settings.json 的
-        // progress/pdf_<bookId> + books.progress（页码/总页数，含 last_read_at）
+        // progress/pdf_<bookId> + books.progress（页码/总页数，含 last_read_at）；
+        // 同时重提取当前页文本（朗读能力随页变化）并同步书签高亮。
         onCurrentPageChanged: {
             if (!page.restoreDone) return
             page.progressDirty = true
             progressFlush.restart()
+            page.refreshPageText()
+            page.syncPdfBookmarkState()
         }
-        // 双击切换宽度适配 / 整页适配
+        // 单点：切换壳层显隐状态（唤出顶栏/Sheet 或关闭——ReaderPage 同款交互）；
+        // 缩放切换由壳层 Sheet 的 PDF 专属缩放面板承担（旧双击切换收编，见 onZoom）。
         TapHandler {
             acceptedButtons: Qt.LeftButton
-            onTapped: if (tapCount === 2) page.toggleFit()
+            onTapped: readerShell.handleTap(0, 0)
         }
     }
 
-    // 顶部栏：返回 + 书名（与 ReaderPage 同模式）
-    Rectangle {
-        id: topBar
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        height: 44
-        color: "#E6FFFFFF"
-        Rectangle {
-            anchors.bottom: parent.bottom
-            anchors.left: parent.left
-            anchors.right: parent.right
-            height: 1
-            color: "#1A000000"
+    // ---- 任务4：PDF 专属缩放面板（经壳层 Sheet 承载；壳层菜单"图书信息"
+    // openInfo → 本面板）——宽度适配 / 整页适配 / 重置缩放，Ready 门控。
+    Component {
+        id: pdfZoomComp
+        Column {
+            width: parent ? parent.width : 0
+            spacing: 0
+            Repeater {
+                model: [
+                    { id: "fitWidth", text: qsTr("宽度适配") },
+                    { id: "fitPage", text: qsTr("整页适配") },
+                    { id: "reset", text: qsTr("重置缩放") }
+                ]
+                delegate: ItemDelegate {
+                    required property var modelData
+                    width: parent ? parent.width : 0
+                    text: modelData.text
+                    onClicked: page.onZoom(modelData.id)
+                }
+            }
         }
-        RowLayout {
+    }
+
+    // ---- 任务4：页码目录（适配器 openContents）——页标签 + 跳转 ----
+    Dialog {
+        id: tocDialog
+        title: qsTr("目录（页码）")
+        modal: true
+        standardButtons: Dialog.Close
+        width: 380
+        height: 480
+        contentItem: ListView {
             anchors.fill: parent
-            anchors.leftMargin: 8
-            anchors.rightMargin: 12
-            spacing: 8
-            ToolButton {
-                text: qsTr("返回")
-                onClicked: page.requestClose()
-            }
-            Label {
-                Layout.fillWidth: true
-                text: page.book.title ?? ""
-                elide: Text.ElideRight
-                font.bold: true
-                // U6：Token 审计——原 #1A1A1A 与 lightTextPrimary 同值，收编为 Token
-                color: UITheme.lightTextPrimary
-            }
-            // 任务2：上一页（仅 Ready 且非首页可用）
-            // 图标经 contentItem 替换按钮默认内容（仓库惯例同 SettingsPage/StatsPage
-            // 的 contentItem: KdIcons），否则图标作为裸子项不参与按钮居中布局
-            ToolButton {
-                id: previousPageButton
-                contentItem: KdIcons { name: "prev"; size: 20; color: UITheme.lightTextPrimary }
-                enabled: pdfDoc.status === PdfDocument.Ready && pdfView.currentPage > 0
-                onClicked: page.previousPage()
-            }
-            // 任务2：页码指示（无文档时显示占位，保持非空）
-            Label {
-                id: pageLabel
-                text: pdfDoc.pageCount > 0
-                      ? qsTr("第 %1 / %2 页").arg(pdfView.currentPage + 1).arg(pdfDoc.pageCount)
-                      : qsTr("第 - / - 页")
-                color: UITheme.lightTextPrimary
-            }
-            // 任务2：下一页（仅 Ready 且非末页可用）
-            ToolButton {
-                id: nextPageButton
-                contentItem: KdIcons { name: "next"; size: 20; color: UITheme.lightTextPrimary }
-                enabled: pdfDoc.status === PdfDocument.Ready
-                         && pdfView.currentPage < pdfDoc.pageCount - 1
-                onClicked: page.nextPage()
-            }
-            // 任务2：更多菜单入口（非 Ready 时禁用——Error/Loading 下不应打开缩放菜单）
-            ToolButton {
-                id: menuButton
-                contentItem: KdIcons { name: "more"; size: 20; color: UITheme.lightTextPrimary }
-                enabled: pdfDoc.status === PdfDocument.Ready
-                onClicked: pdfMenu.open()
+            clip: true
+            model: pdfDoc.pageCount
+            delegate: ItemDelegate {
+                required property int index
+                width: ListView.view.width
+                text: {
+                    const label = pdfDoc.pageLabel(index)
+                    return (label && label.length > 0)
+                        ? label : qsTr("第 %1 页").arg(index + 1)
+                }
+                onClicked: page.goToPdfPage(index)
             }
         }
-    }
-
-    // 任务2：更多缩放菜单——宽度适配 / 整页适配 / 重置缩放；锚定右上角，
-    // 面板不覆盖左上角返回键；点击遮罩关闭
-    KdDropdownMenu {
-        id: pdfMenu
-        z: 100
-        items: [
-            { id: "fitWidth", icon: "image", text: qsTr("宽度适配") },
-            { id: "fitPage", icon: "layout", text: qsTr("整页适配") },
-            { divider: true },
-            { id: "reset", icon: "toc", text: qsTr("重置缩放") }
-        ]
-        onItemClicked: (id) => page.onMenu(id)
     }
 
     // 任务2：Loading 反馈——避免加载期间白屏无反馈
     Rectangle {
         id: loadingIndicator
-        anchors.top: topBar.bottom
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
+        anchors.fill: parent
         visible: pdfDoc.status === PdfDocument.Loading
         color: UITheme.bgPrimary
         Column {
@@ -190,10 +202,7 @@ Page {
     // 任务2：Error 反馈——显示 pdfDoc.error 与重试按钮
     Rectangle {
         id: errorOverlay
-        anchors.top: topBar.bottom
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
+        anchors.fill: parent
         visible: pdfDoc.status === PdfDocument.Error
         color: UITheme.bgPrimary
         Column {
@@ -219,6 +228,45 @@ Page {
         }
     }
 
+    // 任务4：底部左下页码指示（壳层 Sheet 打开时隐藏，与 ReaderPage 进度标签同语义）
+    Label {
+        id: pageLabel
+        anchors.left: parent.left
+        anchors.leftMargin: 16
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: (page.ttsBarVisible ? readerShell.ttsBar.height : 0) + 12
+        visible: !readerShell.sheetOpen
+        z: 10
+        text: pdfDoc.pageCount > 0
+              ? qsTr("第 %1 / %2 页").arg(pdfView.currentPage + 1).arg(pdfDoc.pageCount)
+              : qsTr("第 - / - 页")
+        color: UITheme.lightTextPrimary
+        font.pixelSize: 12
+    }
+
+    // 任务4：耗尽提示 Toast——末页读完后显示"后续 PDF 页面无可朗读文本"，4s 消失。
+    // 说明：壳层 TtsBar 仅在 Tts.state != 0 时可见，耗尽即 stop 后条不可见，
+    // 故提示经本页 Toast 呈现（Shell 无独立 toast 通道，不得为提示改动壳层）。
+    Rectangle {
+        id: ttsExhaustToast
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: (page.ttsBarVisible ? readerShell.ttsBar.height : 0) + 24
+        visible: page.ttsExhaustedHint
+        z: 40
+        height: 36
+        width: ttsExhaustLabel.implicitWidth + 32
+        radius: 8
+        color: UITheme.overlay
+        Label {
+            id: ttsExhaustLabel
+            anchors.centerIn: parent
+            text: qsTr("后续 PDF 页面无可朗读文本")
+            color: "#FFFFFF"
+            font.pixelSize: 13
+        }
+    }
+
     // 任务2：键盘路由——A/Left/PageUp 前一页，D/Right/PageDown 后一页；
     // 只在实际处理（Ready 且边界内）后接受键事件，否则交回 Flickable 处理滚动。
     // 带修饰键（Ctrl/Cmd/Shift/Alt）的事件一律不吞，交回上层/系统（如 Cmd+A 全选、
@@ -235,17 +283,11 @@ Page {
         if (handled) event.accepted = true
     }
 
-    function toggleFit() {
-        page.fitPage = !page.fitPage
-        if (page.fitPage)
-            pdfView.scaleToPage(pdfView.width, pdfView.height)
-        else
-            pdfView.scaleToWidth(pdfView.width, pdfView.height)
-    }
-
-    // 任务2：前一页——仅 Ready 且非首页时 goToPage(currentPage-1)，成功返回 true
+    // 任务2：前一页——仅 Ready 且非首页时 goToPage(currentPage-1)，成功返回 true；
+    // 任务4：手动翻页必须停止本页活动朗读会话（旧页不得继续发声）。
     function previousPage() {
         if (pdfDoc.status !== PdfDocument.Ready || pdfView.currentPage <= 0) return false
+        page.stopPdfTts()
         pdfView.goToPage(pdfView.currentPage - 1)
         return true
     }
@@ -253,13 +295,14 @@ Page {
     function nextPage() {
         if (pdfDoc.status !== PdfDocument.Ready
                 || pdfView.currentPage >= pdfDoc.pageCount - 1) return false
+        page.stopPdfTts()
         pdfView.goToPage(pdfView.currentPage + 1)
         return true
     }
-    // 任务2：缩放菜单动作——宽度适配 / 整页适配 / 重置缩放。
-    // Ready 门控：Error/Loading 状态点中菜单项不得触发缩放调用（缩放依赖已加载
-    // 文档的 pagePointSize，非 Ready 调用无意义；按钮 enabled 已拦截，此处防御）
-    function onMenu(id) {
+    // 任务4：缩放面板动作——宽度适配 / 整页适配 / 重置缩放。
+    // Ready 门控：Error/Loading 状态点中面板项不得触发缩放调用（缩放依赖已加载
+    // 文档的 pagePointSize，非 Ready 调用无意义）。
+    function onZoom(id) {
         if (pdfDoc.status !== PdfDocument.Ready) return
         if (id === "fitWidth") { page.fitPage = false; pdfView.scaleToWidth(pdfView.width, pdfView.height) }
         else if (id === "fitPage") { page.fitPage = true; pdfView.scaleToPage(pdfView.width, pdfView.height) }
@@ -276,6 +319,106 @@ Page {
         if (src.length === 0) return
         pdfDoc.source = "file:///__readdict_reload__"
         pdfDoc.source = src
+    }
+
+    // ---- 任务4：PDF 文本提取与朗读 ----
+    // 整页文本提取项：QPdfDocument.getAllText 返回 C++ 值类型 QPdfSelection，
+    // QML 引擎不支持该返回类型（实测报 "Unknown method return type: QPdfSelection"），
+    // 故经 QtQuick.Pdf 的 PdfSelection 项（QQuickPdfSelection）selectAll() 取整页
+    // 文本——同步数据操作（内部调 getAllText），不依赖渲染/可见性。
+    PdfSelection {
+        id: pdfTextSel
+        document: pdfDoc
+    }
+    // 提取页句子：只在 Ready 时读取（依赖已加载文档），空/异常返回 []。
+    // 句子切分复用 ReaderText.splitSentences（既有 SentenceSplitter 桥接，
+    // 不重写语言规则）。
+    function extractPageText(pageIndex) {
+        if (pdfDoc.status !== PdfDocument.Ready
+                || pageIndex < 0 || pageIndex >= pdfDoc.pageCount) return []
+        try {
+            pdfTextSel.page = pageIndex
+            pdfTextSel.selectAll()
+            const text = pdfTextSel.text ? String(pdfTextSel.text) : ""
+            if (!text.trim()) return []
+            return ReaderText.splitSentences(text)
+        } catch (err) {
+            return []
+        }
+    }
+    // 刷新当前页句子/朗读能力：Ready 且页合法时提取，否则清空（非 Ready 不读文本）
+    function refreshPageText() {
+        const s = page.extractPageText(pdfView.currentPage)
+        page.pdfSentences = s
+        page.pdfCanReadAloud = s.length > 0
+    }
+
+    // 开始朗读：先验证文本可用（空文本绝不触碰 TTS），再装载句子并播放。
+    function startPdfReadAloud() {
+        if (pdfDoc.status !== PdfDocument.Ready || page.pdfSentences.length === 0) return
+        page.ttsExhaustedHint = false
+        Tts.setSentences(page.pdfSentences)
+        Tts.setChapter(pdfView.currentPage)
+        Tts.setCurrentIndex(0)
+        page.ttsSessionActive = true
+        page.ttsSessionChapter = pdfView.currentPage
+        Tts.play()
+    }
+    // 停止本页活动会话：仅会话归属本页时 stop（不误杀下层文本书仍在播放的 TTS）；
+    // 先清标志再 stop——stop 引发的 stateChanged(0) 不再触发会话清理路径。
+    function stopPdfTts() {
+        page.ttsPendingStop = false
+        sessionCleanupTimer.stop()
+        if (page.ttsSessionActive) {
+            page.ttsSessionActive = false
+            page.ttsSessionChapter = -1
+            Tts.stop()
+        }
+    }
+    // 页级续读：朗读越过当前页最后一句（chapterCompleted）→ 找下一含文本页，
+    // 跳转、重提取、重新装载句子并续播；没有后续文本页时停 TTS 并显示提示。
+    function continuePdfTtsToNextTextPage() {
+        page.ttsPendingStop = false      // chapterCompleted 同步到达：取消待清理
+        sessionCleanupTimer.stop()
+        if (pdfDoc.status !== PdfDocument.Ready) { page.stopPdfTts(); return }
+        for (let i = pdfView.currentPage + 1; i < pdfDoc.pageCount; ++i) {
+            const s = page.extractPageText(i)
+            if (s.length > 0) {
+                pdfView.goToPage(i)      // 触发 currentPageChanged → refreshPageText
+                Tts.setSentences(s)
+                Tts.setChapter(i)
+                Tts.setCurrentIndex(0)
+                page.ttsSessionChapter = i
+                Tts.play()
+                return
+            }
+        }
+        // 无后续文本页：停 TTS 并显示提示
+        page.stopPdfTts()
+        page.ttsExhaustedHint = true
+        ttsExhaustHintTimer.restart()
+    }
+
+    // ---- 任务4：目录跳转（页码目录 openContents 目标）——手动跳转停止会话 ----
+    function goToPdfPage(i) {
+        if (pdfDoc.status !== PdfDocument.Ready) return
+        page.stopPdfTts()
+        if (i >= 0 && i < pdfDoc.pageCount) pdfView.goToPage(i)
+    }
+
+    // ---- 任务4：书签（bookmarks/pdf_<bookId> 页索引数组）----
+    function syncPdfBookmarkState() {
+        page.currentBookmarked = page.pdfBookmarks.indexOf(pdfView.currentPage) >= 0
+    }
+    function togglePdfBookmark() {
+        if (!page.book || !page.book.id || pdfDoc.status !== PdfDocument.Ready) return
+        const list = page.pdfBookmarks.slice()
+        const i = list.indexOf(pdfView.currentPage)
+        if (i >= 0) list.splice(i, 1)
+        else list.push(pdfView.currentPage)
+        page.pdfBookmarks = list
+        Settings.setValue("bookmarks/pdf_" + page.book.id, list)
+        page.syncPdfBookmarkState()
     }
 
     // 记录当前页：页码写 settings.json，百分比+last_read_at 写 books（书架进度条联动）
@@ -297,11 +440,13 @@ Page {
         return s === Image.Ready || s === Image.Error || s === Image.Null
     }
 
-    // 关闭阅读页：等渲染线程空闲再 pop（文档销毁撞在途渲染 = UAF 崩溃）。
-    // 渲染在途时持续轮询等待，**绝不**在渲染未稳定时强制销毁文档——慢渲染
-    //（大 PDF 高倍率重渲染可达数秒）超时强制 pop 会把 UAF 换一种方式放回来；
-    // 超长渲染（>60s）仅告警，保持等待直到稳定（Ready 文档的渲染必然完成）。
+    // 关闭阅读页：先停止本页朗读会话，再等渲染线程空闲 pop（文档销毁撞在途
+    // 渲染 = UAF 崩溃）。渲染在途时持续轮询等待，**绝不**在渲染未稳定时强制销毁
+    // 文档——慢渲染（大 PDF 高倍率重渲染可达数秒）超时强制 pop 会把 UAF 换一种
+    // 方式放回来；超长渲染（>60s）仅告警，保持等待直到稳定（Ready 文档的渲染
+    // 必然完成）。
     function requestClose() {
+        page.stopPdfTts()
         if (page.closing) return
         page.closing = true
         page.closePollCount = 0
@@ -339,9 +484,108 @@ Page {
         onTriggered: page.flushProgress()
     }
 
+    // 任务4：会话清理——Tts.state 外部回到 0（如 TtsBar ⏹ 直接 stop）且未收到
+    // chapterCompleted：0ms 后收回本页会话归属。chapterCompleted 是同步信号，先于
+    // 本 Timer 到达（续读路径 cancel）；外部停止无后续信号，Timer 兜底清理。
+    Timer {
+        id: sessionCleanupTimer
+        interval: 0
+        repeat: false
+        onTriggered: {
+            if (page.ttsSessionActive) {
+                page.ttsSessionActive = false
+                page.ttsSessionChapter = -1
+            }
+            page.ttsPendingStop = false
+        }
+    }
+
+    // 任务4：耗尽提示 4s 后自动消失
+    Timer {
+        id: ttsExhaustHintTimer
+        interval: 4000
+        repeat: false
+        onTriggered: page.ttsExhaustedHint = false
+    }
+
+    // 任务4：PDF 朗读会话专用 TTS 接线——只处理本页拥有的活动会话：
+    //   · chapterCompleted：页级续读（找下一有文本页）或耗尽停止 + 提示；
+    //   · state→0 且会话激活：启动 0ms 清理（外部 stop 时收回会话归属）。
+    Connections {
+        target: Tts
+        function onStateChanged(state) {
+            if (state === 0 && page.ttsSessionActive) {
+                page.ttsPendingStop = true
+                sessionCleanupTimer.restart()
+            }
+        }
+        function onChapterCompleted(ch) {
+            if (!page.ttsSessionActive) return
+            if (ch !== page.ttsSessionChapter) return
+            page.continuePdfTtsToNextTextPage()
+        }
+    }
+
+    // ---- 任务4：PDF 阅读适配器（统一契约，ReaderShell 只读）----
+    // 上一/下一项为页级 previousPage()/nextPage()，标签"上一页/下一页"；
+    // 能力位：目录/书签开放（页码目录 + 页书签），搜索/笔记不开放；
+    // 朗读能力随当前页是否有文本层实时派生（canReadAloud + 精确不可用原因）。
+    QtObject {
+        id: pdfReaderAdapter
+        property string progressText: page.pageLabel.text
+        property bool canGoPrevious: pdfDoc.status === PdfDocument.Ready
+                                     && pdfView.currentPage > 0
+        property bool canGoNext: pdfDoc.status === PdfDocument.Ready
+                                 && pdfView.currentPage < pdfDoc.pageCount - 1
+        property bool canReadAloud: page.pdfCanReadAloud
+        property string readAloudUnavailableReason:
+            page.pdfCanReadAloud ? "" : qsTr("当前 PDF 无可朗读文本")
+        property bool supportsContents: true
+        property bool supportsSearch: false
+        property bool supportsNotes: false
+        property bool supportsBookmarks: true
+        property string previousLabel: qsTr("上一页")
+        property string nextLabel: qsTr("下一页")
+        function previous() { page.previousPage() }
+        function next() { page.nextPage() }
+        function startReadAloud() { page.startPdfReadAloud() }
+        function stopReadAloud() { page.stopPdfTts() }
+        function openContents() { tocDialog.open() }
+        function openSearch() {}
+        function openNotes() {}
+        function toggleBookmark() { page.togglePdfBookmark() }
+        // 壳层菜单"图书信息"→ PDF 专属缩放面板（Sheet 承载）
+        function openInfo() {
+            readerShell.sheetTab = "zoom"
+            readerShell.sheetOpen = true
+        }
+    }
+
+    // ---- 任务4：共享交互壳层（唯一顶栏/菜单/TtsBar/底部 Sheet/点击显隐状态机/
+    // 焦点恢复）——本页注入正文宿主 pdfView 与 PDF 适配器；缩放面板经
+    // sheetTabs/sheetPages 注入（onCompleted 赋值，面板创建上下文为本页）。
+    // 声明在最后覆盖全页；声明时 pdfView 已创建，contentItem 绑定可解析。
+    ReaderShell {
+        id: readerShell
+        anchors.fill: parent
+        reader: pdfReaderAdapter
+        contentItem: pdfView
+        bookmarked: page.currentBookmarked
+        // 返回导航：停止朗读会话后走渲染安全关闭（requestClose 内含竞态防护）
+        onBackRequested: page.requestClose()
+    }
+
     Component.onCompleted: {
         if (page.book && page.book.id)
             Books.startTracking(page.book.id)  // 阅读计时开始
+        // 任务4：注入壳层缩放面板（Sheet 单标签"缩放"，默认选中）
+        readerShell.sheetTabs = [{ id: "zoom", text: qsTr("缩放") }]
+        readerShell.sheetPages = [{ id: "zoom", source: pdfZoomComp }]
+        readerShell.sheetTab = "zoom"
+        // 任务4：恢复页书签（bookmarks/pdf_<bookId>）
+        const saved = Settings.value("bookmarks/pdf_" + (page.book ? page.book.id : ""))
+        page.pdfBookmarks = Array.isArray(saved) ? saved.slice() : []
+        page.syncPdfBookmarkState()
         // E4（PDF）：首次创建即获得 activeFocus，方向键翻页立即可用（ReaderPage 同款）
         page.forceActiveFocus()
     }
@@ -351,6 +595,7 @@ Page {
     StackView.onActivated: page.forceActiveFocus()
 
     Component.onDestruction: {
+        page.stopPdfTts()      // 任务4：页面销毁收回朗读会话（防继续发声）
         page.flushProgress()   // L9（P2#34）：未落盘的翻页进度兜底写入
         Books.stopTracking()  // 结算阅读秒数
     }
