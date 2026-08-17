@@ -99,6 +99,7 @@ qt_add_qml_module(Readdict
         src/ui/qml/SyncPage.qml
         src/ui/qml/StatsPage.qml
         src/ui/qml/ReaderPage.qml
+        src/ui/qml/ReaderShell.qml
         src/ui/qml/ReaderContent.qml
         src/ui/qml/ReaderBackground.qml
         src/ui/qml/KdTopToolbar.qml

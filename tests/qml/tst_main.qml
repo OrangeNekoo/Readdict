@@ -31,6 +31,10 @@ Item {
         Loader { source: "qrc:/qt/qml/Readdict/ui/qml/ReaderContent.qml" }
     }
     Component {
+        id: readerShellComp
+        Loader { source: "qrc:/qt/qml/Readdict/ui/qml/ReaderShell.qml" }
+    }
+    Component {
         id: controlsComp
         Loader { source: "qrc:/qt/qml/Readdict/ui/qml/KdTopToolbar.qml" }
     }
@@ -285,6 +289,74 @@ Item {
             tryVerify(function () { return page.pdfView.status === Image.Ready }, 15000,
                       "首页渲染应完成，实际 " + page.pdfView.status)
             stack.destroy()
+        }
+    }
+    TestCase {
+        name: "ReaderShellSmoke"
+        // 任务2：独立共享壳层契约——内联假适配器驱动。朗读禁用项必须 disabled 且
+        // 带原因、不调 startReadAloud、不启动 TTS、不显示 TtsBar；上/下一项标签
+        // 来自适配器（不硬编码"上一章/下一章"）；朗读可用时 triggerMenuAction 仅
+        // 调用适配器。暴露 topToolbar/ttsBar/menuOpen/sheetOpen。
+        function test_readerShellAdapterContract() {
+            Tts.stop()
+            var adapter = Qt.createQmlObject('import QtQuick; QtObject {
+                property bool canReadAloud: false
+                property string readAloudUnavailableReason: ""
+                property bool canGoPrevious: true
+                property bool canGoNext: true
+                property string previousLabel: "上一页"
+                property string nextLabel: "下一页"
+                property bool supportsContents: true
+                property bool supportsSearch: true
+                property bool supportsNotes: true
+                property bool supportsBookmarks: true
+                property string progressText: ""
+                property int readCalls: 0
+                function startReadAloud() { readCalls += 1 }
+                function stopReadAloud() {}
+                function previous() {}
+                function next() {}
+                function openContents() {}
+                function openSearch() {}
+                function openNotes() {}
+                function toggleBookmark() {}
+            }', root)
+            var loader = readerShellComp.createObject(root)
+            var shell = loader.item
+            verify(shell !== null, "ReaderShell 应能加载")
+            verify(shell.topToolbar !== undefined, "应暴露 topToolbar")
+            verify(shell.ttsBar !== undefined, "应暴露 ttsBar")
+            verify(shell.menuOpen !== undefined, "应暴露 menuOpen")
+            verify(shell.sheetOpen !== undefined, "应暴露 sheetOpen")
+            shell.reader = adapter
+            adapter.canReadAloud = false
+            adapter.readAloudUnavailableReason = "当前 PDF 无可朗读文本"
+            shell.openMenu()
+            verify(shell.menuOpen, "openMenu() 应打开菜单")
+            var readItem = shell.menuItem("read")
+            verify(readItem !== null, "menuItem('read') 应存在")
+            verify(readItem.enabled === false, "朗读不可用时应禁用 read 菜单项")
+            compare(readItem.disabledReason, adapter.readAloudUnavailableReason,
+                    "read 菜单项应携带不可用原因")
+            verify(Tts.state === 0, "禁用朗读不应启动 TTS")
+            verify(!shell.ttsBar.visible, "朗读不可用不应显示 TtsBar")
+            // 禁用朗读时 triggerMenuAction("read") 不调用适配器、不启动 TTS
+            shell.triggerMenuAction("read")
+            compare(adapter.readCalls, 0, "禁用朗读不应调用 startReadAloud")
+            verify(Tts.state === 0, "禁用朗读的 read 动作不应启动 TTS")
+            // 上/下一项标签来自适配器，而非固定章节文案
+            compare(shell.menuItem("prev").text, adapter.previousLabel,
+                    "prev 标签应来自适配器 previousLabel")
+            compare(shell.menuItem("next").text, adapter.nextLabel,
+                    "next 标签应来自适配器 nextLabel")
+            verify(shell.menuItem("prev").text !== "上一章",
+                   "prev 标签不应硬编码为上一章")
+            // 朗读可用时 triggerMenuAction("read") 仅调用适配器
+            adapter.canReadAloud = true
+            shell.triggerMenuAction("read")
+            compare(adapter.readCalls, 1, "朗读可用时应调用一次 startReadAloud")
+            loader.destroy()
+            adapter.destroy()
         }
     }
     TestCase {
