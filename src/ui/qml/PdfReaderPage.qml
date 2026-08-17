@@ -98,7 +98,9 @@ Page {
                 page.pdfCanReadAloud = false
                 return
             }
-            // Loading/Unloading/Null：文本暂不可用
+            // Loading/Unloading/Null：文本暂不可用；加载状态变化（如重试换源）必须
+            // 停止活动会话（旧页不得在重载期间继续发声），并清空朗读能力。
+            page.stopPdfTts()
             page.pdfSentences = []
             page.pdfCanReadAloud = false
         }
@@ -164,6 +166,9 @@ Page {
         standardButtons: Dialog.Close
         width: 380
         height: 480
+        // 关闭完成（含退出动画）后把键盘焦点还给页面——模态弹层退出期间焦点
+        // 不自动归还，否则目录跳转后方向键翻页失效（与 StackView.onActivated 同义）
+        onClosed: page.forceActiveFocus()
         contentItem: ListView {
             anchors.fill: parent
             clip: true
@@ -271,8 +276,10 @@ Page {
     // 只在实际处理（Ready 且边界内）后接受键事件，否则交回 Flickable 处理滚动。
     // 带修饰键（Ctrl/Cmd/Shift/Alt）的事件一律不吞，交回上层/系统（如 Cmd+A 全选、
     // Cmd+D、Shift+方向键选区）；自动重复（isAutoRepeat）维持原行为逐次翻页。
+    // 任务4（复审）：菜单/Sheet 打开时与 ReaderPage 同款门控——弹层期间不翻页。
     Keys.priority: Keys.BeforeItem
     Keys.onPressed: (event) => {
+        if (page.readerShell.sheetOpen || page.readerShell.menuOpen) return
         if (event.modifiers & (Qt.ControlModifier | Qt.MetaModifier | Qt.ShiftModifier | Qt.AltModifier))
             return
         let handled = false
@@ -399,10 +406,11 @@ Page {
         ttsExhaustHintTimer.restart()
     }
 
-    // ---- 任务4：目录跳转（页码目录 openContents 目标）——手动跳转停止会话 ----
+    // ---- 任务4：目录跳转（页码目录 openContents 目标）——关闭目录并停止会话 ----
     function goToPdfPage(i) {
         if (pdfDoc.status !== PdfDocument.Ready) return
-        page.stopPdfTts()
+        tocDialog.close()                // 先释放模态焦点，否则后续键盘事件留在弹层
+        page.stopPdfTts()                // 目录跳转属于手动跳转：停止活动会话
         if (i >= 0 && i < pdfDoc.pageCount) pdfView.goToPage(i)
     }
 
@@ -538,8 +546,12 @@ Page {
         property bool canGoNext: pdfDoc.status === PdfDocument.Ready
                                  && pdfView.currentPage < pdfDoc.pageCount - 1
         property bool canReadAloud: page.pdfCanReadAloud
+        // 不可用原因：就绪但无文本 → "当前 PDF 无可朗读文本"；未就绪（Loading/Error/
+        // Null）→ 加载中文案（与测试契约一致，见 tst_main.qml 控制层用例）
         property string readAloudUnavailableReason:
-            page.pdfCanReadAloud ? "" : qsTr("当前 PDF 无可朗读文本")
+            page.pdfCanReadAloud ? ""
+                : (pdfDoc.status === PdfDocument.Ready
+                   ? qsTr("当前 PDF 无可朗读文本") : qsTr("PDF 尚未加载完成"))
         property bool supportsContents: true
         property bool supportsSearch: false
         property bool supportsNotes: false

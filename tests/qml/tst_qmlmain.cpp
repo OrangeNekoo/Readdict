@@ -127,6 +127,29 @@ static bool writeImagePdf(const QString &path) {
     return QFile::exists(path);
 }
 
+// 任务4（复审）：三页 文本-图片-文本 PDF——第 1 页仅图片无 drawText，两侧页各两句。
+// 续读用例据此断言页级自动推进会跳过无文本页（0 → 2），且图片页 canReadAloud=false。
+static bool writeTextImageTextPdf(const QString &path) {
+    QPdfWriter writer(path);
+    writer.setPageSize(QPageSize(QPageSize::A4));
+    writer.setResolution(300);
+    QPainter painter(&writer);
+    if (!painter.isActive()) return false;
+    QFont font = painter.font();
+    font.setFamily(QStringLiteral("PingFang SC"));
+    font.setPointSize(24);
+    painter.setFont(font);
+    painter.drawText(120, 180, QString::fromUtf8("第一页第一句，用于跳过图片页验证。第一页第二句，紧随其后。"));
+    writer.newPage();
+    QImage img(400, 400, QImage::Format_RGB32);
+    img.fill(QColor(0x3a, 0x7d, 0xbd));
+    painter.drawImage(120, 120, img);   // 第 2 页仅图片
+    writer.newPage();
+    painter.drawText(120, 180, QString::fromUtf8("第三页第一句，属于末页内容。第三页第二句，读完即停。"));
+    painter.end();
+    return QFile::exists(path);
+}
+
 // 仅测试进程可见：在临时目录预生成 TXT 源书，QML 侧经 Importer.doImport 导入。
 class TestEnv : public QObject {
     Q_OBJECT
@@ -155,9 +178,11 @@ class TestEnv : public QObject {
     // 封面刷新冒烟：导入 → cover 改回占位 → refreshCovers 恢复真实封面
     Q_PROPERTY(QString coverEpubSource READ coverEpubSource CONSTANT)
     // 任务4：确定性 PDF 夹具（QPdfWriter 生成，全平台可跑）——
-    // 两页含可提取文本（每页两句）供朗读/续读用例；一页仅图片供朗读禁用用例
+    // 两页含可提取文本（每页两句）供朗读/续读用例；一页仅图片供朗读禁用用例；
+    // 三页 文本-图片-文本 供续读跳过图片页用例
     Q_PROPERTY(QString textPdfSource READ textPdfSource CONSTANT)
     Q_PROPERTY(QString imagePdfSource READ imagePdfSource CONSTANT)
+    Q_PROPERTY(QString textImageTextPdfSource READ textImageTextPdfSource CONSTANT)
 public:
     explicit TestEnv(const QString &workDir, QObject *parent = nullptr) : QObject(parent) {
         QDir srcDir(workDir + "/src");
@@ -242,6 +267,9 @@ public:
         const QString imagePdfPath = srcDir.filePath("image_pdf_fixture.pdf");
         if (writeImagePdf(imagePdfPath))
             m_imagePdfSource = imagePdfPath;
+        const QString tItPath = srcDir.filePath("text_image_text_fixture.pdf");
+        if (writeTextImageTextPdf(tItPath))
+            m_textImageTextPdfSource = tItPath;
     }
     QStringList sourceFiles() const { return m_files; }
     // B1：删除冒烟断言书库文件真实消失（QML 侧无文件系统 API）
@@ -267,6 +295,7 @@ public:
     QString coverEpubSource() const { return m_coverEpubSource; }
     QString textPdfSource() const { return m_textPdfSource; }
     QString imagePdfSource() const { return m_imagePdfSource; }
+    QString textImageTextPdfSource() const { return m_textImageTextPdfSource; }
 private:
     QStringList m_files;
     QString m_longSource;
@@ -277,6 +306,7 @@ private:
     QString m_coverEpubSource;
     QString m_textPdfSource;
     QString m_imagePdfSource;
+    QString m_textImageTextPdfSource;
 };
 
 int main(int argc, char *argv[]) {

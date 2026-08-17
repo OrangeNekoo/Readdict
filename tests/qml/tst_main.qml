@@ -77,6 +77,9 @@ Item {
             verify(page.readerAdapter.readAloudUnavailableReason !== undefined,
                    "适配器应有 readAloudUnavailableReason")
             verify(page.readerAdapter.previousLabel !== undefined, "适配器应有 previousLabel")
+            // 未就绪（status Null）时不可用原因应为加载中文案（区别于就绪无文本）
+            compare(page.readerAdapter.readAloudUnavailableReason, "PDF 尚未加载完成",
+                    "未就绪时不可用原因应为'PDF 尚未加载完成'")
             // 错误/重试/加载指示句柄（任务4 保留，非顶栏/菜单/TTS 逻辑）
             verify(page.retryButton !== undefined, "应暴露 retryButton")
             verify(page.errorLabel !== undefined, "应暴露 errorLabel")
@@ -347,6 +350,20 @@ Item {
             keyClick(Qt.Key_A)
             tryVerify(function () { return page.pdfView.currentPage === 0 }, 5000,
                       "生产 A 键应回到第 0 页，实际 " + page.pdfView.currentPage)
+            // 菜单/Sheet 打开时键盘翻页门控（与 ReaderPage 一致）：不翻页
+            page.readerShell.openMenu()
+            keyClick(Qt.Key_D)
+            compare(page.pdfView.currentPage, 0, "菜单打开时 D 键不应翻页")
+            page.readerShell.triggerMenuAction("info")   // 关菜单；Sheet 仍打开
+            keyClick(Qt.Key_D)
+            compare(page.pdfView.currentPage, 0, "Sheet 打开时 D 键不应翻页")
+            page.readerShell.sheetOpen = false
+            keyClick(Qt.Key_D)
+            tryVerify(function () { return page.pdfView.currentPage === 1 }, 5000,
+                      "关闭 Sheet 后 D 键应翻页")
+            keyClick(Qt.Key_A)
+            tryVerify(function () { return page.pdfView.currentPage === 0 }, 5000,
+                      "A 键应回到第 0 页")
             // 菜单朗读：适配器经 Tts.setSentences/setChapter/setCurrentIndex/play 启动会话
             page.readerShell.triggerMenuAction("read")
             tryVerify(function () { return Tts.state === 1 }, 3000,
@@ -360,6 +377,26 @@ Item {
                       "手动翻页应停止 TTS，实际 state=" + Tts.state)
             tryVerify(function () { return !page.readerShell.ttsBar.visible }, 3000,
                       "停止后 TtsBar 应隐藏")
+            // 目录跳转停止朗读会话：第 0 页朗读中经目录跳到第 1 页 → TTS 停止
+            page.readerShell.triggerMenuAction("read")
+            tryVerify(function () { return Tts.state === 1 }, 3000,
+                      "第 0 页应可朗读，实际 state=" + Tts.state)
+            page.readerShell.triggerMenuAction("toc")
+            tryVerify(function () { return page.tocDlg.visible }, 3000,
+                      "目录项应打开页码目录")
+            var tocList = page.tocDlg.contentItem
+            var page2Delegate = tocList.contentItem.children[1]   // 第 2 页条目
+            verify(page2Delegate !== undefined, "目录应含第 2 页条目")
+            page2Delegate.clicked()
+            tryVerify(function () { return page.pdfView.currentPage === 1 }, 5000,
+                      "目录跳转应到第 1 页，实际 " + page.pdfView.currentPage)
+            tryVerify(function () { return Tts.state === 0 }, 3000,
+                      "目录跳转应停止 TTS，实际 state=" + Tts.state)
+            // 等目录关闭动画完成（模态弹层退出期间不归还键盘焦点）再按键
+            tryVerify(function () { return !page.tocDlg.visible }, 3000,
+                      "目录跳转后目录应关闭")
+            tryVerify(function () { return page.activeFocus }, 3000,
+                      "目录关闭后页面应恢复键盘焦点")
             // 回到第 0 页重新朗读：读完两句 → chapterCompleted → 自动续读下一有文本页
             keyClick(Qt.Key_A)
             tryVerify(function () { return page.pdfView.currentPage === 0 }, 5000,
@@ -383,6 +420,71 @@ Item {
             tryVerify(function () { return page.ttsExhaustedHint === true }, 3000,
                       "耗尽后应显示无可朗读文本提示")
             verify(!page.readerShell.ttsBar.visible, "停止后 TtsBar 应隐藏")
+            // 加载状态变化停止会话：朗读中更换文档源（Loading/Error）→ TTS 停止
+            page.readerShell.triggerMenuAction("read")
+            tryVerify(function () { return Tts.state === 1 }, 3000,
+                      "第 1 页应可朗读，实际 state=" + Tts.state)
+            page.book = { id: 999101, title: "文本PDF", path: "/nonexistent/reload.pdf" }
+            tryVerify(function () { return Tts.state === 0 }, 3000,
+                      "更换文档源应停止 TTS，实际 state=" + Tts.state)
+            stack.destroy()
+        }
+        // 任务4（复审）：三页 文本-图片-文本 PDF——页级自动续读必须跳过无文本页
+        //（0 → 2），且中间图片页 canReadAloud=false、原因精确、菜单朗读项 disabled。
+        function test_pdfReadAloudSkipsImagePage() {
+            Tts.stop()
+            Tts.reconfigure("openai", "https://api.openai.com/v1", "", "tts-1", "nova", 1.0)
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            verify(stack !== null, "测试 StackView 应能创建")
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/PdfReaderPage.qml",
+                       { book: { id: 999103, title: "图文图PDF", path: TestEnv.textImageTextPdfSource } })
+            var page = stack.currentItem
+            verify(page !== null, "PdfReaderPage 应被 push 进 StackView")
+            var doc = page.pdfDocument
+            tryVerify(function () { return doc.status === PdfDocument.Ready }, 15000,
+                      "图文图 PDF 应加载为 Ready，实际 " + doc.status)
+            compare(doc.pageCount, 3, "图文图 PDF 应为三页")
+            tryVerify(function () { return page.readerAdapter.canReadAloud === true }, 3000,
+                      "第 0 页有文本应可朗读，实际 " + page.readerAdapter.canReadAloud)
+            // 中间图片页：不可朗读 + 精确原因 + 菜单项 disabled
+            keyClick(Qt.Key_D)
+            tryVerify(function () { return page.pdfView.currentPage === 1 }, 5000,
+                      "D 键应到第 1 页（图片页）")
+            tryVerify(function () { return page.readerAdapter.canReadAloud === false }, 3000,
+                      "图片页不应可朗读，实际 " + page.readerAdapter.canReadAloud)
+            compare(page.readerAdapter.readAloudUnavailableReason, "当前 PDF 无可朗读文本",
+                    "图片页不可用原因应精确")
+            tryVerify(function () { return page.readerShell.menuItem("read").enabled === false },
+                      3000, "图片页朗读菜单项应 disabled")
+            // 末页恢复可读
+            keyClick(Qt.Key_D)
+            tryVerify(function () { return page.pdfView.currentPage === 2 }, 5000,
+                      "D 键应到第 2 页（末页）")
+            tryVerify(function () { return page.readerAdapter.canReadAloud === true }, 3000,
+                      "末页有文本应可朗读，实际 " + page.readerAdapter.canReadAloud)
+            // 回到第 0 页朗读：读完两句 → 自动续读必须跳过图片页直接到第 2 页
+            keyClick(Qt.Key_A)
+            keyClick(Qt.Key_A)
+            tryVerify(function () { return page.pdfView.currentPage === 0 }, 5000,
+                      "A 键应回到第 0 页")
+            page.readerShell.triggerMenuAction("read")
+            tryVerify(function () { return Tts.state === 1 }, 3000,
+                      "第 0 页应可朗读，实际 state=" + Tts.state)
+            Tts.next()
+            Tts.next()
+            tryVerify(function () { return page.pdfView.currentPage === 2 }, 5000,
+                      "读完一页应跳过图片页续读第 2 页，实际 " + page.pdfView.currentPage)
+            tryVerify(function () { return Tts.state === 1 }, 3000,
+                      "跳过续读应继续播放，实际 state=" + Tts.state)
+            // 末页耗尽：无后续文本页 → 停 TTS、不翻页、显示提示
+            Tts.next()
+            Tts.next()
+            tryVerify(function () { return Tts.state === 0 }, 3000,
+                      "末页读完应停 TTS，实际 state=" + Tts.state)
+            compare(page.pdfView.currentPage, 2, "无后续文本页时不应再翻页")
+            tryVerify(function () { return page.ttsExhaustedHint === true }, 3000,
+                      "耗尽后应显示无可朗读文本提示")
             stack.destroy()
         }
         // 任务4：图片 PDF 朗读禁用——确定性夹具（TestEnv.imagePdfSource，一页仅图片）：
