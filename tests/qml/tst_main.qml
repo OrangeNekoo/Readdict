@@ -353,6 +353,54 @@ Item {
                       "渲染应稳定再销毁，实际 status=" + page.pdfView.status)
             stack.destroy()
         }
+        // 任务2：整页适配居中——paged 单页视图（PdfScrollablePageView，Flickable）在
+        // fitPage 时设置对称左右边距，使内容中心 == 视口中心；宽度适配清除边距
+        //（不强制居中）；视口尺寸改变后重新计算。确定性文本 PDF 夹具（两页 A4）。
+        function test_fitPageCentersNarrowPdf() {
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            verify(stack !== null, "测试 StackView 应能创建")
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/PdfReaderPage.qml",
+                       { book: { id: 999112, title: "居中PDF", path: TestEnv.textPdfSource } })
+            var page = stack.currentItem
+            verify(page !== null, "PdfReaderPage 应被 push 进 StackView")
+            tryVerify(function () { return page.pdfDocument.status === PdfDocument.Ready }, 15000,
+                      "文本 PDF 应加载为 Ready，实际 " + page.pdfDocument.status)
+            // 居中仅在 paged（PdfScrollablePageView，Flickable 可设左右边距）模式断言
+            page.setPageMode("paged")
+            tryVerify(function () { return page.pdfViewKind === "single" }, 3000,
+                      "居中验证应在 paged（single）模式，实际 " + page.pdfViewKind)
+            // 整页适配：窄页产生对称正边距，内容中心 == 视口中心
+            page.setFitPage(true)
+            tryVerify(function () { return page.pdfHorizontalMargin > 0 }, 3000,
+                      "窄页整页适配应产生正边距，实际 " + page.pdfHorizontalMargin)
+            compare(page.pdfLeftMargin, page.pdfRightMargin, "整页适配左右边距应对称")
+            tryVerify(function () {
+                return Math.abs(page.pdfContentCenter - page.pdfViewportCenter) < 1.0
+            }, 3000, "整页适配内容中心应等于视口中心（内容 " + page.pdfContentCenter
+                  + " vs 视口 " + page.pdfViewportCenter + "）")
+            // 宽度适配：清除边距（不强制居中）
+            page.setFitPage(false)
+            tryVerify(function () { return page.pdfLeftMargin === 0 && page.pdfRightMargin === 0 }, 3000,
+                      "宽度适配应清除居中边距，实际 L=" + page.pdfLeftMargin + " R=" + page.pdfRightMargin)
+            // 视口尺寸改变后重新计算边距并保持居中
+            page.setFitPage(true)
+            tryVerify(function () { return page.pdfHorizontalMargin > 0 }, 3000,
+                      "再次整页适配应产生边距")
+            var marginBefore = page.pdfLeftMargin
+            page.width = page.width + 200
+            tryVerify(function () { return page.pdfViewportCenter > 0
+                                            && page.pdfLeftMargin !== marginBefore }, 3000,
+                      "视口变宽应重算边距，实际 " + page.pdfLeftMargin + "（原 " + marginBefore + "）")
+            tryVerify(function () {
+                return Math.abs(page.pdfContentCenter - page.pdfViewportCenter) < 1.0
+            }, 3000, "尺寸改变后内容中心仍应等于视口中心")
+            page.width = page.width - 200
+            // 渲染稳定后销毁，避免 QtPdfQuick 拆除竞态崩溃
+            tryVerify(function () { return page.renderSettled() }, 15000,
+                      "渲染应稳定再销毁，实际 " + page.pdfView.status)
+            stack.destroy()
+        }
         // 任务4：文本 PDF 朗读——确定性夹具（TestEnv.textPdfSource，两页各两句）：
         // 生产 keyClick(D) 翻页、共享壳层菜单朗读、手动翻页停止 TTS 会话、
         // 读完一页自动续读下一有文本页、末页耗尽停 TTS 并显示提示。

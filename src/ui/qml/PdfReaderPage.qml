@@ -46,6 +46,21 @@ Page {
     property var activePdfView: page.pageMode === "scroll" ? multiView : singleView
     // 方向切换待恢复页：setPageMode 先存当前页，切换活动视图后 goToPage 恢复
     property int pendingRestorePage: -1
+    // 任务2：整页居中句柄——活动视图对称左右边距与内容/视口中心。
+    // scroll 的 PdfMultiPageView 内部委托 anchors.centerIn 已居中且无 margin API，
+    // 这些句柄在 paged 的 PdfScrollablePageView（Flickable）上产生非零值。
+    property real pdfLeftMargin: page.pdfView.leftMargin
+    property real pdfRightMargin: page.pdfView.rightMargin
+    property real pdfHorizontalMargin: page.pdfLeftMargin
+    property real pdfViewportCenter: page.pdfView.width / 2
+    // 内容中心（视口坐标）= -contentX + contentWidth/2：Flickable 设边距后自动把
+    // 子项 paper.x 置为 -contentX 且 contentX 钳制到 -leftMargin，因此内容中心
+    // 恰为 leftMargin + contentWidth/2，无需再叠加 contentX（实测公式）。
+    property real pdfContentCenter: {
+        const v = page.activePdfView
+        if (!v || v.contentX === undefined) return 0
+        return -v.contentX + v.contentWidth / 2
+    }
     // 暴露给测试/上层：文档状态、页数、页码跳转（B10 进度恢复经此 goToPage）；
     // pdfView 是统一活动视图代理（currentPage/goToPage/renderScale/status/边距）
     property alias pdfDocument: pdfDoc
@@ -146,6 +161,8 @@ Page {
         // progress/pdf_<bookId> + books.progress（页码/总页数，含 last_read_at）；
         // 同时重提取当前页文本（朗读能力随页变化）并同步书签高亮。
         onCurrentPageChanged: page.viewCurrentPageChanged(this)
+        // 任务2：窗口尺寸改变后重算居中（multi 无 margin API，内部已居中，空操作）
+        onWidthChanged: page.updatePdfAlignment()
         // 轻点：切换壳层显隐状态（唤出顶栏/Sheet 或关闭——ReaderPage 同款交互）；
         // 页面上 Qt 内部 TapHandler（链接/文本选择）接管处例外，边缘/间隙仍可唤出。
         TapHandler {
@@ -166,6 +183,9 @@ Page {
         anchors.bottomMargin: page.ttsBarVisible ? readerShell.ttsBar.height : 0
         document: pdfDoc
         onCurrentPageChanged: page.viewCurrentPageChanged(this)
+        // 任务2：视口尺寸/内容宽度（缩放）变化后重算整页居中边距
+        onWidthChanged: page.updatePdfAlignment()
+        onContentWidthChanged: page.updatePdfAlignment()
         // 单点：切换壳层显隐状态（唤出顶栏/Sheet 或关闭——ReaderPage 同款交互）；
         // 缩放切换由壳层 Sheet 的 PDF 专属缩放面板承担（旧双击切换收编，见 onZoom）。
         TapHandler {
@@ -390,6 +410,26 @@ Page {
         view.renderScale = page.fitPage
             ? Math.min(view.width / pageSize.width, view.height / pageSize.height)
             : view.width / pageSize.width
+        page.updatePdfAlignment()
+    }
+
+    // 任务2：整页适配开关——fitPage=true 缩放并对称居中；false（宽度适配）清除边距。
+    function setFitPage(v) {
+        page.fitPage = !!v
+        page.applyFitModeToActiveView()
+    }
+
+    // 任务2：整页居中——仅对带边距的 Flickable（paged 的 PdfScrollablePageView）设置
+    // 对称 leftMargin/rightMargin，使内容中心对齐视口中心（窄页 contentWidth<width
+    // 时默认 contentX=0 靠左）；宽度适配/重置缩放清除边距；scroll 的 PdfMultiPageView
+    // 内部委托已居中且无 margin API，跳过。尺寸/缩放/方向/Ready 后都会重算（视图
+    // onWidthChanged/onContentWidthChanged 与 applyFitModeToActiveView 调此函数）。
+    function updatePdfAlignment() {
+        const view = page.activePdfView
+        if (!view || view.leftMargin === undefined) return
+        const margin = page.fitPage ? Math.max(0, (view.width - view.contentWidth) / 2) : 0
+        view.leftMargin = margin
+        view.rightMargin = margin
     }
 
     // 切换活动视图后恢复保存页（文档未就绪时 PdfMultiPageView 走内部 pendingRow
