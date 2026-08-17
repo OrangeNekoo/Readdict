@@ -1,5 +1,6 @@
 #pragma once
 #include <QObject>
+#include <QStringList>
 #include <QVariantList>
 
 class QQuickItem;
@@ -16,4 +17,7 @@ public:
     // 返回同一 TextEdit 实际布局产生的行边界，坐标相对 TextEdit 左上角。
     // 每项为 {top: real, bottom: real}，QML 用它在真实行边界分页。
     Q_INVOKABLE QVariantList lineBreaks(QQuickItem *edit) const;
+    // 桥接既有 SentenceSplitter：不复制/改写其缩写、标点或空白规则，
+    // 仅过滤 trim 后为空的片段并转为 QStringList 供 QML 使用。
+    Q_INVOKABLE QStringList splitSentences(const QString &text) const;
 };

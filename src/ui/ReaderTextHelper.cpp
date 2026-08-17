@@ -1,5 +1,7 @@
 #include "ReaderTextHelper.h"
 
+#include "parsers/SentenceSplitter.h"
+
 #include <QMetaObject>
 #include <QMetaProperty>
 #include <QObject>
@@ -72,4 +74,13 @@ QVariantList ReaderTextHelper::lineBreaks(QQuickItem *edit) const {
         }
     }
     return breaks;
+}
+
+QStringList ReaderTextHelper::splitSentences(const QString &text) const {
+    const QVector<QString> sentences = SentenceSplitter::split(text);
+    QStringList result;
+    result.reserve(sentences.size());
+    for (const QString &sentence : sentences)
+        if (!sentence.trimmed().isEmpty()) result.append(sentence);
+    return result;
 }

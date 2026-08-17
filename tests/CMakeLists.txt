@@ -86,6 +86,16 @@ target_include_directories(tst_sentencesplitter PRIVATE ../src ../src/parsers)
 target_link_libraries(tst_sentencesplitter PRIVATE Qt6::Test)
 add_test(NAME tst_sentencesplitter COMMAND tst_sentencesplitter)
 
+qt_add_executable(tst_readertexthelper
+    tst_readertexthelper.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/ReaderTextHelper.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/ReaderTextHelper.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/SentenceSplitter.cpp
+)
+target_include_directories(tst_readertexthelper PRIVATE ../src ../src/parsers)
+target_link_libraries(tst_readertexthelper PRIVATE Qt6::Test Qt6::Quick Qt6::Gui)
+add_test(NAME tst_readertexthelper COMMAND tst_readertexthelper)
+
 qt_add_executable(tst_textparser tst_textparser.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/SentenceSplitter.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/TextParser.cpp)
 target_include_directories(tst_textparser PRIVATE ../src ../src/parsers)
 target_link_libraries(tst_textparser PRIVATE Qt6::Test)
