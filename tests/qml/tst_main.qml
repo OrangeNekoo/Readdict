@@ -587,6 +587,71 @@ Item {
         }
     }
     TestCase {
+        name: "ReaderPageSmoke"
+        // 任务3：文本阅读页接入共享壳层——ReaderPage 必须暴露 readerShell，且顶栏/
+        // TtsBar/底部 Sheet 为 ReaderShell 的同一对象（不得保留双份壳层）；菜单朗读
+        // 经适配器 startReadAloud 启动 TTS 会话；上一/下一章经适配器 previous()/next()
+        // 推进章节（不直接调 loadChapter，壳层只经统一适配器契约调用）。
+        function initTestCase() {
+            Books.doSearch("")
+            Books.setFilter("")
+            Books.setSort(0)
+            if (!findBook("multibook")) Importer.doImport(TestEnv.multiSource)
+        }
+        function cleanupTestCase() {
+            // 同 tst_e4_keys 约定：清理本用例导入的多章书，避免污染后续用例
+            //（tst_highlightsui 的 findTxtBook() 取最新 TXT 会拿到它）
+            for (let b of Books.booksModel)
+                if (b.title === "multibook")
+                    Books.removeBookWithFiles(b.id, true)
+        }
+        function findBook(title) {
+            for (let b of Books.booksModel)
+                if (b.title === title) return b
+            return null
+        }
+        function test_readerUsesSharedShell() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            Tts.stop()
+            Tts.reconfigure("openai", "https://api.openai.com/v1", "", "tts-1", "nova", 1.0)
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            verify(stack !== null, "测试 StackView 应能创建")
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: book })
+            var page = stack.currentItem
+            verify(page !== null, "ReaderPage 应被 push 进 StackView")
+            tryVerify(function () {
+                return page.chapter && page.chapter.paragraphs
+                    && page.chapter.paragraphs.length > 0
+            }, 3000, "打开书后应加载章节段落")
+            Books.currentChapter = 0
+            page.loadChapter(0)
+            // 共享壳层：readerShell 暴露且顶栏为同一对象（无重复顶栏/朗读条/Sheet）
+            verify(page.readerShell !== undefined, "ReaderPage 应暴露 readerShell")
+            verify(page.readerShell.topToolbar === page.topToolbar,
+                   "顶栏应为 ReaderShell 同一对象")
+            verify(page.readerShell.ttsBar === page.ttsBar,
+                   "TtsBar 应为 ReaderShell 同一对象")
+            verify(page.readerShell.bottomSheet === page.bottomSheet,
+                   "底部 Sheet 应为 ReaderShell 同一对象")
+            // 菜单朗读：经适配器 startReadAloud → TTS 会话激活（state=1）
+            page.readerShell.triggerMenuAction("read")
+            tryVerify(function () { return Tts.state === 1 }, 3000,
+                      "菜单朗读应经适配器启动 TTS 会话，实际 state=" + Tts.state)
+            Tts.stop()
+            // 下一章：经适配器 next() 推进（Books.currentChapter 0→1）
+            page.readerShell.triggerMenuAction("next")
+            tryVerify(function () { return Books.currentChapter === 1 }, 3000,
+                      "菜单下一章应经适配器推进到第 1 章，实际 " + Books.currentChapter)
+            // 上一章：经适配器 previous() 回退（1→0）
+            page.readerShell.triggerMenuAction("prev")
+            tryVerify(function () { return Books.currentChapter === 0 }, 3000,
+                      "菜单上一章应经适配器回到第 0 章，实际 " + Books.currentChapter)
+            stack.destroy()
+        }
+    }
+    TestCase {
         name: "ContentSmoke"
         // 直接实例化 ReaderContent：运行期验证段落委托（Text 与图片分支）不报错、
         // 排版参数生效、内容高度随段落增长

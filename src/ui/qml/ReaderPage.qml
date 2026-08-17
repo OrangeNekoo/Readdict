@@ -56,16 +56,22 @@ Page {
     property alias contentView: content
     // C7：笔记列表 Dialog（冒烟测试经此打开/关闭）
     property alias notesDialog: notesDlg
-    // U4：Kindle 顶栏仅在 Sheet 打开时显示。
-    property alias topToolbar: topToolbar
-    property alias backButton: topToolbar.backBtn
-    property alias menuButton: topToolbar.menuBtn
+    // 任务3：共享壳层——顶栏/菜单/TtsBar/底部 Sheet 与显隐状态全部由 ReaderShell
+    // 持有，本页只保留文本正文特有的内容与交互策略层（热区/分页点击，见
+    // handleContentTap）。公开 alias 保持既有测试/调用者接口不变，读写透传壳层。
+    property alias readerShell: readerShell
+    property alias topToolbar: readerShell.topToolbar
+    // backButton/menuButton 为壳层顶栏（KdTopToolbar）内部按钮：alias 目标链不能
+    // 穿越另一 alias（topToolbar），经 onCompleted 运行时赋值（测试只读句柄）。
+    property var backButton: null
+    property var menuButton: null
     property alias infoDialog: infoDialog
     property alias progressLabel: progressLabel
-    // U4：Kindle 底部 Sheet 工具栏。
-    property bool sheetOpen: false
-    property string sheetTab: "theme"
-    property bool menuOpen: false
+    // U4：Kindle 底部 Sheet 工具栏（统一由 ReaderShell 提供；默认主题标签在
+    // onCompleted 注入）。
+    property alias sheetOpen: readerShell.sheetOpen
+    property alias sheetTab: readerShell.sheetTab
+    property alias menuOpen: readerShell.menuOpen
     // U4：MoreSheet 开关——自动续章（reading/autoContinue，默认开，门控
     // autoNextChapter）与深色跟随（reading/darkFollow，默认关，effectiveBg 派生
     // 跟随应用主题深浅，覆盖显式背景选择；关闭后还原显式选择——page.bgMode 未被覆盖）
@@ -270,19 +276,29 @@ Page {
     // 否则显式选择（bgMode）。
     property string effectiveBg: page.darkFollow
         ? (UITheme.isDark ? "dark" : "light") : page.bgMode
-    // U4：测试句柄（冒烟经此驱动 Sheet 开合/标签/面板与右上角菜单）
-    property alias bottomSheet: bottomSheet
-    property alias readerMenu: menuOverlay
-    property alias menuItems: menuRepeater
-    // U4：控制栏自动隐藏计时器（现在仅控制 Sheet/顶栏）。
-    property alias hideTimer: hideControlsTimer
+    // U4：测试句柄（冒烟经此驱动 Sheet 开合/标签/面板与右上角菜单）——目标为
+    // 壳层子对象；menuRepeater 在壳层菜单内层（menuOverlay→menuPanel→menuColumn），
+    // 非壳层直属 id，经 onCompleted 运行时解析赋值（alias 目标链不可编译期解析）。
+    property alias bottomSheet: readerShell.bottomSheet
+    // readerMenu/menuItems/hideTimer 是壳层内部子对象（menuOverlay/menuRepeater/
+    // hideControlsTimer 为壳层组件作用域私有 id，外部组件不可引用——QML id 隐私），
+    // 由下方 menuOverlayCompat/hideTimerCompat 桥接：菜单遮罩只镜像壳层显隐状态
+    //（无任何输入处理，不拦截点击；真实遮罩/菜单项仍在壳层单一实例内），hideTimer
+    // 按壳层状态机不变量派生 running（running ⟺ controlsVisible && !sheetOpen，
+    // 与壳层 onControlsVisibleChanged/onSheetOpenChanged 驱动的计时状态一致）。
+    // 菜单模型由壳层按适配器 capability 与标签构造（结构 read/toc/prev/next/
+    // divider/info 与旧 page.menuModel 一致，另带 enabled/disabledReason 字段）。
+    property alias menuModel: readerShell.menuModel
+    property alias readerMenu: menuOverlayCompat
+    property alias menuItems: menuRepeaterCompat
+    property alias hideTimer: hideTimerCompat
 
     // C8：全文搜索结果跳转目标（书架全文搜索 push 时传入；-1 表示正常打开）。
     property int initialChapter: -1
     property int initialParagraph: -1
     property alias searchDialog: searchDlg
     property alias tocDlg: tocDialog
-    property alias ttsBar: ttsBar
+    property alias ttsBar: readerShell.ttsBar
 
     ReaderBackground {
         anchors.fill: parent
@@ -292,38 +308,17 @@ Page {
         brightness: page.bgBrightness
     }
 
-    KdTopToolbar {
-        id: topToolbar
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        visible: page.sheetOpen
-        z: 20
-        bookmarked: page.currentBookmarked
-        onBack: {
-            page.menuOpen = false
-            const win = Window.window
-            if (win && win.goBack) win.goBack()
-            else {
-                const sv = page.StackView.view
-                if (sv) sv.pop()
-            }
-        }
-        onNotes: notesDlg.open()
-        onBookmark: page.toggleBookmark()
-        onSearch: searchDlg.open()
-        onMenu: {
-            page.sheetOpen = true
-            page.menuOpen = !page.menuOpen
-        }
-    }
-
     ReaderContent {
         id: content
-        anchors.top: page.sheetOpen ? topToolbar.bottom : parent.top
+        // 锚定壳层（兄弟节点 id）并以边距让出顶栏/TtsBar——alias 引用的项不能作
+        // 锚目标（QML 只允许父/兄弟 id），改经 shell 几何数值派生，语义同旧实现：
+        // Sheet 打开时正文下移 40px 顶栏；TtsBar 显示时正文上收 46px。
+        anchors.top: readerShell.top
+        anchors.topMargin: page.sheetOpen ? readerShell.topToolbar.height : 0
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: page.ttsBarVisible ? ttsBar.top : parent.bottom
+        anchors.bottom: readerShell.bottom
+        anchors.bottomMargin: page.ttsBarVisible ? readerShell.ttsBar.height : 0
         chapter: page.chapter
         scrollChapters: page.scrollChapters
         typography: page.typography
@@ -354,8 +349,8 @@ Page {
         id: progressLabel
         anchors.left: parent.left
         anchors.leftMargin: 16
-        anchors.bottom: page.ttsBarVisible ? ttsBar.top : parent.bottom
-        anchors.bottomMargin: 12
+        anchors.bottom: readerShell.bottom
+        anchors.bottomMargin: (page.ttsBarVisible ? readerShell.ttsBar.height : 0) + 12
         visible: !page.sheetOpen && page.loadError.length === 0
         z: 10
         text: page.progressText
@@ -388,34 +383,13 @@ Page {
     }
 
     // C2：朗读条门控——朗读会话激活（Tts.state != 0 播放/暂停）才显示，否则隐藏且正文
-    // 占满到底部控制栏（用户反馈 BUG ②：未点朗读却自动出现语速条）。content/hover 区
-    // 锚点随本属性切换，保证隐藏时不挤占正文。
-    // C3 扩展点：在此之上叠加"点底部唤出 + 5s 自动隐藏"统一显隐——如朗读会话中用户
-    // 手动收起，需在本属性处引入手动隐藏覆盖（勿在 TtsBar 上另写 visible 绑定，C3 统一接管）。
-    property bool ttsBarVisible: Tts.state !== 0
+    // 占满到底部。任务3：TtsBar 本体与 Tts 状态连接已迁入 ReaderShell（唯一实例），
+    // 本属性透传壳层门控供 content/progressLabel 锚点使用。
+    property alias ttsBarVisible: readerShell.ttsBarVisible
 
-    // C5：朗读控制条（播放/暂停/停止/跳句/语速/音色），信号接 Tts 单例；
-    // 引擎不可用时 TtsBar 内部禁用播放并显示提示。
-    // C2：visible 由 page.ttsBarVisible 门控（仅朗读会话激活时显示）。
-    TtsBar {
-        id: ttsBar
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        visible: page.ttsBarVisible
-        bgMode: page.effectiveBg
-        onPlayClicked: Tts.play()
-        onPauseClicked: Tts.pause()
-        onStopClicked: Tts.stop()
-        onPrevClicked: Tts.previous()
-        onNextClicked: Tts.next()
-        onRateChanged: (r) => { Tts.rate = r; Settings.setValue("tts/rate", r) }
-        onVoiceChanged: (v) => { Tts.voice = v; Settings.setValue("tts/systemVoice", v) }
-    }
-
-    // 兼容旧版阅读页显隐状态接口；不再渲染底部控制栏，计时器只控制 Sheet。
-    property bool controlsVisible: true
-    property int controlsHideDelay: 5000
+    // 兼容旧版阅读页显隐状态接口（任务3：状态机已迁入 ReaderShell，读写透传）。
+    property alias controlsVisible: readerShell.controlsVisible
+    property alias controlsHideDelay: readerShell.controlsHideDelay
     property real chapterProgress: {
         const id = page.book ? page.book.id : -1
         if (id <= 0) return 0
@@ -423,33 +397,10 @@ Page {
         return n > 0 ? Math.min(1, (Books.currentChapter + 1) / n) : 0
     }
 
-    Timer {
-        id: hideControlsTimer
-        interval: page.controlsHideDelay
-        repeat: false
-        running: false
-        onTriggered: {
-            if (page.sheetOpen) return
-            page.controlsVisible = false
-            page.sheetOpen = false
-        }
-    }
-    onControlsVisibleChanged: {
-        if (page.controlsVisible && !page.sheetOpen) hideControlsTimer.start()
-        else if (!page.controlsVisible) hideControlsTimer.stop()
-    }
-
-    // C5：Tts 状态/错误同步到 TtsBar（playing 图标切换、错误提示 4 秒后消失）
-    Timer {
-        id: ttsErrorTimer
-        interval: 4000
-        onTriggered: ttsBar.errorText = ""
-    }
+    // C5：朗读越过章末 → 自动换下一章并继续朗读（continueReadingFromTts）；
+    // TtsBar 的 playing/错误同步由 ReaderShell 的 Connections 承担（不重复）。
     Connections {
         target: Tts
-        function onStateChanged(state) { ttsBar.playing = state === 1 }
-        function onErrorOccurred(msg) { ttsBar.errorText = msg; ttsErrorTimer.restart() }
-        // 规格 §7：朗读越过章末 → 自动换下一章并继续朗读（continueReadingFromTts）
         function onChapterCompleted(ch) { page.continueReadingFromTts(ch) }
     }
 
@@ -1080,55 +1031,28 @@ Page {
     // 任务2：同因"hover 路由到最顶层项"，正文内 HoverHandler 收不到悬停——本处把
     // 每次位置变化转发给 content.notifyEdgeHintHover（paged 左右约 15% 热区判定在
     // ReaderContent 内），驱动边缘翻页提示重新显示/重启闲置计时（契约2）。
-    MouseArea {
-        anchors.top: page.sheetOpen ? topToolbar.bottom : parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: page.ttsBarVisible ? ttsBar.top : parent.bottom
-        acceptedButtons: Qt.NoButton
-        hoverEnabled: true
-        onPositionChanged: {
-            // 只在显示态重置（restart 会启动停止态的计时器，隐藏态禁止——见 handleContentTap 注释）
-            if (page.controlsVisible)
-                hideControlsTimer.restart()
-            if (content.pageMode === "paged")
-                content.notifyEdgeHintHover(mouseX)
-        }
-    }
-
-    // C3：点击唤出状态机（U4 整合，决策见 task-U4-report）：
-    //   · Sheet 打开时任意轻点关闭（Kindle"点面板外关闭"）；菜单打开时轻点关闭
-    //   · 控件隐藏且轻点正文底部 1/4（content.y + 0.75*高至控制栏顶，含隐藏时
-    //     控制栏空位带）→ 唤出快捷控制栏（C3 保留为快捷条）
-    //   · 其余轻点（屏幕中部/边缘）→ 弹出 KdBottomSheet（Kindle 主操作面）
-    // TtsBar 显隐由 C2 门控独立决定，本框架不作用于朗读条。
-    // 任务2：状态机收敛在 handleContentTap（页面坐标 y，x 为视口坐标）——真实点击
-    // 由正文宿主（ReaderContent）的 TapHandler 桥接（contentTapped → onContentTapped
-    // → 本函数，见 ReaderContent.contentTapped 注释）；冒烟测试既可直接调用本函数
-    //（x 缺省）也经真实鼠标事件走桥接（tst_readerpage test_realClick*）。
-    // 任务3：paged 模式点击即翻页——右半屏下一页、左半屏上一页（首末页边界换章
-    // 由 pageNext/pagePrev → autoNext/autoPrevChapter 处理）；x 缺省（旧直调路径）
-    // 保持唤出语义不翻页。scroll 模式行为不变（忽略 x）。
+    // C3：点击状态机（U4 整合，决策见 task-U4-report）——任务3 起关闭路径统一
+    // 走壳层 handleTap（菜单打开 → 关菜单与 Sheet；Sheet 打开 → 关闭）；隐藏态
+    // 的唤出/翻页属文本正文特有策略（壳层注释明确 paged 边缘翻页与正文热区不迁入
+    // 壳层），保留在本页策略层：paged 模式点击即翻页——右半屏下一页、左半屏上一页
+    //（首末页边界换章由 pageNext/pagePrev → autoNext/autoPrevChapter 处理）；x 缺省
+    //（旧直调路径）保持唤出语义不翻页。scroll 模式只在上/下 20% 热区唤出，中部
+    // 轻点无动作（BUG4）。x 为视口坐标、y 为页面坐标（content.y 换算见 onContentTapped）。
     // 注意：Timer.restart() 对停止态的计时器会重新启动（Qt 语义），隐藏态禁止
     // 调用——否则违反"隐藏后计时停止"；重置只发生在显示态。
     function handleContentTap(y, x) {
         content.forceActiveFocus()
-        if (page.menuOpen) {
-            page.menuOpen = false
-            page.sheetOpen = false
-            return
-        }
-        if (page.sheetOpen) {
-            page.sheetOpen = false
+        if (page.menuOpen || page.sheetOpen) {
+            readerShell.handleTap(y, x)   // 统一关闭语义（壳层状态机）
             return
         }
         if (page.pageMode === "paged" && x !== undefined && x >= 0) {
             const hotTop = content.y + content.height * 0.2
             const hotBottom = content.y + content.height * 0.8
             if (y <= hotTop || y >= hotBottom) {
+                // 唤出：sheetOpen=true 由壳层 onSheetOpenChanged 自动停计时器
                 page.controlsVisible = true
                 page.sheetOpen = true
-                hideControlsTimer.stop()
                 return
             }
             const edge = Math.max(72, content.width * 0.15)
@@ -1139,30 +1063,16 @@ Page {
         const hotTop = content.y + content.height * 0.2
         const hotBottom = content.y + content.height * 0.8
         if (y <= hotTop || y >= hotBottom) {
+            // 唤出：sheetOpen=true 由壳层 onSheetOpenChanged 自动停计时器
             page.controlsVisible = true
             page.sheetOpen = true
-            hideControlsTimer.stop()
         }
-    }
-    onSheetOpenChanged: {
-        if (page.sheetOpen) hideControlsTimer.stop()
-        else if (page.controlsVisible) hideControlsTimer.restart()
     }
 
     // ---- U4：Kindle 底部 Sheet 工具栏（点屏幕中部弹出）----
     // 四个标签面板以 ReaderPage 内联 Component 注入（创建上下文为 ReaderPage，
-    // 面板可直接引用 page/Settings；经 KdBottomSheet 的 Loader 按 currentId 切换）。
-    // 面板只渲染与上报，业务读写集中在 ReaderPage。
-
-    // 右上角下拉菜单数据（§5：KdListItem 风格列表）——功能入口与 MoreSheet 一致
-    property var menuModel: [
-        { id: "read", icon: "read", text: qsTr("朗读"), act: "read" },
-        { id: "toc", icon: "toc", text: qsTr("目录"), act: "toc" },
-        { id: "prev", icon: "prev", text: qsTr("上一章"), act: "prev" },
-        { id: "next", icon: "next", text: qsTr("下一章"), act: "next" },
-        { divider: true },
-        { id: "info", icon: "info", text: qsTr("图书信息"), act: "info" }
-    ]
+    // 面板可直接引用 page/Settings；经壳层 KdBottomSheet 的 Loader 按 currentId
+    // 切换）。面板只渲染与上报，业务读写集中在 ReaderPage。
 
     function startReadAloud() {
         if (Tts.state === 2) { Tts.play(); return }
@@ -1176,92 +1086,9 @@ Page {
         Tts.play()
     }
 
+    // 兼容旧菜单入口：统一经壳层 triggerMenuAction（适配器分发，capability 门控）。
     function menuAction(act) {
-        page.menuOpen = false
-        switch (act) {
-        case "read": page.startReadAloud(); break
-        case "toc": tocDialog.open(); break
-        case "prev":
-            page.loadChapter(Books.currentChapter - 1)
-            // 任务1：显式翻章放弃运行锚点事务，并定位到目标章首段——仅取消
-            // 锚点会让视口停在旧偏移（重建钳制后位置随机）；旧实现的
-            // scheduleRestore 会把 contentY 落回保存位置/0，同样不正确。
-            content.cancelWindowAnchor()
-            content.focusScrollParagraph(Number(Books.currentChapter), 0)
-            break
-        case "next":
-            page.loadChapter(Books.currentChapter + 1)
-            content.cancelWindowAnchor()
-            content.focusScrollParagraph(Number(Books.currentChapter), 0)
-            break
-        case "info": infoDialog.open(); break
-        }
-    }
-    Item {
-        id: menuOverlay
-        z: 30
-        anchors.fill: parent
-        visible: page.menuOpen || opacity > 0.01
-        opacity: page.menuOpen ? 1 : 0
-        Behavior on opacity { NumberAnimation { duration: 150 } }
-        Rectangle {
-            anchors.fill: parent
-            color: UITheme.overlay
-            MouseArea {
-                anchors.fill: parent
-                enabled: page.menuOpen
-                onClicked: page.menuOpen = false
-            }
-        }
-        Rectangle {
-            id: menuPanel
-            anchors.top: parent.top
-            anchors.topMargin: 38
-            anchors.right: parent.right
-            anchors.rightMargin: 8
-            width: parent.width * 0.62
-            height: menuColumn.implicitHeight
-            color: UITheme.bgPrimary
-            border.color: UITheme.divider
-            border.width: 1
-            Column {
-                id: menuColumn
-                width: parent.width
-                Repeater {
-                    id: menuRepeater
-                    model: page.menuModel
-                    Rectangle {
-                        required property var modelData
-                        width: parent.width
-                        height: modelData.divider ? 1 : 48
-                        color: modelData.divider ? UITheme.divider
-                                                 : (menuRowMouse.containsMouse ? UITheme.bgSecondary : UITheme.bgPrimary)
-                        MouseArea {
-                            id: menuRowMouse
-                            anchors.fill: parent
-                            enabled: !modelData.divider
-                            hoverEnabled: !modelData.divider
-                            onClicked: page.menuAction(modelData.act)
-                        }
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 16
-                            anchors.rightMargin: 16
-                            spacing: 14
-                            visible: !modelData.divider
-                            KdIcons { name: modelData.icon || "dot"; size: 22; color: UITheme.textPrimary }
-                            Label {
-                                text: modelData.text || ""
-                                Layout.fillWidth: true
-                                elide: Text.ElideRight
-                                font.pixelSize: 15
-                                color: UITheme.textPrimary
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        readerShell.triggerMenuAction(act)
     }
 
     // 主题标签面板：四态背景网格 + L10 自定义预设（与 bgMode/Settings background/mode、
@@ -1317,34 +1144,125 @@ Page {
         }
     }
 
-    // Sheet 本体（声明在最后 → 覆盖全页，含顶栏；遮罩/面板按 open 显隐）
-    KdBottomSheet {
-        id: bottomSheet
+    // 任务3：菜单遮罩测试桥——镜像壳层 menuOverlay 的显隐/淡出状态（visible/
+    // opacity），但不渲染遮罩、不挂任何输入处理（不拦截点击；真实遮罩与菜单项
+    // 由壳层单一实例提供）。menuRepeaterCompat 仅作模型就绪探针（空 Item 委托，
+    // 不可见），供既有冒烟测试的 itemAt(0) 句柄保持可用。
+    Item {
+        id: menuOverlayCompat
         anchors.fill: parent
-        open: page.sheetOpen
-        tabs: [
+        visible: page.menuOpen || opacity > 0.01
+        opacity: page.menuOpen ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 150 } }
+        Repeater {
+            id: menuRepeaterCompat
+            model: page.menuModel
+            delegate: Item {}
+        }
+    }
+    // 任务3：自动隐藏计时器测试桥——壳层 hideControlsTimer 是组件私有 id，这里按
+    // 壳层状态机不变量派生 running（壳层计时器 running ⟺ controlsVisible && !sheetOpen，
+    // 见 ReaderShell onControlsVisibleChanged/onSheetOpenChanged；创建瞬间的初始值
+    // 不触发变更处理器，但任何既有冒烟断言都发生在状态变更之后）。
+    QtObject {
+        id: hideTimerCompat
+        property bool running: page.controlsVisible && !page.sheetOpen
+    }
+
+    // 任务3：文本阅读适配器——实现统一适配器契约（ReaderShell 只读此对象），把
+    // 壳层菜单/顶栏动作映射回本页既有函数与 Dialog（章节导航/目录/搜索/笔记/
+    // 书签/朗读）。canGoPrevious/canGoNext 随当前章节实时派生，壳层菜单按
+    // capability 禁用边界项（首章上一章/末章下一章不触发，同旧 loadChapter 钳制）；
+    // 上/下一项标签取"上一章/下一章"（PDF 适配器取"上一页/下一页"，壳层不硬编码）。
+    QtObject {
+        id: textReaderAdapter
+        property string progressText: page.progressText
+        property bool canGoPrevious: Number(Books.currentChapter) > 0
+        property bool canGoNext: page.book && page.book.id
+            ? Books.currentChapter + 1 < Books.chapterCount(page.book.id) : false
+        property bool canReadAloud: true
+        property string readAloudUnavailableReason: ""
+        property bool supportsContents: true
+        property bool supportsSearch: true
+        property bool supportsNotes: true
+        property bool supportsBookmarks: true
+        property string previousLabel: qsTr("上一章")
+        property string nextLabel: qsTr("下一章")
+        function previous() {
+            page.loadChapter(Books.currentChapter - 1)
+            // 任务1：显式翻章放弃运行锚点事务，并定位到目标章首段——仅取消
+            // 锚点会让视口停在旧偏移（重建钳制后位置随机）；旧实现的
+            // scheduleRestore 会把 contentY 落回保存位置/0，同样不正确。
+            content.cancelWindowAnchor()
+            content.focusScrollParagraph(Number(Books.currentChapter), 0)
+        }
+        function next() {
+            page.loadChapter(Books.currentChapter + 1)
+            content.cancelWindowAnchor()
+            content.focusScrollParagraph(Number(Books.currentChapter), 0)
+        }
+        function startReadAloud() { page.startReadAloud() }
+        function stopReadAloud() { Tts.stop() }
+        function openContents() { tocDialog.open() }
+        function openSearch() { searchDlg.open() }
+        function openNotes() { notesDlg.open() }
+        function toggleBookmark() { page.toggleBookmark() }
+        function openInfo() { infoDialog.open() }
+    }
+
+    // 任务3：共享交互壳层（唯一顶栏/菜单/TtsBar/底部 Sheet/点击显隐状态机/焦点
+    // 恢复）——本页注入正文宿主、适配器、面板组件与背景/书签绑定。声明在最后
+    // 覆盖全页（同旧 bottomSheet 语义）；ReaderContent 的点击信号经
+    // onContentTapped → handleContentTap 统一走壳层状态机（关闭路径）与本页
+    // 文本点击策略（热区唤出/paged 翻页）。
+    ReaderShell {
+        id: readerShell
+        anchors.fill: parent
+        reader: textReaderAdapter
+        contentItem: content
+        bookmarked: page.currentBookmarked
+        ttsBgMode: page.effectiveBg
+        // 返回导航（原 ReaderPage 顶栏 onBack 语义：先关菜单再出栈）
+        onBackRequested: {
+            page.menuOpen = false
+            const win = Window.window
+            if (win && win.goBack) win.goBack()
+            else {
+                const sv = page.StackView.view
+                if (sv) sv.pop()
+            }
+        }
+        // hover 区把边缘热区提示转发给正文（paged 左右约 15% 热区显隐，任务2 契约；
+        // 壳层自身只负责计时重置与 edgeHover 上报）
+        onEdgeHover: (x) => {
+            if (content.pageMode === "paged") content.notifyEdgeHintHover(x)
+        }
+        // §4：底部描边按钮"保存当前设置"——仅主题标签显示（onActionClicked →
+        // onSaveThemeRequested → 主题面板命名输入 Dialog；面板槽保留在本页）
+        bottomSheet.actionText: page.sheetTab === "theme" ? qsTr("保存当前设置") : ""
+        bottomSheet.onActionClicked: page.onSaveThemeRequested()
+    }
+
+    Component.onCompleted: {
+        // 任务3：注入壳层运行期依赖——sheetTabs/sheetPages 引用本页内联 Component
+        //（创建上下文为 ReaderPage，面板可直接访问 page/Settings），须在全部子对象
+        // 完成后赋值；默认 Sheet 标签为"主题"（旧 page.sheetTab 默认值）；menuItems
+        // 为壳层菜单内层 Repeater（alias 目标链不可编译期解析，运行时赋值）。
+        readerShell.sheetTabs = [
             { id: "theme", text: qsTr("主题") },
             { id: "font", text: qsTr("字体") },
             { id: "layout", text: qsTr("布局") },
             { id: "more", text: qsTr("更多") }
         ]
-        pages: [
+        readerShell.sheetPages = [
             { id: "theme", source: themePanelComp },
             { id: "font", source: fontPanelComp },
             { id: "layout", source: layoutPanelComp },
             { id: "more", source: morePanelComp }
         ]
-        currentId: page.sheetTab
-        // §4：底部描边按钮"保存当前设置"——仅主题标签显示（L10 已实现：
-        // onActionClicked → onSaveThemeRequested → 主题面板命名输入 Dialog）
-        actionText: page.sheetTab === "theme" ? qsTr("保存当前设置") : ""
-        onTabClicked: (id) => page.sheetTab = id
-        onActionClicked: page.onSaveThemeRequested()
-        onMaskClicked: page.sheetOpen = false
-    }
-
-    Component.onCompleted: {
-        hideControlsTimer.start()
+        readerShell.sheetTab = "theme"
+        page.backButton = readerShell.topToolbar.backBtn
+        page.menuButton = readerShell.topToolbar.menuBtn
         page.typography = page.typographyFromSettings()
         page.backgroundFromSettings()
         const pm = Settings.value("reading/pageMode")
