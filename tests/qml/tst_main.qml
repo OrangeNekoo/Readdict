@@ -355,6 +355,81 @@ Item {
             adapter.canReadAloud = true
             shell.triggerMenuAction("read")
             compare(adapter.readCalls, 1, "朗读可用时应调用一次 startReadAloud")
+            // info 项应可点击（enabled 不得为 undefined/假值）
+            verify(!!shell.menuItem("info").enabled, "info 菜单项应可点击（enabled）")
+            // 上/下一项标签应随适配器动态更新（非一次性快照）
+            adapter.previousLabel = "上一节"
+            adapter.nextLabel = "下一节"
+            compare(shell.menuItem("prev").text, "上一节",
+                    "prev 标签应随适配器 previousLabel 动态更新")
+            compare(shell.menuItem("next").text, "下一节",
+                    "next 标签应随适配器 nextLabel 动态更新")
+            adapter.previousLabel = "上一页"
+            adapter.nextLabel = "下一页"
+            // contentItem 赋值后应延迟恢复焦点（正文持有 activeFocus）
+            shell.menuOpen = false
+            shell.sheetOpen = false
+            var focusTarget = Qt.createQmlObject('import QtQuick; Item {}', root)
+            shell.contentItem = focusTarget
+            tryVerify(function () { return focusTarget.activeFocus }, 2000,
+                      "contentItem 应在赋值后获得 activeFocus")
+            // TtsBar：语速持久化到设置、背景随 ttsBgMode
+            var prevRate = Settings.value("tts/rate")
+            shell.ttsBar.rateChanged(1.25)
+            compare(Settings.value("tts/rate"), 1.25, "语速应持久化到设置")
+            shell.ttsBgMode = "dark"
+            compare(shell.ttsBar.bgMode, "dark", "TtsBar 背景应随 ttsBgMode 更新")
+            shell.ttsBgMode = "light"
+            Settings.setValue("tts/rate", prevRate === undefined ? 1.0 : prevRate)
+            loader.destroy()
+            adapter.destroy()
+        }
+        // 关闭路径与自动隐藏：菜单/sheet 的多种关闭方式 + 超时自动隐藏回退。
+        function test_readerShellClosePathsAndAutoHide() {
+            Tts.stop()
+            var adapter = Qt.createQmlObject('import QtQuick; QtObject {
+                property bool canReadAloud: false
+                property string readAloudUnavailableReason: ""
+                property bool canGoPrevious: true
+                property bool canGoNext: true
+                property string previousLabel: "上一页"
+                property string nextLabel: "下一页"
+                function startReadAloud() {}
+                function stopReadAloud() {}
+                function previous() {}
+                function next() {}
+            }', root)
+            var loader = readerShellComp.createObject(root)
+            var shell = loader.item
+            shell.reader = adapter
+            // 关闭路径：triggerMenuAction 关闭菜单
+            shell.openMenu()
+            verify(shell.menuOpen, "openMenu() 应打开菜单")
+            shell.triggerMenuAction("info")
+            verify(!shell.menuOpen, "triggerMenuAction 应关闭菜单")
+            // 内容点击：菜单+sheet 同时关闭
+            shell.openMenu()
+            shell.handleTap(200, 100)
+            verify(!shell.menuOpen && !shell.sheetOpen,
+                   "内容点击应同时关闭菜单与 sheet")
+            // 内容点击：sheet 打开时关闭
+            shell.sheetOpen = true
+            shell.handleTap(200, 100)
+            verify(!shell.sheetOpen, "sheet 打开时内容点击应关闭")
+            // 隐藏态内容点击唤出 sheet（ReaderPage 唤出语义）
+            shell.handleTap(200, 100)
+            verify(shell.sheetOpen, "隐藏态内容点击应唤出 sheet")
+            verify(shell.controlsVisible, "唤出应置 controlsVisible")
+            // 底部 Sheet 遮罩点击关闭
+            shell.bottomSheet.maskClicked()
+            verify(!shell.sheetOpen, "sheet 遮罩点击应关闭")
+            // 自动隐藏：关闭后计时重启，超时回退隐藏态（controlsVisible=false）
+            shell.controlsHideDelay = 100
+            shell.sheetOpen = true
+            shell.handleTap(200, 100)
+            verify(shell.controlsVisible, "关闭后 controlsVisible 应保持")
+            wait(300)
+            verify(!shell.controlsVisible, "超时后应自动隐藏（controlsVisible=false）")
             loader.destroy()
             adapter.destroy()
         }

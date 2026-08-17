@@ -29,6 +29,9 @@ Item {
     // 测试可见句柄。
     property alias topToolbar: topToolbar
     property alias ttsBar: ttsBar
+    property alias bottomSheet: bottomSheet
+    // TtsBar 前景/底色（随阅读背景切换，由注入方提供；浅色默认）。
+    property string ttsBgMode: "light"
     // 底部 Sheet 面板由适配器注入（主题/字体/布局等格式专属内容不迁入壳层）。
     property var sheetTabs: []
     property var sheetPages: []
@@ -41,12 +44,18 @@ Item {
     property int controlsHideDelay: 5000
 
     // 自动隐藏计时器（只控制 Sheet/顶栏；TtsBar 显隐由 state 独立门控）。
+    // 语义同 ReaderPage：显示态（controlsVisible && !sheetOpen）期间计时，超时
+    // 回退隐藏态；hover/点击重置；Sheet 打开时停止。
     Timer {
         id: hideControlsTimer
         interval: shell.controlsHideDelay
         repeat: false
         running: false
-        onTriggered: { if (!shell.sheetOpen) shell.sheetOpen = false }
+        onTriggered: {
+            if (shell.sheetOpen) return
+            shell.controlsVisible = false
+            shell.sheetOpen = false
+        }
     }
     onControlsVisibleChanged: {
         if (shell.controlsVisible && !shell.sheetOpen) hideControlsTimer.start()
@@ -82,7 +91,7 @@ Item {
         { id: "next", icon: "next", text: shell.nextLabel, act: "next",
           enabled: shell.nextEnabled },
         { divider: true },
-        { id: "info", icon: "info", text: qsTr("图书信息"), act: "info" }
+        { id: "info", icon: "info", text: qsTr("图书信息"), act: "info", enabled: true }
     ]
 
     function openMenu() {
@@ -101,7 +110,8 @@ Item {
         switch (id) {
         case "read":
             // 朗读禁用项不调用适配器、不启动 TTS（TtsBar 由 Tts.state 门控不显示）。
-            if (shell.readEnabled) shell.reader.startReadAloud()
+            if (shell.readEnabled && shell.reader.startReadAloud)
+                shell.reader.startReadAloud()
             break
         case "toc":
             if (shell.tocEnabled && shell.reader.openContents) shell.reader.openContents()
@@ -153,10 +163,14 @@ Item {
     }
 
     // 统一点击状态机（正文宿主桥接到本函数：y 页面坐标、x 视口坐标，可缺省）。
+    // 语义对齐 ReaderPage（scroll 模式）：菜单打开 → 关闭菜单与 sheet；
+    // sheet 打开 → 关闭；隐藏态 → 唤出（controlsVisible=true）。paged 边缘翻页
+    // 属正文侧逻辑（ReaderContent），不迁入壳层。
     function handleTap(y, x) {
         if (shell.contentItem) shell.contentItem.forceActiveFocus()
         if (shell.menuOpen) { shell.menuOpen = false; shell.sheetOpen = false; return }
         if (shell.sheetOpen) { shell.sheetOpen = false; return }
+        shell.controlsVisible = true
         shell.sheetOpen = true
         hideControlsTimer.stop()
     }
@@ -169,13 +183,14 @@ Item {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         visible: shell.ttsBarVisible
+        bgMode: shell.ttsBgMode
         onPlayClicked: Tts.play()
         onPauseClicked: Tts.pause()
         onStopClicked: Tts.stop()
         onPrevClicked: Tts.previous()
         onNextClicked: Tts.next()
-        onRateChanged: (r) => { Tts.rate = r }
-        onVoiceChanged: (v) => { Tts.voice = v }
+        onRateChanged: (r) => { Tts.rate = r; Settings.setValue("tts/rate", r) }
+        onVoiceChanged: (v) => { Tts.voice = v; Settings.setValue("tts/systemVoice", v) }
     }
     Timer {
         id: ttsErrorTimer
@@ -244,8 +259,8 @@ Item {
                         MouseArea {
                             id: menuRowMouse
                             anchors.fill: parent
-                            enabled: !modelData.divider && !!modelData.enabled
-                            hoverEnabled: !modelData.divider && !!modelData.enabled
+                            enabled: !modelData.divider && modelData.enabled !== false
+                            hoverEnabled: !modelData.divider && modelData.enabled !== false
                             onClicked: shell.triggerMenuAction(modelData.act)
                         }
                         RowLayout {
@@ -257,14 +272,14 @@ Item {
                             KdIcons {
                                 name: modelData.icon || "dot"
                                 size: 22
-                                color: modelData.enabled ? UITheme.textPrimary : UITheme.textDisabled
+                                color: modelData.enabled !== false ? UITheme.textPrimary : UITheme.textDisabled
                             }
                             Label {
                                 text: modelData.text || ""
                                 Layout.fillWidth: true
                                 elide: Text.ElideRight
                                 font.pixelSize: 15
-                                color: modelData.enabled ? UITheme.textPrimary : UITheme.textDisabled
+                                color: modelData.enabled !== false ? UITheme.textPrimary : UITheme.textDisabled
                             }
                             // 朗读禁用原因提示
                             Label {
@@ -288,6 +303,8 @@ Item {
     // 不会被本钩子抢焦点）。
     focus: true
     Component.onCompleted: shell.restoreContentFocus()
+    // 注入方在创建后才赋值 contentItem——赋值即恢复焦点（延迟焦点路径）。
+    onContentItemChanged: shell.restoreContentFocus()
     StackView.onActivated: shell.restoreContentFocus()
     function restoreContentFocus() {
         if (shell.contentItem && !shell.menuOpen && !shell.sheetOpen)
