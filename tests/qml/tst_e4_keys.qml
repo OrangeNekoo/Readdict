@@ -704,6 +704,122 @@ Item {
             h.stack.destroy()
         }
 
+        // 任务2：scroll 模式兼容旧整数章节收藏——整数显示点亮；toggle 取消后
+        // 整数与章节键一并清除（不遗留）。
+        function test_scrollLegacyIntegerBookmarkShowsAndClears() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            page.pageMode = "scroll"
+            Books.currentChapter = 0
+            page.loadChapter(0)
+            wait(100)
+            // 旧整数章节收藏（迁移前格式）
+            page.bookmarks = [Books.currentChapter]
+            page.syncCurrentBookmark()
+            verify(page.currentBookmarked, "旧整数章节收藏应点亮")
+            tryVerify(function () { return page.topToolbar.bookmarked }, 3000,
+                      "顶栏应反映旧整数章节收藏")
+            // 取消：整数与章节键一并清除
+            page.toggleBookmark()
+            verify(!page.currentBookmarked, "取消后旧整数章节收藏应熄灭")
+            var saved = Settings.value("bookmarks/" + book.id)
+            verify(!saved || (saved.indexOf(Books.currentChapter) < 0
+                              && saved.indexOf("chapter:" + Books.currentChapter) < 0),
+                   "取消后持久化不应残留旧整数/章节键，实际=" + JSON.stringify(saved))
+            h.stack.destroy()
+        }
+
+        // 任务2：scroll⇄paged 方向切换立即刷新收藏态——paged 页键不算 scroll
+        // 章节收藏，scroll 章节键也不算 paged 页收藏。
+        function test_bookmarkStateRefreshesOnModeSwitch() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            // paged：收藏第 1 页（page:0:1）
+            page.pageMode = "paged"
+            Books.currentChapter = 0
+            page.loadChapter(0)
+            verify(waitPagesSettled(cv),
+                   "章 0 页面模型应就绪（pageCount=" + cv.pageCount + "）")
+            cv.goToPage(1)
+            tryVerify(function () { return cv.currentPage === 1 }, 3000, "应切到第 1 页")
+            page.toggleBookmark()
+            verify(page.currentBookmarked, "paged 第 1 页应点亮")
+            // 切 scroll：章节键语义，页键收藏不点亮
+            page.pageMode = "scroll"
+            tryVerify(function () { return !page.currentBookmarked }, 3000,
+                      "切 scroll 后页键收藏不应点亮")
+            // scroll 下收藏章节 → 点亮
+            page.toggleBookmark()
+            verify(page.currentBookmarked, "scroll 章节收藏应点亮")
+            // 切回 paged：currentPage 归 0，章节键不算页收藏 → 熄灭
+            page.pageMode = "paged"
+            tryVerify(function () { return !page.currentBookmarked }, 3000,
+                      "切回 paged 第 0 页不应被章节收藏点亮")
+            // 页键收藏仍保留：回第 1 页重新点亮
+            cv.goToPage(1)
+            tryVerify(function () { return page.currentBookmarked }, 3000,
+                      "回第 1 页页键收藏应保留点亮")
+            // 持久化：页键与章节键并存，互不覆盖
+            var saved = Settings.value("bookmarks/" + book.id)
+            verify(saved && saved.indexOf("page:0:1") >= 0
+                   && saved.indexOf("chapter:" + Books.currentChapter) >= 0,
+                   "持久化应并存页键与章节键，实际=" + JSON.stringify(saved))
+            h.stack.destroy()
+        }
+
+        // 任务2：换章后相同页号不串用收藏——页键含章节号，章 0 第 1 页收藏
+        // 不影响章 1 第 1 页；返回章 0 第 1 页仍点亮。
+        function test_pagedBookmarkDoesNotLeakAcrossChapters() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.pageMode = "paged"
+            Books.currentChapter = 0
+            page.loadChapter(0)
+            verify(waitPagesSettled(cv),
+                   "章 0 页面模型应就绪（pageCount=" + cv.pageCount + "）")
+            verify(cv.pageCount >= 2, "章 0 应至少 2 页，实际 " + cv.pageCount)
+            cv.goToPage(1)
+            tryVerify(function () { return cv.currentPage === 1 }, 3000, "应切到章 0 第 1 页")
+            page.toggleBookmark()
+            verify(page.currentBookmarked, "章 0 第 1 页应点亮")
+            // 换章：章 1 相同页号不应串用
+            Books.currentChapter = 1
+            page.loadChapter(1)
+            verify(waitPagesSettled(cv),
+                   "章 1 页面模型应就绪（pageCount=" + cv.pageCount + "）")
+            if (cv.pageCount >= 2) {
+                cv.goToPage(1)
+                tryVerify(function () { return cv.currentPage === 1 }, 3000,
+                          "应切到章 1 第 1 页")
+                tryVerify(function () { return !page.currentBookmarked }, 3000,
+                          "章 1 第 1 页不应被章 0 收藏串用")
+            } else {
+                compare(cv.currentPage, 0, "章 1 单页应钳制到第 0 页")
+                verify(!page.currentBookmarked, "章 1 第 0 页不应被章 0 第 1 页收藏点亮")
+            }
+            // 返回章 0 第 1 页：页键收藏恢复点亮
+            Books.currentChapter = 0
+            page.loadChapter(0)
+            verify(waitPagesSettled(cv),
+                   "章 0 页面模型应再次就绪（pageCount=" + cv.pageCount + "）")
+            cv.goToPage(1)
+            tryVerify(function () { return page.currentBookmarked }, 3000,
+                      "返回章 0 第 1 页应重新点亮")
+            // 持久化：页键精确含章节号
+            var saved = Settings.value("bookmarks/" + book.id)
+            verify(saved && saved.indexOf("page:0:1") >= 0,
+                   "持久化应含 page:0:1，实际=" + JSON.stringify(saved))
+            h.stack.destroy()
+        }
+
         // 横翻：章末页再 → 翻过章末进入下一章（真实书籍语义）；末章 → 不越
         function test_pagedLastPageAdvancesChapter() {
             var book = findBook("multibook")

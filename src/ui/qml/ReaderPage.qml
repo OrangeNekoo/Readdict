@@ -734,20 +734,28 @@ Page {
     }
 
     // 旧 Settings 数组整数按章节键解释；非法/重复键去重（只清洗 bookmarks 键，
-    // 不修改其它设置）。保留原始值，仅剔除非法项与完全重复项。
+    // 不修改其它设置）。仅保留：>=0 的整数章节索引（QML 读回为 number）、
+    // 合法 "chapter:<整数>=0"、"page:<章节整数>=0:<页整数>=0"；非法数值/格式
+    // 清除。去重按规范化键（Number 归一化，消除前导零重复），保留原始值。
     function normalizeBookmarks(list) {
         var result = []
         var seen = {}
         for (var i = 0; i < list.length; ++i) {
             var v = list[i]
-            var ok = false
-            if (typeof v === "number") ok = true                      // 旧整数章节索引
-            else if (typeof v === "string" && (v.indexOf("chapter:") === 0
-                    || v.indexOf("page:") === 0)) ok = true           // 章节/页键
-            if (!ok) continue
-            var seenKey = String(v)
-            if (seen[seenKey]) continue
-            seen[seenKey] = true
+            var key = null
+            if (typeof v === "number") {
+                if (Number.isInteger(v) && v >= 0) key = "int:" + v
+            } else if (typeof v === "string") {
+                var m = /^chapter:(\d+)$/.exec(v)
+                if (m) key = "chapter:" + Number(m[1])
+                else {
+                    m = /^page:(\d+):(\d+)$/.exec(v)
+                    if (m) key = "page:" + Number(m[1]) + ":" + Number(m[2])
+                }
+            }
+            if (key === null) continue    // 非法数值/格式清除
+            if (seen[key]) continue       // 重复键去重
+            seen[key] = true
             result.push(v)
         }
         return result
@@ -764,13 +772,17 @@ Page {
             if (i >= 0) list.splice(i, 1)
             else list.push(key)
         } else {
-            // scroll：取消时同时清掉新章节键与旧整数章节项；新增写新章节键
+            // scroll：按值一次性过滤新章节键与旧整数章节项（双键并存时顺序
+            // splice 会因索引位移误删后续项/遗留收藏）；未收藏则写新章节键
             const key = "chapter:" + ch
-            const ik = list.indexOf(key)
-            const il = list.indexOf(ch)
-            if (ik >= 0) list.splice(ik, 1)
-            if (il >= 0) list.splice(il, 1)
-            if (ik < 0 && il < 0) list.push(key)
+            var had = false
+            var kept = []
+            for (var k = 0; k < list.length; ++k) {
+                if (list[k] === key || list[k] === ch) { had = true; continue }
+                kept.push(list[k])
+            }
+            if (!had) kept.push(key)
+            list = kept
         }
         page.bookmarks = list
         Settings.setValue("bookmarks/" + page.book.id, list)
