@@ -607,6 +607,61 @@ Item {
                       "渲染应稳定再销毁，实际 " + page.pdfView.status)
             stack.destroy()
         }
+        // 任务3 复审（Important）：PDF 笔记列表删除必须即时刷新列表数据与标题计数。
+        // 回归点：删除按钮此前只 Highlights.removeHighlight 不 reloadPdfHighlights，
+        // 列表行与标题（N）会保留已删除行直到 Dialog 重开。
+        function test_pdfNotesDeleteRefreshesListAndTitle() {
+            var id = 999121
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/PdfReaderPage.qml",
+                       { book: { id: id, title: "删除刷新PDF", path: TestEnv.textPdfSource } })
+            var page = stack.currentItem
+            verify(page !== null, "PdfReaderPage 应被 push 进 StackView")
+            tryVerify(function () { return page.pdfDocument.status === PdfDocument.Ready }, 15000,
+                      "文本 PDF 应加载为 Ready")
+
+            // 经真实顶栏路径创建一条 PDF 笔记（有选区 → 编辑 Dialog → 确认）。
+            page.activePdfView.selectAll()
+            tryVerify(function () { return String(page.activePdfView.selectedText).length > 0 }, 3000,
+                      "selectAll 后活动视图应有选中文字")
+            page.readerShell.topToolbar.topToolbarButtons[1].clicked()
+            tryVerify(function () { return page.pdfNoteDialog.visible }, 3000,
+                      "顶栏笔记按钮应打开 PDF 选区笔记 Dialog")
+            page.pdfNoteDialog.noteArea.text = "删除刷新测试"
+            page.pdfNoteDialog.accept()
+            tryVerify(function () { return page.pdfHighlights.length === 1 }, 3000,
+                      "确认选区笔记后列表数据应恰好 1 行，实际 " + page.pdfHighlights.length)
+
+            // 无选区时再次点顶栏笔记 → 打开管理列表。Dialog 打开动画完成（opened
+            // 信号）才触发 onOpened 刷新；必须先等 opened 已发出再点删除，否则延迟
+            // 刷新会掩盖回归（删除后 onOpened 补跑一次 reload 误判为已刷新）。
+            var trace = Qt.createQmlObject(
+                "import QtQuick; Item { property var dlg; property int notesOpened: 0;" +
+                " Connections { target: dlg; function onOpened() { notesOpened++ } } }", root)
+            trace.dlg = page.pdfNotesDialog
+            page.readerShell.topToolbar.topToolbarButtons[1].clicked()
+            tryVerify(function () { return page.pdfNotesDialog.visible }, 3000,
+                      "无选区时顶栏笔记按钮应打开 PDF 笔记列表")
+            tryVerify(function () { return trace.notesOpened >= 1 }, 3000,
+                      "PDF 笔记列表应完成打开动画（onOpened 已触发）")
+            tryVerify(function () { return page.pdfNotesDialog.title.toString().indexOf("（1）") >= 0 }, 3000,
+                      "删除前标题计数应显示 1，实际标题 " + page.pdfNotesDialog.title)
+
+            // 点删除：列表数据与标题计数必须即时刷新（回归点）。
+            var del = page.pdfNotesDialog.contentItem.contentItem.children[0]
+            verify(del !== undefined, "PDF 笔记列表应显示已保存行")
+            del.children[0].children[3].children[2].clicked()
+            tryVerify(function () { return page.pdfHighlights.length === 0 }, 3000,
+                      "删除后 pdfHighlights 应刷新为空，实际 " + page.pdfHighlights.length)
+            tryVerify(function () { return page.pdfNotesDialog.title.toString().indexOf("（0）") >= 0 }, 3000,
+                      "删除后标题计数应显示 0，实际标题 " + page.pdfNotesDialog.title)
+
+            // 渲染稳定后销毁，避免 QtPdfQuick 拆除竞态崩溃
+            tryVerify(function () { return page.renderSettled() }, 15000,
+                      "渲染应稳定再销毁，实际 " + page.pdfView.status)
+            stack.destroy()
+        }
         // 任务4（复审）：三页 文本-图片-文本 PDF——页级自动续读必须跳过无文本页
         //（0 → 2），且中间图片页 canReadAloud=false、原因精确、菜单朗读项 disabled。
         function test_pdfReadAloudSkipsImagePage() {

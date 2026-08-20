@@ -717,6 +717,17 @@ Page {
         page.pdfHighlights = filtered
     }
 
+    // 任务3 复审：划线增删改（removeHighlight/updateNote/addHighlight）后即时重载，
+    // 驱动笔记列表与标题计数（（N））同步——删除按钮此前只 removeHighlight 不刷新，
+    // 列表保留已删行直到 Dialog 重开。仅监听当前书，避免他书变更触发误刷新。
+    Connections {
+        target: Highlights
+        function onHighlightsChanged(bookId) {
+            if (page.book && bookId === page.book.id)
+                page.reloadPdfHighlights()
+        }
+    }
+
     function openPdfNoteEditor(chapter, text, targetId, note) {
         const prefix = String(chapter || "")
         page.pendingPdfSelectionPage = Number(prefix.slice(9))
