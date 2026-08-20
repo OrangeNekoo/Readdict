@@ -633,23 +633,27 @@ Item {
             tryVerify(function () { return page.pdfHighlights.length === 1 }, 3000,
                       "确认选区笔记后列表数据应恰好 1 行，实际 " + page.pdfHighlights.length)
 
-            // 无选区时再次点顶栏笔记 → 打开管理列表。Dialog 打开动画完成（opened
-            // 信号）才触发 onOpened 刷新；必须先等 opened 已发出再点删除，否则延迟
-            // 刷新会掩盖回归（删除后 onOpened 补跑一次 reload 误判为已刷新）。
-            var trace = Qt.createQmlObject(
-                "import QtQuick; Item { property var dlg; property int notesOpened: 0;" +
-                " Connections { target: dlg; function onOpened() { notesOpened++ } } }", root)
-            trace.dlg = page.pdfNotesDialog
+            // 无选区时再次点顶栏笔记 → 打开管理列表。Dialog 打开动画完成后
+            // Popup.opened 属性才为 true——opened 信号恰在同一时刻同步发出，
+            // onOpened 的 reloadPdfHighlights 必然已执行完；必须先等 opened 再点
+            // 删除，否则延迟刷新会掩盖回归（删除后 onOpened 补跑一次 reload 误判
+            // 为已刷新）。不用动态 target 的 Connections 探测 opened 信号：target
+            // 未定先建会触发 "no signal matches" QML warning，且跨版本重连行为
+            // 不稳（曾在其它 build 丢失连接导致断言失败）。
             page.readerShell.topToolbar.topToolbarButtons[1].clicked()
             tryVerify(function () { return page.pdfNotesDialog.visible }, 3000,
                       "无选区时顶栏笔记按钮应打开 PDF 笔记列表")
-            tryVerify(function () { return trace.notesOpened >= 1 }, 3000,
-                      "PDF 笔记列表应完成打开动画（onOpened 已触发）")
+            tryVerify(function () { return page.pdfNotesDialog.opened }, 3000,
+                      "PDF 笔记列表应完成打开动画（opened 已为 true，onOpened 已执行）")
             tryVerify(function () { return page.pdfNotesDialog.title.toString().indexOf("（1）") >= 0 }, 3000,
                       "删除前标题计数应显示 1，实际标题 " + page.pdfNotesDialog.title)
 
-            // 点删除：列表数据与标题计数必须即时刷新（回归点）。
-            var del = page.pdfNotesDialog.contentItem.contentItem.children[0]
+            // 内容模型稳定：等首行 delegate（含删除按钮）实例化后再点删除
+            var del = null
+            tryVerify(function () {
+                del = page.pdfNotesDialog.contentItem.contentItem.children[0]
+                return del !== undefined
+            }, 3000, "PDF 笔记列表应显示已保存行")
             verify(del !== undefined, "PDF 笔记列表应显示已保存行")
             del.children[0].children[3].children[2].clicked()
             tryVerify(function () { return page.pdfHighlights.length === 0 }, 3000,
