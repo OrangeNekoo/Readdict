@@ -1026,8 +1026,12 @@ Page {
         if (!hl || hl.sentenceIndex === undefined || hl.sentenceIndex < 0) return
         const titles = Books.chapterTitles(page.book.id)
         let ci = -1
-        if (Number(hl.chapterIndex) > 0)
-            ci = Number(hl.chapterIndex) - 1
+        // 任务1 复核：1 起 chapterIndex 须为 [1, titles.length] 内的整数才采用
+        //（转 0 起目标章）；旧数据/越界/非整数等无效值时回退到高亮章节标题
+        // 查找，而不是静默返回。
+        const rawIndex = Number(hl.chapterIndex)
+        if (Number.isInteger(rawIndex) && rawIndex > 0 && rawIndex <= titles.length)
+            ci = rawIndex - 1
         else if (hl.chapter !== undefined)
             ci = titles.indexOf(hl.chapter)
         if (ci < 0 || ci >= titles.length) return

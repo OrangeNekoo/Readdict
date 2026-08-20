@@ -246,6 +246,9 @@ Flickable {
             flick.explicitNavPending = false
             flick.scrollTargetRetries = 0
             navGuardTimer.stop()
+            // 任务1 复核：定位提前中止（目标句越界）即补一次中线激活——视口停在
+            // 重建后窗口顶端（可能落在目标章上一章尾部），章节身份需与视口一致。
+            flick.checkChapterActivation()
             return
         }
         flick.activeScrollChapter = ci
@@ -765,6 +768,9 @@ Flickable {
                     flick.pendingScrollTarget = null
                     flick.explicitNavPending = false
                     flick.scrollTargetRetries = 0
+                    // 任务1 复核：放弃定位后补一次激活——目标段未入窗且无后续
+                    // contentY 变化时，章节身份可能与视口不一致。
+                    flick.checkChapterActivation()
                     return
                 }
                 scrollTargetTimer.restart()
@@ -789,6 +795,10 @@ Flickable {
         onTriggered: {
             flick.explicitNavPending = false
             flick.scrollTargetRetries = 0
+            // 任务1 复核：guard 到期补一次中线激活——跳转失败/动画被中断且无后续
+            // contentY 变化时，章节身份可能与视口不一致；正常完成路径标志已复位，
+            // 本次检查为幂等 no-op。
+            flick.checkChapterActivation()
         }
     }
     Timer {
@@ -1196,8 +1206,14 @@ Flickable {
             // 目标）——动画中途视口穿过上一章尾部，过早解除会让中线激活把目标
             // 章拉回旧章；被 stop() 中断（新定位/用户操作接管）时不解除，由
             // navGuardTimer 兜底复位。
-            if (flick.explicitNavPending && Math.abs(flick.contentY - followAnim.to) < 1)
+            if (flick.explicitNavPending && Math.abs(flick.contentY - followAnim.to) < 1) {
                 flick.explicitNavPending = false
+                // 任务1 复核：定位完成即补一次激活——动画期间激活被抑制，若目标
+                // 段恰在章尾、视口中线落进下一章窗口，身份需与视口一致（同旧
+                // followSentence 语义）；目标段在章内时本次检查为 no-op，不破坏
+                // 显式目标定位。
+                flick.checkChapterActivation()
+            }
         }
     }
 
