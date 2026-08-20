@@ -454,11 +454,13 @@ Page {
                 text: modelData
                 highlighted: ListView.isCurrentItem
                 onClicked: {
+                    // 任务1：目录跳转是显式导航——先准备（放弃运行锚点事务并标记
+                    // 接下来的章节重建不捕获旧视口锚点/不按中线激活旧章），再
+                    // loadChapter，随后定位到目标章首段（旧实现经 showScrollChapter→
+                    // scheduleRestore 落回保存位置/0，窗口重建期又会被钳回 0——
+                    // 改为显式定位）。
+                    content.prepareExplicitNavigation()
                     page.loadChapter(index)
-                    // 任务1：目录跳转是显式导航，放弃运行锚点事务；随后定位到
-                    // 目标章首段（旧实现经 showScrollChapter→scheduleRestore 落回
-                    // 保存位置/0，窗口重建期又会被钳回 0——改为显式定位）。
-                    content.cancelWindowAnchor()
                     content.focusScrollParagraph(Number(index), 0)
                     tocDialog.close()
                 }
@@ -981,17 +983,23 @@ Page {
         page.highlights = Highlights.highlightsForBook(page.book.id)
     }
 
+    // C8：全文搜索跳转——定位到指定段落。scroll：prepareExplicitNavigation 放弃
+    // 运行锚点事务并锁定目标章，focusScrollParagraph 滚到视口上 1/3 处；paged：
+    // 无运行窗口锚点竞争，沿用 paraJumpTimer 翻页定位（页内整页呈现无需偏移）。
     function jumpToSearchHit(hit) {
         if (!hit || hit.chapterIndex === undefined || hit.paragraphIndex === undefined) return
         content.restoreScrollY = -1
         content.restoreAnchor = null
         content.restorePending = false
+        if (page.pageMode === "paged") {
+            page.loadChapter(hit.chapterIndex)
+            paraJumpTimer.targetIndex = hit.paragraphIndex
+            paraJumpTimer.restart()
+            return
+        }
+        content.prepareExplicitNavigation()
         page.loadChapter(hit.chapterIndex)
-        // 任务1：显式跳转放弃运行锚点事务（目标由 paraJumpTimer 定位），
-        // 续章式锚点恢复不得在跳转后把视口拉回原位置。
-        content.cancelWindowAnchor()
-        paraJumpTimer.targetIndex = hit.paragraphIndex
-        paraJumpTimer.restart()
+        content.focusScrollParagraph(hit.chapterIndex, hit.paragraphIndex)
     }
 
     // C8：外部（书架全文搜索入口）定位——同一跳转路径，供 initial* 属性复用。
@@ -999,25 +1007,41 @@ Page {
         content.restoreScrollY = -1
         content.restoreAnchor = null
         content.restorePending = false
+        if (page.pageMode === "paged") {
+            page.loadChapter(ci)
+            paraJumpTimer.targetIndex = pi
+            paraJumpTimer.restart()
+            return
+        }
+        content.prepareExplicitNavigation()
         page.loadChapter(ci)
-        // 任务1：同 jumpToSearchHit——显式跳转放弃运行锚点事务。
-        content.cancelWindowAnchor()
-        paraJumpTimer.targetIndex = pi
-        paraJumpTimer.restart()
+        content.focusScrollParagraph(ci, pi)
     }
 
-    // C7：笔记列表跳转——按章节标题定位章索引，loadChapter 后滚动/闪烁目标句
+    // C7：笔记列表跳转——以高亮保存的 1 起 chapterIndex 为目标章（转 0 起），旧
+    // 数据无有效 chapterIndex 时回退标题查找；scroll：prepareExplicitNavigation +
+    // focusScrollSentence 锁定目标章/目标段（句索引 → 段索引）后闪烁目标句；
+    // paged：无运行窗口锚点竞争，沿用原跳转定时器路径（重建后翻页定位）。
     function jumpToHighlight(hl) {
         if (!hl || hl.sentenceIndex === undefined || hl.sentenceIndex < 0) return
         const titles = Books.chapterTitles(page.book.id)
-        const ci = titles.indexOf(hl.chapter)
-        if (ci < 0) return
+        let ci = -1
+        if (Number(hl.chapterIndex) > 0)
+            ci = Number(hl.chapterIndex) - 1
+        else if (hl.chapter !== undefined)
+            ci = titles.indexOf(hl.chapter)
+        if (ci < 0 || ci >= titles.length) return
         notesDlg.close()
+        if (page.pageMode === "paged") {
+            page.loadChapter(ci)
+            jumpTimer.targetIndex = hl.sentenceIndex
+            jumpTimer.restart()
+            return
+        }
+        content.prepareExplicitNavigation()
         page.loadChapter(ci)
-        // 任务1：同 jumpToSearchHit——显式跳转放弃运行锚点事务。
-        content.cancelWindowAnchor()
-        jumpTimer.targetIndex = hl.sentenceIndex
-        jumpTimer.restart()
+        content.focusScrollSentence(ci, hl.sentenceIndex)
+        content.flashSentence(hl.sentenceIndex)
     }
 
     // C3：hover 追踪（5s 计时复位）——只覆盖正文内容区（topBar 下沿 → 朗读条上沿，
@@ -1189,16 +1213,17 @@ Page {
         property string previousLabel: qsTr("上一章")
         property string nextLabel: qsTr("下一章")
         function previous() {
+            // 任务1：显式翻章——先准备（放弃运行锚点事务并标记章节重建不捕获
+            // 旧视口锚点），再 loadChapter 并定位到目标章首段；仅取消锚点会让
+            // 视口停在旧偏移（重建钳制后位置随机）；旧实现的 scheduleRestore
+            // 会把 contentY 落回保存位置/0，同样不正确。
+            content.prepareExplicitNavigation()
             page.loadChapter(Books.currentChapter - 1)
-            // 任务1：显式翻章放弃运行锚点事务，并定位到目标章首段——仅取消
-            // 锚点会让视口停在旧偏移（重建钳制后位置随机）；旧实现的
-            // scheduleRestore 会把 contentY 落回保存位置/0，同样不正确。
-            content.cancelWindowAnchor()
             content.focusScrollParagraph(Number(Books.currentChapter), 0)
         }
         function next() {
+            content.prepareExplicitNavigation()
             page.loadChapter(Books.currentChapter + 1)
-            content.cancelWindowAnchor()
             content.focusScrollParagraph(Number(Books.currentChapter), 0)
         }
         function startReadAloud() { page.startReadAloud() }

@@ -50,6 +50,16 @@ Flickable {
     // contentY 已移动）时重捕获锚点，避免延迟重建用过期锚点把视口拽回旧位置。
     property double windowAnchorY: -1
     property double windowAnchorContentHeight: -1
+    // 任务1：显式导航（笔记/目录/搜索/菜单翻章）准备状态——prepareExplicitNavigation
+    // 置位：清理运行锚点事务，并让接下来一次 onChapterChanged/onScrollChaptersChanged
+    // 不捕获旧视口锚点（跳转目标由 pendingScrollTarget 定位），checkChapterActivation
+    // 不按视口中线激活章节（重建后视口短暂停在目标章上一章尾部，动画中途也会穿过
+    // 旧章区域，中线激活会把目标章拉回旧章）。目标段定位动画自然完成/放弃/兜底
+    // 超时后由本组件复位。
+    property bool explicitNavPending: false
+    // 任务1：显式导航定位重试计数（scrollTargetTimer 在目标委托缺失时有限自旋，
+    // 达上限后放弃并解除 explicitNavPending，避免永久挂起）
+    property int scrollTargetRetries: 0
     // 任务1：ttsForChapter 的 setSentences 游标复位区间标记（ReaderPage 设置）——
     // setSentences 同步发出 sentenceChanged(0)，那是换章副作用而非朗读推进；该
     // 复位发生在 onChapterChanged（下一帧）之前，pendingWindowAnchor 尚未捕获，
@@ -79,6 +89,15 @@ Flickable {
         flick.pendingWindowAnchor = null
         flick.windowAnchorRetries = 0
         windowAnchorTimer.stop()
+    }
+    // 任务1：显式跳转准备——先放弃运行锚点事务，再标记接下来的章节窗口重建为
+    // 显式导航（onChapterChanged/onScrollChaptersChanged 不捕获旧视口锚点、
+    // checkChapterActivation 不激活旧章）；由目标定位动画完成/放弃/兜底超时复位。
+    function prepareExplicitNavigation() {
+        flick.cancelWindowAnchor()
+        flick.explicitNavPending = true
+        flick.scrollTargetRetries = 0
+        navGuardTimer.restart()
     }
     function rebuildScrollModel() {
         if (flick.pageMode === "paged") return
@@ -194,11 +213,56 @@ Flickable {
         }
         return null
     }
+    // 任务1：目标章内句索引 → 段索引——按每段 sentences.length 累加（不能把句
+    // 索引直接当段落索引）。目标章数据从 scrollChapters（含相邻章窗口）解析；
+    // 目标章缺失/句索引越界返回 -1。
+    function paragraphForSentence(chapterIndex, sentenceIndex) {
+        var paras = null
+        var chapters = flick.scrollChapters || []
+        for (var c = 0; c < chapters.length; ++c) {
+            if (Number(chapters[c].index) === Number(chapterIndex)) {
+                paras = (chapters[c].chapter || {}).paragraphs || []
+                break
+            }
+        }
+        if (!paras && Number(flick.activeScrollChapter) === Number(chapterIndex))
+            paras = (flick.chapter || {}).paragraphs || []
+        var acc = 0
+        for (var p = 0; p < paras.length; ++p) {
+            var count = ((paras[p] || {}).sentences || []).length
+            if (sentenceIndex >= acc && sentenceIndex < acc + count) return p
+            acc += count
+        }
+        return -1
+    }
+    // 任务1：显式跳转的句子定位——把 activeScrollChapter/scrollFocusChapter 锁定
+    // 到目标章，重建窗口并把目标段设为 pendingScrollTarget，由 scrollTargetTimer
+    // 在委托就绪后滚到视口上 1/3 处。进入前需已 prepareExplicitNavigation +
+    // loadChapter（本函数只处理 scroll 窗口；paged 由 ReaderPage 走原定时器路径）。
+    function focusScrollSentence(chapterIndex, sentenceIndex) {
+        var ci = Number(chapterIndex)
+        var pi = flick.paragraphForSentence(ci, sentenceIndex)
+        if (pi < 0) {
+            flick.explicitNavPending = false
+            flick.scrollTargetRetries = 0
+            navGuardTimer.stop()
+            return
+        }
+        flick.activeScrollChapter = ci
+        flick.scrollFocusChapter = ci
+        flick.focusScrollParagraph(ci, pi)
+    }
     function focusScrollParagraph(chapter, paragraph) {
+        // 任务1：显式导航中强制同步求值 chapter 绑定——loadChapter 刚把
+        // page.chapter 置脏，绑定求值默认延迟到下一帧；此刻同步触发
+        // onChapterChanged（显式导航期间不捕获旧视口锚点），使章节重建在定位
+        // 动画启动前完成，杜绝其随后停止动画/重建窗口与 scrollTargetTimer 竞争。
+        if (flick.explicitNavPending) { var _flush = flick.chapter }
         flick.scrollFocusChapter = chapter
         flick.scrollFocusParagraph = paragraph
         flick.rebuildScrollModel()
         flick.pendingScrollTarget = { chapter: chapter, paragraph: paragraph }
+        flick.scrollTargetRetries = 0
         scrollTargetTimer.restart()
     }
     onScrollChaptersChanged: {
@@ -208,7 +272,9 @@ Flickable {
         // 章节变化（loadChapter/activateChapter）已在本 handler 之前的
         // onChapterChanged 中捕获过同一视口锚点——重建在途时旧委托未布局，
         // 二次捕获可能读到空/错误段落，已有待恢复锚点时不再重复捕获。
-        if (!flick.pendingWindowAnchor) flick.captureWindowAnchor()
+        // 任务1：显式导航在途时不捕获旧视口锚点——跳转目标由 pendingScrollTarget
+        // 定位，旧视口锚点恢复只会在跳转后把视口拉回原位置并触发旧章激活。
+        if (!flick.pendingWindowAnchor && !flick.explicitNavPending) flick.captureWindowAnchor()
         flick.rebuildScrollModel()
     }
     property var typography: ({})
@@ -383,7 +449,9 @@ Flickable {
             // 任务1（契约2）：章节属性变化同样进入运行锚点事务——宿主随后更新
             // scrollChapters 并触发 onScrollChaptersChanged（同事务，捕获同一视口
             // 锚点）；这里重建前先捕获，避免重建后旧视口信息丢失。
-            flick.captureWindowAnchor()
+            // 任务1：显式导航在途时不捕获——跳转目标由 pendingScrollTarget 定位，
+            // 旧视口锚点恢复只会在跳转后把视口拉回旧位置并触发旧章激活。
+            if (!flick.explicitNavPending) flick.captureWindowAnchor()
             // 宿主随后更新 scrollChapters；不要在此处写入该输入属性，
             // 否则会切断 ReaderPage 的绑定并丢失前后章节窗口。
             flick.activeScrollChapter = Math.max(0, flick.chapterIndex - 1)
@@ -647,6 +715,11 @@ Flickable {
 
     function checkChapterActivation() {
         if (flick.pageMode === "paged" || flick.scrollModel.length === 0) return
+        // 任务1：显式导航在途（prepare 到目标段定位动画完成）不按视口中线激活
+        // 章节——重建后视口短暂停在目标章上一章的尾部，定位动画中途也会穿过旧章
+        // 区域，中线激活会把 activeScrollChapter 与 Books.currentChapter 拉回旧章，
+        // 覆盖显式跳转目标（跳回旧章/目标段定位错章）。
+        if (flick.explicitNavPending) return
         // 任务1：仅两类重建过渡态不得按视口中线激活——(a) 锚点恢复写入 contentY
         // 的瞬间（windowAnchorRestoring，恢复的是捕获位置，非用户滚动）；
         // (b) 重建塌缩期间（内容高度低于捕获时，contentY 被钳回 0）。其余时刻
@@ -685,15 +758,37 @@ Flickable {
             if (!target) return
             var item = flick.itemForChapterParagraph(target.chapter, target.paragraph)
             if (!item) {
+                // 任务1：显式导航的定位重试有上限——目标委托缺失（模型未就绪/
+                // 窗口不含目标段）时有限自旋后放弃并解除显式导航态，避免永久挂起；
+                // 非显式路径（滚动恢复等）保持原有无限重试语义。
+                if (flick.explicitNavPending && flick.scrollTargetRetries++ >= 120) {
+                    flick.pendingScrollTarget = null
+                    flick.explicitNavPending = false
+                    flick.scrollTargetRetries = 0
+                    return
+                }
                 scrollTargetTimer.restart()
                 return
             }
             flick.pendingScrollTarget = null
+            flick.scrollTargetRetries = 0
             var maxY = Math.max(0, flick.contentHeight - flick.height)
             followAnim.stop()
             followAnim.to = Math.max(0, Math.min(item.y - flick.height / 3, maxY))
             followAnim.start()
             flick.scheduleRestore()
+        }
+    }
+    // 任务1：显式导航兜底——定位未在预算内完成（目标缺失/加载失败中止/动画被
+    // 打断）时解除 explicitNavPending，恢复运行锚点/中线激活的正常语义；正常
+    // 完成时标志已由 followAnim.onStopped 复位，本 Timer 触发为幂等 no-op。
+    Timer {
+        id: navGuardTimer
+        interval: 2000
+        repeat: false
+        onTriggered: {
+            flick.explicitNavPending = false
+            flick.scrollTargetRetries = 0
         }
     }
     Timer {
@@ -1096,6 +1191,14 @@ Flickable {
         property: "contentY"
         duration: 300
         easing.type: Easing.OutCubic
+        onStopped: {
+            // 任务1：显式导航的激活抑制持续到定位动画自然完成（contentY 到达
+            // 目标）——动画中途视口穿过上一章尾部，过早解除会让中线激活把目标
+            // 章拉回旧章；被 stop() 中断（新定位/用户操作接管）时不解除，由
+            // navGuardTimer 兜底复位。
+            if (flick.explicitNavPending && Math.abs(flick.contentY - followAnim.to) < 1)
+                flick.explicitNavPending = false
+        }
     }
 
 

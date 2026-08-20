@@ -535,5 +535,52 @@ Item {
                       "删除划线后应清空")
             loader.destroy()
         }
+        // 任务1：多章节笔记跳转回归——从第 2 章（0 起 1）保存句索引 10 的高亮，
+        // 先把阅读页切回第 1 章，再 jumpToHighlight()：必须稳定落到高亮保存的
+        // chapterIndex 对应章 + sentenceIndex 对应段（视口上 1/3 附近），不得被
+        // 旧章运行锚点/重建后中线激活拉回旧章（跳回旧章或目标段不在视口）。
+        function test_notesJumpToMultiChapterSentence() {
+            if (TestEnv.multiSource.length === 0) skip("无多章节书，跳过")
+            var book = null
+            for (let b of Books.booksModel)
+                if (b.title === "multibook") { book = b; break }
+            if (!book) {
+                Importer.doImport(TestEnv.multiSource)
+                for (let b of Books.booksModel)
+                    if (b.title === "multibook") { book = b; break }
+            }
+            if (!book) skip("多章节书未导入")
+            Settings.setValue("reading/pageMode", "scroll")
+            var loader = readerComp.createObject(root)
+            loader.setSource("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: book })
+            var page = loader.item
+            verify(page !== null, "ReaderPage 应能加载")
+            tryVerify(function () { return page.chapter.paragraphs && page.chapter.paragraphs.length > 0 }, 5000,
+                      "打开应加载章节")
+            // 第 2 章（0 起 1）句索引 10 = 段落 10（每段 1 句）；chapterIndex 1 起 = 2
+            var hlId = Highlights.addHighlight(book.id, "第二章", 10,
+                                               "这是第二章的第 11 段内容。", "#FFEB3B", "跨章跳转测试", 2)
+            tryVerify(function () { return Highlights.highlightsForBook(book.id).length === 1 }, 3000,
+                      "划线应落库")
+            // 先把阅读页切回第 1 章，制造"旧章视口 + 运行锚点"竞争条件
+            page.loadChapter(0)
+            tryVerify(function () { return Books.currentChapter === 0 }, 3000,
+                      "跳转前应位于第 1 章")
+            var highlight = Highlights.highlightsForBook(book.id)[0]
+            page.jumpToHighlight(highlight)
+            tryVerify(function () { return Books.currentChapter === 1 }, 3000,
+                      "跳转后当前章应为第 2 章（0 起 1），实际 " + Books.currentChapter)
+            tryVerify(function () {
+                var item = page.contentView.itemForChapterParagraph(1, 10)
+                return item && Math.abs((item.y - page.contentView.contentY)
+                                        - page.contentView.height / 3) < page.contentView.height / 2
+            }, 3000, "目标段（第 2 章第 10 段）应位于视口上 1/3 附近")
+            // 清理：划线 + 多章节书（后续用例依赖原有 3 本 TXT）
+            Highlights.removeHighlight(hlId)
+            tryVerify(function () { return Highlights.highlightsForBook(book.id).length === 0 }, 3000,
+                      "删除划线后应清空")
+            Books.removeBook(book.id)
+            loader.destroy()
+        }
     }
 }
