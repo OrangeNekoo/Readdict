@@ -523,6 +523,90 @@ Item {
                       "更换文档源应停止 TTS，实际 state=" + Tts.state)
             stack.destroy()
         }
+        // 任务3：PDF 选区笔记、逐页收藏与真实顶栏/目录菜单路径回归。
+        // 按简报要求使用确定性两页文本 PDF；实现批次不运行项目测试。
+        function test_pdfNotesBookmarksAndContents() {
+            var id = 999120
+            Settings.setValue("bookmarks/pdf_" + id, [0])
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/PdfReaderPage.qml",
+                       { book: { id: id, title: "任务3 PDF", path: TestEnv.textPdfSource } })
+            var page = stack.currentItem
+            verify(page !== null, "PdfReaderPage 应被 push 进 StackView")
+            tryVerify(function () { return page.pdfDocument.status === PdfDocument.Ready }, 15000,
+                      "文本 PDF 应加载为 Ready")
+            tryVerify(function () { return page.pdfView.currentPage === 0 }, 5000,
+                      "应从第 0 页开始")
+            tryVerify(function () { return page.currentBookmarked === true }, 3000,
+                      "Ready 恢复后第 0 页收藏图标应点亮")
+
+            // 真实顶栏按钮路径：有选区时打开编辑 Dialog，确认后写入 PDF 行。
+            page.activePdfView.selectAll()
+            tryVerify(function () { return String(page.activePdfView.selectedText).length > 0 }, 3000,
+                      "selectAll 后活动视图应有选中文字")
+            page.readerShell.topToolbar.topToolbarButtons[1].clicked()
+            tryVerify(function () { return page.pdfNoteDialog.visible }, 3000,
+                      "顶栏笔记按钮应打开 PDF 选区笔记 Dialog")
+            page.pdfNoteDialog.noteArea.text = "任务3笔记"
+            page.pdfNoteDialog.accept()
+            var rows = Highlights.highlightsForBook(id)
+            verify(rows.length > 0, "确认选区笔记后应产生 Highlights 行")
+            var pdfRow = null
+            for (var i = 0; i < rows.length; ++i)
+                if (String(rows[i].chapter).indexOf("pdf-page:") === 0) { pdfRow = rows[i]; break }
+            verify(pdfRow !== null, "Highlights 行应使用 pdf-page 前缀")
+            compare(pdfRow.chapter, "pdf-page:0")
+            compare(pdfRow.chapterIndex, 1)
+            compare(pdfRow.sentenceIndex, 0)
+            verify(String(pdfRow.text).length > 0, "PDF 行应保存原文")
+            compare(pdfRow.note, "任务3笔记")
+
+            // 无选区时从真实顶栏打开管理列表，行上的跳转回到保存页。
+            page.readerShell.topToolbar.topToolbarButtons[1].clicked()
+            tryVerify(function () { return page.pdfNotesDialog.visible }, 3000,
+                      "无选区时顶栏笔记按钮应打开 PDF 笔记列表")
+            page.pdfView.goToPage(1)
+            var jump = page.pdfNotesDialog.contentItem.contentItem.children[0]
+            verify(jump !== undefined, "PDF 笔记列表应显示已保存行")
+            jump.children[0].children[3].children[0].clicked()
+            tryVerify(function () { return page.pdfView.currentPage === 0 }, 5000,
+                      "笔记列表跳转应回到保存页")
+
+            // 页收藏随活动视图页码实时同步：预置第 0 页书签已点亮；真实翻到第 1 页
+            // 熄灭，回第 0 页重新点亮；顶栏书签按钮只增删当前页。
+            page.nextPage()
+            tryVerify(function () { return page.pdfView.currentPage === 1 }, 5000,
+                      "翻到第 1 页")
+            tryVerify(function () { return page.currentBookmarked === false }, 3000,
+                      "第 1 页未收藏时图标应熄灭")
+            page.previousPage()
+            tryVerify(function () { return page.pdfView.currentPage === 0 }, 5000,
+                      "回到第 0 页")
+            tryVerify(function () { return page.currentBookmarked === true }, 3000,
+                      "返回第 0 页后图标应点亮")
+            // 顶栏书签按钮只增删当前页：点一下取消第 0 页收藏，Settings 不再含该页
+            page.readerShell.topToolbar.topToolbarButtons[2].clicked()
+            tryVerify(function () { return page.currentBookmarked === false }, 3000,
+                      "点书签按钮应取消第 0 页收藏")
+            compare(Settings.value("bookmarks/pdf_" + id).length, 0,
+                    "取消收藏后 Settings 应清空该书签数组")
+
+            // 真实更多菜单目录行路径与第 2 页点击跳转。
+            page.readerShell.openMenu()
+            page.readerShell.triggerMenuAction("toc")
+            tryVerify(function () { return page.tocDlg.visible }, 3000,
+                      "更多菜单目录行应打开目录 Dialog")
+            var page2 = page.tocDlg.contentItem.contentItem.children[1]
+            verify(page2 !== undefined, "目录应含第 2 页条目")
+            page2.clicked()
+            tryVerify(function () { return !page.tocDlg.visible && page.pdfView.currentPage === 1 }, 5000,
+                      "点击目录第 2 页应关闭 Dialog 并跳到第 1 页")
+            // 渲染稳定后销毁，避免 QtPdfQuick 拆除竞态崩溃
+            tryVerify(function () { return page.renderSettled() }, 15000,
+                      "渲染应稳定再销毁，实际 " + page.pdfView.status)
+            stack.destroy()
+        }
         // 任务4（复审）：三页 文本-图片-文本 PDF——页级自动续读必须跳过无文本页
         //（0 → 2），且中间图片页 canReadAloud=false、原因精确、菜单朗读项 disabled。
         function test_pdfReadAloudSkipsImagePage() {

@@ -65,11 +65,13 @@ Page {
     // pdfView 是统一活动视图代理（currentPage/goToPage/renderScale/status/边距）
     property alias pdfDocument: pdfDoc
     property alias pdfView: pdfViewProxy
-    // 任务4：共享壳层与 PDF 适配器（统一契约，ReaderShell 只读此对象）；
-    // 目录 Dialog（页码目录）与底部左下页码指示句柄。
+    // 任务3：共享壳层与 PDF 适配器（统一契约，ReaderShell 只读此对象）；
+    // 目录 Dialog 与 PDF 笔记 Dialog 句柄供宿主/回归测试使用。
     property alias readerShell: readerShell
     property alias readerAdapter: pdfReaderAdapter
     property alias tocDlg: tocDialog
+    property alias pdfNotesDialog: pdfNotesDialog
+    property alias pdfNoteDialog: pdfNoteDialog
     property alias pageLabel: pageLabel
     property alias retryButton: retryButton
     property alias errorLabel: errorLabel
@@ -103,6 +105,15 @@ Page {
     // Timer 清理会话；chapterCompleted 同步到达时取消（续读路径不清理）。
     property bool ttsPendingStop: false
     // 书签（bookmarks/pdf_<bookId> 页索引数组，与文本书 bookmarks/<bookId> 区分）
+    // 任务3：PDF 选区笔记仅使用本书 chapter 前缀为 pdf-page: 的行。
+    property var pdfHighlights: []
+    property string pendingPdfSelectionText: ""
+    property int pendingPdfSelectionPage: -1
+    // 当前选区是否已被消费（已据此建/改笔记）：为 true 时下次笔记入口进入无选区
+    // 分支（打开列表）。页码变化/方向切换时经 resetPdfSelection 重置。multi 的
+    // selectedText 是普通可写属性但由内部委托 textChanged 写回，single 是只读别名
+    // ——都不在本页可靠清空，故用本标记统一判定"是否仍有未消费选区"，跨视图一致。
+    property bool pdfSelectionConsumed: false
     property var pdfBookmarks: []
     property bool currentBookmarked: false
 
@@ -124,6 +135,10 @@ Page {
                     page.pendingRestorePage = -1
                     if (target > 0) page.pdfView.goToPage(target)
                     page.restoreDone = true
+                    // 任务3（4.2）：恢复页完成后再次同步书签——恢复期首个
+                    // currentPageChanged(0) 可能被 restoreDone 门控（见
+                    // viewCurrentPageChanged），不在此补同步则图标停在未点亮。
+                    page.syncPdfBookmarkState()
                     page.recordProgress()
                 }
                 page.refreshPageText()
@@ -278,6 +293,123 @@ Page {
         }
     }
 
+    // 任务3：PDF 笔记管理——只显示当前书 pdf-page:<zero-based-page> 行。
+    Dialog {
+        id: pdfNotesDialog
+        title: qsTr("PDF 笔记") + "（" + page.pdfHighlights.length + "）"
+        modal: true
+        standardButtons: Dialog.Close
+        width: 500
+        height: 540
+        onOpened: page.reloadPdfHighlights()
+        onClosed: page.forceActiveFocus()
+        contentItem: ListView {
+            id: pdfNotesList
+            anchors.fill: parent
+            clip: true
+            model: page.pdfHighlights
+            delegate: Rectangle {
+                width: ListView.view.width
+                height: pdfNoteBody.implicitHeight + 18
+                color: index % 2 === 0 ? "#0A000000" : "transparent"
+                Column {
+                    id: pdfNoteBody
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 4
+                    Label {
+                        text: qsTr("第 %1 页").arg(Number(String(modelData.chapter).slice(9)) + 1)
+                        color: UITheme.textSecondary
+                        font.pixelSize: 12
+                    }
+                    Label {
+                        text: modelData.text || ""
+                        elide: Text.ElideRight
+                        maximumLineCount: 2
+                        wrapMode: Text.Wrap
+                        font.pixelSize: 14
+                    }
+                    Label {
+                        text: modelData.note ? qsTr("笔记：") + modelData.note : qsTr("（无笔记）")
+                        color: modelData.note ? UITheme.textSecondary : UITheme.textDisabled
+                        wrapMode: Text.Wrap
+                        font.pixelSize: 12
+                    }
+                    Row {
+                        spacing: 12
+                        Button {
+                            text: qsTr("跳转")
+                            onClicked: page.goToPdfHighlight(modelData)
+                        }
+                        Button {
+                            text: qsTr("编辑")
+                            onClicked: {
+                                pdfNotesDialog.close()
+                                page.openPdfNoteEditor(modelData.chapter, modelData.text, modelData.id,
+                                                       modelData.note || "")
+                            }
+                        }
+                        Button {
+                            text: qsTr("删除")
+                            onClicked: Highlights.removeHighlight(modelData.id)
+                        }
+                    }
+                }
+            }
+            ScrollBar.vertical: ScrollBar {}
+        }
+    }
+
+    // 任务3：PDF 选中文字笔记编辑；取消路径不触碰 Highlights。
+    Dialog {
+        id: pdfNoteDialog
+        title: qsTr("PDF 选区笔记")
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        width: 420
+        height: 300
+        property int targetId: -1
+        property alias noteArea: pdfNoteArea
+        contentItem: ColumnLayout {
+            spacing: 10
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("第 %1 页").arg(page.pendingPdfSelectionPage + 1)
+                color: UITheme.textSecondary
+            }
+            Label {
+                Layout.fillWidth: true
+                text: page.pendingPdfSelectionText
+                wrapMode: Text.Wrap
+                maximumLineCount: 4
+                elide: Text.ElideRight
+            }
+            TextArea {
+                id: pdfNoteArea
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                placeholderText: qsTr("写下你的想法…")
+                wrapMode: TextEdit.Wrap
+            }
+        }
+        onAccepted: {
+            if (!page.book || !page.book.id || page.pendingPdfSelectionPage < 0) return
+            if (pdfNoteDialog.targetId > 0)
+                Highlights.updateNote(pdfNoteDialog.targetId, pdfNoteArea.text)
+            else
+                Highlights.addHighlight(page.book.id, "pdf-page:" + page.pendingPdfSelectionPage,
+                                        0, page.pendingPdfSelectionText, "#FFEB3B", pdfNoteArea.text,
+                                        page.pendingPdfSelectionPage + 1)
+            page.reloadPdfHighlights()
+            page.consumePdfSelection()   // 选区已消费：下次笔记入口打开列表而非编辑
+        }
+        onClosed: page.forceActiveFocus()
+    }
+
+    // 任务4：页码目录（适配器 openContents）——页标签 + 跳转
     // 任务2：Loading 反馈——避免加载期间白屏无反馈
     Rectangle {
         id: loadingIndicator
@@ -390,6 +522,7 @@ Page {
         if (page.pageMode === mode) return
         page.pendingRestorePage = page.pdfView.currentPage >= 0 ? page.pdfView.currentPage : 0
         page.stopPdfTts()
+        page.resetPdfSelection()   // 任务3（3.1）：方向切换清理过期选区状态
         Settings.setValue("reading/pageMode", mode)
         page.pageMode = mode
         page.applyFitModeToActiveView()
@@ -453,6 +586,7 @@ Page {
         progressFlush.restart()
         page.refreshPageText(current)
         page.syncPdfBookmarkState(current)
+        page.resetPdfSelection()   // 任务3（3.1）：页码变化清理过期选区状态
     }
 
     // 任务2：前一页——仅 Ready 且非首页时 goToPage(currentPage-1)，成功返回 true；
@@ -572,29 +706,110 @@ Page {
         ttsExhaustHintTimer.restart()
     }
 
-    // ---- 任务4：目录跳转（页码目录 openContents 目标）——关闭目录并停止会话 ----
-    function goToPdfPage(i) {
-        if (pdfDoc.status !== PdfDocument.Ready) return
-        tocDialog.close()                // 先释放模态焦点，否则后续键盘事件留在弹层
-        page.stopPdfTts()                // 目录跳转属于手动跳转：停止活动会话
-        if (i >= 0 && i < pdfDoc.pageCount) pdfView.goToPage(i)
+    // 任务3：刷新并过滤本书 PDF 笔记，避免正文笔记混入管理列表。
+    function reloadPdfHighlights() {
+        const all = page.book && page.book.id ? Highlights.highlightsForBook(page.book.id) : []
+        const filtered = []
+        for (const row of all) {
+            if (row && String(row.chapter || "").indexOf("pdf-page:") === 0)
+                filtered.push(row)
+        }
+        page.pdfHighlights = filtered
     }
 
-    // ---- 任务4：书签（bookmarks/pdf_<bookId> 页索引数组）----
+    function openPdfNoteEditor(chapter, text, targetId, note) {
+        const prefix = String(chapter || "")
+        page.pendingPdfSelectionPage = Number(prefix.slice(9))
+        page.pendingPdfSelectionText = String(text || "")
+        pdfNoteDialog.targetId = Number(targetId) || -1
+        pdfNoteArea.text = String(note || "")
+        pdfNoteDialog.open()
+    }
+
+    function goToPdfHighlight(row) {
+        const chapter = String(row && row.chapter || "")
+        if (chapter.indexOf("pdf-page:") !== 0) return
+        const idx = Number(chapter.slice(9))
+        if (!Number.isInteger(idx) || idx < 0 || idx >= pdfDoc.pageCount) return
+        page.goToPdfPage(idx)
+    }
+
+    function openPdfNotes() {
+        const selected = activePdfView && activePdfView.selectedText !== undefined
+            ? String(activePdfView.selectedText || "").trim() : ""
+        if (selected.length > 0 && pdfDoc.status === PdfDocument.Ready
+                && !page.pdfSelectionConsumed) {
+            const current = activePdfView.currentPage
+            const chapter = "pdf-page:" + current
+            let target = -1
+            let existingNote = ""
+            const rows = page.book && page.book.id ? Highlights.highlightsForBook(page.book.id) : []
+            for (const row of rows) {
+                if (row.chapter === chapter && row.text === selected) {
+                    target = Number(row.id)
+                    existingNote = String(row.note || "")
+                    break
+                }
+            }
+            page.pendingPdfSelectionPage = current
+            page.pendingPdfSelectionText = selected
+            pdfNoteDialog.targetId = target
+            pdfNoteArea.text = existingNote
+            pdfNoteDialog.open()
+        } else {
+            page.reloadPdfHighlights()
+            pdfNotesDialog.open()
+        }
+    }
+
+    // 任务3（3.1）：编辑确认后消费当前选区——下次笔记入口进入无选区分支（列表）。
+    function consumePdfSelection() {
+        page.pdfSelectionConsumed = true
+        page.pendingPdfSelectionText = ""
+        page.pendingPdfSelectionPage = -1
+    }
+    // 页码变化/方向切换：重置选区消费状态（跨页/跨方向不保留旧选区），使新页
+    // 上的新选区可重新进入编辑分支。
+    function resetPdfSelection() {
+        page.pdfSelectionConsumed = false
+        page.pendingPdfSelectionText = ""
+        page.pendingPdfSelectionPage = -1
+    }
+
+    function closeReaderShellLayers() {
+        readerShell.menuOpen = false
+        readerShell.sheetOpen = false
+    }
+
+    // 任务4：目录跳转（页码目录 openContents 目标）——关闭目录并停止会话
+    function goToPdfPage(i) {
+        if (pdfDoc.status !== PdfDocument.Ready) return
+        tocDialog.close()
+        pdfNotesDialog.close()
+        page.stopPdfTts()
+        if (i >= 0 && i < pdfDoc.pageCount) page.activePdfView.goToPage(i)
+    }
+
+    // ---- 任务3：书签（bookmarks/pdf_<bookId> 页索引数组）----
     function syncPdfBookmarkState(pageIndex) {
-        const idx = (pageIndex !== undefined) ? pageIndex : page.pdfView.currentPage
+        const view = page.activePdfView
+        const idx = (pageIndex !== undefined) ? pageIndex
+            : (view && view.currentPage !== undefined ? view.currentPage : -1)
         page.currentBookmarked = page.pdfBookmarks.indexOf(idx) >= 0
     }
     function togglePdfBookmark() {
-        if (!page.book || !page.book.id || pdfDoc.status !== PdfDocument.Ready) return
+        const view = page.activePdfView
+        if (!page.book || !page.book.id || pdfDoc.status !== PdfDocument.Ready || !view) return
+        const idx = view.currentPage
         const list = page.pdfBookmarks.slice()
-        const i = list.indexOf(pdfView.currentPage)
+        const i = list.indexOf(idx)
         if (i >= 0) list.splice(i, 1)
-        else list.push(pdfView.currentPage)
+        else list.push(idx)
         page.pdfBookmarks = list
         Settings.setValue("bookmarks/pdf_" + page.book.id, list)
-        page.syncPdfBookmarkState()
+        page.syncPdfBookmarkState(idx)
     }
+
 
     // 记录当前页：页码写 settings.json，百分比+last_read_at 写 books（书架进度条联动）
     function recordProgress() {
@@ -726,7 +941,9 @@ Page {
                    ? qsTr("当前 PDF 无可朗读文本") : qsTr("PDF 尚未加载完成"))
         property bool supportsContents: true
         property bool supportsSearch: false
-        property bool supportsNotes: false
+        // 任务3：PDF 笔记开放——顶栏笔记按钮经 openNotes 分发（有选区→编辑，
+        // 无选区→列表）；目录 openContents 先释放菜单/Sheet 再开 Dialog。
+        property bool supportsNotes: true
         property bool supportsBookmarks: true
         property string previousLabel: qsTr("上一页")
         property string nextLabel: qsTr("下一页")
@@ -734,9 +951,15 @@ Page {
         function next() { page.nextPage() }
         function startReadAloud() { page.startPdfReadAloud() }
         function stopReadAloud() { page.stopPdfTts() }
-        function openContents() { tocDialog.open() }
+        function openContents() {
+            page.closeReaderShellLayers()   // 先释放菜单/Sheet，再开目录
+            tocDialog.open()
+        }
         function openSearch() {}
-        function openNotes() {}
+        function openNotes() {
+            page.closeReaderShellLayers()   // 先释放 Sheet，再按选区/无选区分发
+            page.openPdfNotes()
+        }
         function toggleBookmark() { page.togglePdfBookmark() }
         // 壳层菜单"图书信息"→ PDF 专属缩放面板（Sheet 承载）
         function openInfo() {
