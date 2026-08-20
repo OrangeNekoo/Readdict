@@ -734,29 +734,40 @@ Page {
     }
 
     // 旧 Settings 数组整数按章节键解释；非法/重复键去重（只清洗 bookmarks 键，
-    // 不修改其它设置）。仅保留：>=0 的整数章节索引（QML 读回为 number）、
-    // 合法 "chapter:<整数>=0"、"page:<章节整数>=0:<页整数>=0"；非法数值/格式
-    // 清除。去重按规范化键（Number 归一化，消除前导零重复），保留原始值。
+    // 不修改其它设置）。仅保留：>=0 的安全整数章节索引（QML 读回为 number，
+    // 保存值保留 number）、合法 "chapter:<整数>=0"、"page:<章节整数>=0:<页整数>=0"
+    //（保存规范化键，消除前导零，保证与 sync 生成的规范键匹配）；解析结果非
+    // Number.isSafeInteger（如超长数字→Infinity/1e21）或非法格式一律清除。
     function normalizeBookmarks(list) {
         var result = []
         var seen = {}
         for (var i = 0; i < list.length; ++i) {
             var v = list[i]
             var key = null
+            var keep = null
             if (typeof v === "number") {
-                if (Number.isInteger(v) && v >= 0) key = "int:" + v
+                if (Number.isSafeInteger(v) && v >= 0) {
+                    key = "int:" + v
+                    keep = v                      // 旧整数保留 number
+                }
             } else if (typeof v === "string") {
                 var m = /^chapter:(\d+)$/.exec(v)
-                if (m) key = "chapter:" + Number(m[1])
-                else {
+                if (m && Number.isSafeInteger(Number(m[1]))) {
+                    key = "chapter:" + Number(m[1])
+                    keep = key                    // 规范化章节键
+                } else {
                     m = /^page:(\d+):(\d+)$/.exec(v)
-                    if (m) key = "page:" + Number(m[1]) + ":" + Number(m[2])
+                    if (m && Number.isSafeInteger(Number(m[1]))
+                            && Number.isSafeInteger(Number(m[2]))) {
+                        key = "page:" + Number(m[1]) + ":" + Number(m[2])
+                        keep = key                // 规范化页键
+                    }
                 }
             }
             if (key === null) continue    // 非法数值/格式清除
-            if (seen[key]) continue       // 重复键去重
+            if (seen[key]) continue       // 重复键去重（按规范化键）
             seen[key] = true
-            result.push(v)
+            result.push(keep)
         }
         return result
     }

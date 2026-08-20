@@ -820,6 +820,50 @@ Item {
             h.stack.destroy()
         }
 
+        // 任务2：加载时 normalizeBookmarks 规范化/清除非法键——前导零键规范化后
+        // 与 sync 生成的规范键匹配（而非永不匹配的幽灵键）；超长数字/非法键清除；
+        // 规范化结果回写 Settings。
+        function test_bookmarkLoadNormalizesKeys() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            // 直接写含前导零/超长数字/非法键的原始 Settings（模拟旧数据）
+            Settings.setValue("bookmarks/" + book.id,
+                              ["page:0:01", "chapter:00", 0,
+                               999999999999999999999, "bogus", -3, 1.5])
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.pageMode = "paged"
+            Books.currentChapter = 0
+            page.loadChapter(0)
+            verify(waitPagesSettled(cv),
+                   "章 0 页面模型应就绪（pageCount=" + cv.pageCount + "）")
+            // 前导零页键 page:0:01 规范化后等于 page:0:1 → 第 1 页应点亮
+            cv.goToPage(1)
+            tryVerify(function () { return cv.currentPage === 1 }, 3000, "应切到第 1 页")
+            verify(page.currentBookmarked, "前导零页键应规范化并点亮第 1 页")
+            // scroll 模式：chapter:00 规范化 + 旧整数 0 → 章节 0 点亮
+            page.pageMode = "scroll"
+            tryVerify(function () { return page.currentBookmarked }, 3000,
+                      "chapter:00 与整数 0 均应识别为章节收藏")
+            // Settings 已回写规范化结果：规范键在、原始前导零/超长/非法键清除
+            var saved = Settings.value("bookmarks/" + book.id)
+            verify(saved && saved.indexOf("page:0:1") >= 0,
+                   "回写应含规范页键 page:0:1，实际=" + JSON.stringify(saved))
+            verify(saved.indexOf("chapter:0") >= 0,
+                   "回写应含规范章节键 chapter:0，实际=" + JSON.stringify(saved))
+            verify(saved.indexOf(0) >= 0, "回写应保留旧整数 0，实际=" + JSON.stringify(saved))
+            verify(saved.indexOf("page:0:01") < 0 && saved.indexOf("chapter:00") < 0,
+                   "原始前导零键应被规范化清除，实际=" + JSON.stringify(saved))
+            var clean = true
+            for (var i = 0; i < saved.length; ++i) {
+                if (saved[i] === 999999999999999999999 || saved[i] === "bogus"
+                        || saved[i] === -3 || saved[i] === 1.5) clean = false
+            }
+            verify(clean, "超长数字与非法键应被清除，实际=" + JSON.stringify(saved))
+            h.stack.destroy()
+        }
+
         // 横翻：章末页再 → 翻过章末进入下一章（真实书籍语义）；末章 → 不越
         function test_pagedLastPageAdvancesChapter() {
             var book = findBook("multibook")
