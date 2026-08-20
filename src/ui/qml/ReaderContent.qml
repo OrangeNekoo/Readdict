@@ -799,7 +799,7 @@ Flickable {
             //（scrollTargetTimer 命中或 followAnim 自然到达）后再释放并对账，
             // 不得用固定延时强行打断有效的显式跳转（否则动画中途释放 guard，
             // 旧章中线激活会把目标章回切）。
-            if (flick.followAnim.running || flick.pendingScrollTarget) {
+            if (followAnim.running || flick.pendingScrollTarget) {
                 navGuardTimer.restart()
                 return
             }

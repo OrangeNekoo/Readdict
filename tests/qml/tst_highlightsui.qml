@@ -16,7 +16,9 @@ Item {
     }
     Component {
         id: readerComp
-        Loader { source: "qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml" }
+        // 阅读页容器需要显式尺寸（同 contentComp 用法）：视口几何断言
+        //（跳转目标段位于视口上 1/3）依赖内容实际布局，0x0 下无法判定
+        Loader { width: 800; height: 600; source: "qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml" }
     }
 
     // 3 纯文本段（各 2 句，共 6 句）+ 1 富文本段（含 <b>，2 句）
