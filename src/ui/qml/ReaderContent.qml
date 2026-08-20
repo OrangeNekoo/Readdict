@@ -785,14 +785,24 @@ Flickable {
             flick.scheduleRestore()
         }
     }
-    // 任务1：显式导航兜底——定位未在预算内完成（目标缺失/加载失败中止/动画被
-    // 打断）时解除 explicitNavPending，恢复运行锚点/中线激活的正常语义；正常
-    // 完成时标志已由 followAnim.onStopped 复位，本 Timer 触发为幂等 no-op。
+    // 任务1：显式导航兜底——定位已结束（目标缺失/加载失败中止/动画被中断且未
+    // 在途）时解除 explicitNavPending 并补一次中线激活对账，恢复运行锚点/中线
+    // 激活的正常语义；定位仍在途（pendingScrollTarget 未清/动画在跑）时延后，
+    // 正常完成时标志已由 followAnim.onStopped 复位，本 Timer 触发为幂等 no-op。
     Timer {
         id: navGuardTimer
         interval: 2000
         repeat: false
         onTriggered: {
+            // 任务1 复核：guard 兜底只释放"已结束"的定位——若目标定位仍在途
+            //（pendingScrollTarget 未清/定位动画在跑），延后到目标完成
+            //（scrollTargetTimer 命中或 followAnim 自然到达）后再释放并对账，
+            // 不得用固定延时强行打断有效的显式跳转（否则动画中途释放 guard，
+            // 旧章中线激活会把目标章回切）。
+            if (flick.followAnim.running || flick.pendingScrollTarget) {
+                navGuardTimer.restart()
+                return
+            }
             flick.explicitNavPending = false
             flick.scrollTargetRetries = 0
             // 任务1 复核：guard 到期补一次中线激活——跳转失败/动画被中断且无后续
