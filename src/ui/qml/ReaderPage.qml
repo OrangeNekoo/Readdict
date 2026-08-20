@@ -835,7 +835,6 @@ Page {
         }
         return result
     }
-
     function loadChapter(i) {
         if (!page.book || !page.book.id) return
         const titles = Books.chapterTitles(page.book.id)
@@ -867,7 +866,6 @@ Page {
         }
         content.forceActiveFocus()
     }
-    // ReaderContent 中线激活的章节同步更新页面章节身份与连续窗口。
     function activateChapter(i) {
         if (!page.book || !page.book.id || i === Books.currentChapter) return
         const titles = Books.chapterTitles(page.book.id) || []

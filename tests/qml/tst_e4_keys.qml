@@ -56,6 +56,16 @@ Item {
             stack.push("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: book })
             var page = stack.currentItem
             verify(page !== null, "ReaderPage 应被 push 进 StackView")
+            // E4：取消滚动恢复——必须在任何长等待之前执行：ReaderPage.onCompleted
+            // 已从 Settings 恢复阅读位置（progress/anchor_<bookId> → restoreScrollAnchor、
+            // scroll_<bookId> → restoreScrollY，前序用例销毁页面时 saveScroll 写入），
+            // 200ms restoreTimer 会在下方 tryVerify 等待期间把前序滚动位置写进
+            // contentY——视口中线落到旧章范围触发 checkChapterActivation 换窗
+            //（scrollChapters 被重扩，单章模型/翻页断言污染）。restoreScrollY=-1 +
+            // restorePending=false 后 applyRestore 对非 pending 直接 return。
+            page.contentView.restoreScrollY = -1
+            page.contentView.restorePending = false
+            page.contentView.restoreAnchor = null
             tryVerify(function () {
                 return page.chapter && page.chapter.paragraphs
                     && page.chapter.paragraphs.length > 0
@@ -63,12 +73,6 @@ Item {
             // 本测试组覆盖连续滚动键盘语义，显式覆盖跨 TestCase 的模式残留。
             page.pageMode = "scroll"
             wait(50)
-            // E4：取消滚动恢复——恢复 Timer（200ms 收敛后 applyRestore）会在翻页
-            // 动画中途把 contentY 拽回保存位置，干扰方向键/翻页断言；本用例
-            // 从 0 起翻，显式关闭恢复（restoreScrollY=-1 + restorePending=false，
-            // applyRestore 对非 pending 直接 return）。
-            page.contentView.restoreScrollY = -1
-            page.contentView.restorePending = false
             return { stack: stack, page: page }
         }
 
@@ -325,6 +329,11 @@ Item {
             wait(100)
             Books.currentChapter = 0
             cv.activeScrollChapter = 0
+            // E4 复审：本用例假设从第 0 章顶部开始单章窗口——openPage 已提前关闭
+            // 滚动恢复（见 openPage 注释），这里再显式钳到顶部，杜绝任何残留
+            // 位置把视口中线留在第 1 章范围（checkChapterActivation 会激活第 1 章
+            // 并把窗口重扩为 [0,1,2]，污染"单章模型"断言）。
+            cv.contentY = 0
             tryVerify(function () { return cv.scrollModel.length > 0
                                       && cv.scrollModel[cv.scrollModel.length - 1].chapterIndex === 0 },
                       3000, "单章测试模型应稳定在第 0 章")
@@ -581,20 +590,29 @@ Item {
             return false
         }
         function openPage(book) {
+            // E4 复审：销毁前序用例残留的 StackView——QML destroy() 的删除在事件
+            // 循环中异步落地，用例失败/中断时整棵 ReaderPage 树可能遗留到下一用例；
+            // 残留 ReaderContent 持续持有 activeFocus，抢走本用例正文焦点
+            //（方向键/焦点断言会观察到"焦点在其他内容上"）。
+            for (var di = root.children.length - 1; di >= 0; --di) {
+                var stale = root.children[di]
+                if (stale && String(stale).indexOf("StackView") >= 0) stale.destroy()
+            }
             var stack = Qt.createQmlObject(
                 "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
             verify(stack !== null, "测试 StackView 应能创建")
             stack.push("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: book })
             var page = stack.currentItem
             verify(page !== null, "ReaderPage 应被 push 进 StackView")
+            // E4：取消滚动恢复（同 ArrowKeyPagingSmoke.openPage——提前到任何长等待
+            // 之前；restoreTimer 在 tryVerify 期间会把前序滚动位置写进 contentY）
+            page.contentView.restoreScrollY = -1
+            page.contentView.restorePending = false
+            page.contentView.restoreAnchor = null
             tryVerify(function () {
                 return page.chapter && page.chapter.paragraphs
                     && page.chapter.paragraphs.length > 0
             }, 3000, "打开书后应加载章节段落")
-            // E4：取消滚动恢复（同 ArrowKeyPagingSmoke.openPage，避免恢复 Timer
-            // 在翻页动画中途拽回 contentY）
-            page.contentView.restoreScrollY = -1
-            page.contentView.restorePending = false
             return { stack: stack, page: page }
         }
 
@@ -739,6 +757,13 @@ Item {
             var h = openPage(book)
             var page = h.page
             var cv = page.contentView
+            // E4 复审：自初始化本书收藏——Testcase 函数按字母序运行，前序用例
+            //（test_bookmarkLoadNormalizesKeys 等）会在 Settings 留下 page:0:1/
+            // chapter:0/0 键；本用例假设从空收藏开始（首个 toggleBookmark 语义为
+            // "新增"），不清理会让 toggle 变成"取消"导致点亮断言失败。
+            page.bookmarks = []
+            Settings.setValue("bookmarks/" + book.id, [])
+            page.syncCurrentBookmark()
             // paged：收藏第 1 页（page:0:1）
             page.pageMode = "paged"
             Books.currentChapter = 0
@@ -780,6 +805,11 @@ Item {
             var h = openPage(book)
             var page = h.page
             var cv = page.contentView
+            // E4 复审：同 test_bookmarkStateRefreshesOnModeSwitch——从空收藏开始
+            //（首 toggleBookmark 语义为新增），不依赖前序用例清理。
+            page.bookmarks = []
+            Settings.setValue("bookmarks/" + book.id, [])
+            page.syncCurrentBookmark()
             page.pageMode = "paged"
             Books.currentChapter = 0
             page.loadChapter(0)
