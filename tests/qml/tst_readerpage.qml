@@ -487,11 +487,17 @@ Item {
             page.toggleBookmark()
             verify(page.topToolbar.bookmarked, "点击书签后应进入已收藏态")
             var saved = Settings.value("bookmarks/" + page.book.id)
-            verify(saved && saved.indexOf(Books.currentChapter) >= 0, "书签应持久化当前章节")
+            // 任务2：scroll 模式按章节键 "chapter:<index>" 持久化（仍兼容旧整数）
+            var chKey = "chapter:" + Books.currentChapter
+            verify(saved && (saved.indexOf(chKey) >= 0
+                             || saved.indexOf(Books.currentChapter) >= 0),
+                   "书签应持久化当前章节")
             page.toggleBookmark()
             verify(!page.topToolbar.bookmarked, "再次点击同一章节应取消书签")
             saved = Settings.value("bookmarks/" + page.book.id)
-            verify(!saved || saved.indexOf(Books.currentChapter) < 0, "取消书签应更新持久化列表")
+            verify(!saved || (saved.indexOf(chKey) < 0
+                              && saved.indexOf(Books.currentChapter) < 0),
+                   "取消书签应更新持久化列表")
             page.sheetOpen = false
             tryVerify(function () { return !page.topToolbar.visible }, 2000, "Sheet 关闭时顶栏应隐藏")
             h.stack.destroy()

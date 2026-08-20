@@ -127,8 +127,15 @@ Page {
     Connections {
         target: content
         function onContentYChanged() { page.updateBookPageNumber() }
-        function onCurrentPageChanged() { page.updateBookPageNumber() }
+        // 任务2：paged 逻辑页变化（goToPage 立即写 currentPage，含动画目标）时
+        // 同步顶栏收藏态——同章不同页各自按页键点亮/熄灭
+        function onCurrentPageChanged() {
+            page.updateBookPageNumber()
+            page.syncCurrentBookmark()
+        }
         function onPageCountChanged() { page.updateBookPageNumber() }
+        // 任务2：方向切换（scroll ⇄ paged）后收藏键语义变化，立即刷新按钮状态
+        function onPageModeChanged() { page.syncCurrentBookmark() }
         // 任务3（契约1）：换章后即使 contentY/currentPage 未变（如两章都停在
         // 页首），全书页号也必须按新章前序偏移重算
         function onChapterChanged() { page.updateBookPageNumber() }
@@ -703,18 +710,68 @@ Page {
         }
     }
 
+    // 任务2：当前模式下的精确收藏键——scroll 存章节键 "chapter:<index>"（与旧
+    // 整数章节数据兼容），paged 按逻辑页存 "page:<index>:<currentPage>"。同章不同
+    // 页因此各自独立收藏/熄灭，不共享章节状态。
+    function bookmarkKey() {
+        const ch = Number(Books.currentChapter)
+        if (page.pageMode === "paged")
+            return "page:" + ch + ":" + content.currentPage
+        return "chapter:" + ch
+    }
+
     function syncCurrentBookmark() {
         const ch = Number(Books.currentChapter)
-        page.currentBookmarked = page.bookmarks.indexOf(ch) >= 0
+        const list = Array.isArray(page.bookmarks) ? page.bookmarks : []
+        if (page.pageMode === "paged") {
+            // paged：只按当前章节+逻辑页的页键精确匹配
+            page.currentBookmarked = list.indexOf(page.bookmarkKey()) >= 0
+        } else {
+            // scroll：新章节键 + 旧整数章节数据都算收藏（兼容迁移期）
+            page.currentBookmarked = list.indexOf("chapter:" + ch) >= 0
+                || list.indexOf(ch) >= 0
+        }
+    }
+
+    // 旧 Settings 数组整数按章节键解释；非法/重复键去重（只清洗 bookmarks 键，
+    // 不修改其它设置）。保留原始值，仅剔除非法项与完全重复项。
+    function normalizeBookmarks(list) {
+        var result = []
+        var seen = {}
+        for (var i = 0; i < list.length; ++i) {
+            var v = list[i]
+            var ok = false
+            if (typeof v === "number") ok = true                      // 旧整数章节索引
+            else if (typeof v === "string" && (v.indexOf("chapter:") === 0
+                    || v.indexOf("page:") === 0)) ok = true           // 章节/页键
+            if (!ok) continue
+            var seenKey = String(v)
+            if (seen[seenKey]) continue
+            seen[seenKey] = true
+            result.push(v)
+        }
+        return result
     }
 
     function toggleBookmark() {
         if (!page.book || !page.book.id) return
         const ch = Number(Books.currentChapter)
         var list = Array.isArray(page.bookmarks) ? page.bookmarks.slice() : []
-        const i = list.indexOf(ch)
-        if (i >= 0) list.splice(i, 1)
-        else list.push(ch)
+        if (page.pageMode === "paged") {
+            // paged：只增删当前逻辑页的页键，绝不触碰章节键/旧整数收藏
+            const key = "page:" + ch + ":" + content.currentPage
+            const i = list.indexOf(key)
+            if (i >= 0) list.splice(i, 1)
+            else list.push(key)
+        } else {
+            // scroll：取消时同时清掉新章节键与旧整数章节项；新增写新章节键
+            const key = "chapter:" + ch
+            const ik = list.indexOf(key)
+            const il = list.indexOf(ch)
+            if (ik >= 0) list.splice(ik, 1)
+            if (il >= 0) list.splice(il, 1)
+            if (ik < 0 && il < 0) list.push(key)
+        }
         page.bookmarks = list
         Settings.setValue("bookmarks/" + page.book.id, list)
         page.syncCurrentBookmark()
@@ -1304,7 +1361,13 @@ Page {
         page.progressScope = ps === "book" ? "book" : "chapter"
         page.fontFamily = String(Settings.value("typography/fontFamily") || "思源宋体 VF")
         const savedBookmarks = Settings.value("bookmarks/" + (page.book ? page.book.id : ""))
-        page.bookmarks = Array.isArray(savedBookmarks) ? savedBookmarks.slice() : []
+        page.bookmarks = page.normalizeBookmarks(
+            Array.isArray(savedBookmarks) ? savedBookmarks.slice() : [])
+        // 清洗后与原始列表不同则回写去重/过滤结果（只改 bookmarks 键）
+        const rawList = Array.isArray(savedBookmarks) ? savedBookmarks : []
+        if (page.book && page.book.id
+                && JSON.stringify(page.bookmarks) !== JSON.stringify(rawList))
+            Settings.setValue("bookmarks/" + page.book.id, page.bookmarks)
         page.syncCurrentBookmark()
         const initChapter = page.initialChapter >= 0
             ? page.initialChapter : Books.lastChapter(page.book.id)

@@ -663,6 +663,47 @@ Item {
             h.stack.destroy()
         }
 
+        // 任务2：paged 收藏按逻辑页保存/显示——同章不同页独立收藏，切页即时
+        // 刷新顶栏；持久化含页级键 page:<chapter>:<page>，不覆盖旧章节收藏。
+        function test_pagedBookmarkTracksLogicalPage() {
+            var book = findBook("multibook")
+            verify(book !== null, "multibook 应已导入")
+            var h = openPage(book)
+            var page = h.page
+            var cv = page.contentView
+            page.pageMode = "paged"
+            Books.currentChapter = 0
+            page.loadChapter(0)
+            verify(waitPagesSettled(cv),
+                   "章 0 页面模型应就绪（pageCount=" + cv.pageCount + "）")
+            verify(cv.pageCount >= 2, "章 0 应至少 2 页，实际 " + cv.pageCount)
+            // 清空书签，从第 0 页开始
+            page.bookmarks = []
+            cv.goToPage(0)
+            tryVerify(function () { return cv.currentPage === 0 }, 3000, "应回到第 0 页")
+            verify(!page.currentBookmarked, "第 0 页初始不应点亮")
+            // 第 1 页收藏 → 点亮
+            cv.goToPage(1)
+            tryVerify(function () { return cv.currentPage === 1 }, 3000, "应切到第 1 页")
+            page.toggleBookmark()
+            verify(page.currentBookmarked, "第 1 页收藏后应点亮")
+            tryVerify(function () { return page.topToolbar.bookmarked }, 3000,
+                      "顶栏应反映第 1 页收藏态")
+            // 返回第 0 页 → 熄灭（同章不同页不共享收藏状态）
+            cv.goToPage(0)
+            tryVerify(function () { return !page.currentBookmarked }, 3000,
+                      "切回第 0 页应熄灭（同章不同页不共享收藏）")
+            // 再回第 1 页 → 重新点亮
+            cv.goToPage(1)
+            tryVerify(function () { return page.currentBookmarked }, 3000,
+                      "再回第 1 页应重新点亮")
+            // 持久化含页级键（chapter 0, page 1）
+            var saved = Settings.value("bookmarks/" + book.id)
+            verify(saved && saved.indexOf("page:0:1") >= 0,
+                   "持久化应含页级键 page:0:1，实际=" + JSON.stringify(saved))
+            h.stack.destroy()
+        }
+
         // 横翻：章末页再 → 翻过章末进入下一章（真实书籍语义）；末章 → 不越
         function test_pagedLastPageAdvancesChapter() {
             var book = findBook("multibook")
