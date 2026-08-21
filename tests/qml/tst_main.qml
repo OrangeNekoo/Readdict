@@ -1064,11 +1064,8 @@ Item {
             if (!findBook("multibook")) Importer.doImport(TestEnv.multiSource)
         }
         function cleanupTestCase() {
-            // 同 tst_e4_keys 约定：清理本用例导入的多章书，避免污染后续用例
-            //（tst_highlightsui 的 findTxtBook() 取最新 TXT 会拿到它）
-            for (let b of Books.booksModel)
-                if (b.title === "multibook")
-                    Books.removeBookWithFiles(b.id, true)
+            // tst_qml 使用独立临时数据目录；multibook 是后续 ReaderRestore 和
+            // BookProgressMeasure 的共享夹具，不能在本 TestCase 结束时删除。
         }
         function findBook(title) {
             for (let b of Books.booksModel)

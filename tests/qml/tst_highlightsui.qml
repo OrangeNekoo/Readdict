@@ -517,6 +517,8 @@ Item {
             verify(page !== null, "ReaderPage 应能加载")
             tryVerify(function () { return page.chapter.paragraphs && page.chapter.paragraphs.length > 0 }, 5000,
                       "打开应加载章节")
+            page.loadChapter(0)
+            Books.currentChapter = 0
             var hlId = Highlights.addHighlight(book.id, page.chapter.title, 1, "第二行内容", "#FFEB3B", "跳转测试")
             // highlightsChanged → ReaderPage 重载 → content.highlights 注入
             tryVerify(function () {
@@ -531,7 +533,8 @@ Item {
                       "跳转后笔记列表应收起")
             tryVerify(function () { return page.contentView.flashIndex === 1 }, 3000,
                       "跳转应闪烁目标句，实际 " + page.contentView.flashIndex)
-            verify(page.chapter.title === book.title, "跳转后章节应仍为该书章节")
+            verify(page.book && page.book.id === book.id && Books.currentChapter === 0,
+                   "跳转后仍应位于原书当前章节")
             Highlights.removeHighlight(hlId)
             tryVerify(function () { return Highlights.highlightsForBook(book.id).length === 0 }, 3000,
                       "删除划线后应清空")
@@ -577,11 +580,10 @@ Item {
                 return item && Math.abs((item.y - page.contentView.contentY)
                                         - page.contentView.height / 3) < page.contentView.height / 2
             }, 3000, "目标段（第 2 章第 10 段）应位于视口上 1/3 附近")
-            // 清理：划线 + 多章节书（后续用例依赖原有 3 本 TXT）
+            // 清理本用例划线；多章节书是后续阅读器回归的共享夹具。
             Highlights.removeHighlight(hlId)
             tryVerify(function () { return Highlights.highlightsForBook(book.id).length === 0 }, 3000,
                       "删除划线后应清空")
-            Books.removeBook(book.id)
             loader.destroy()
         }
     }

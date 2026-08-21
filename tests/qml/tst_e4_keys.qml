@@ -36,13 +36,9 @@ Item {
             Settings.setValue("reading/pageMode", "scroll")
         }
         function cleanupTestCase() {
+            // 测试进程使用独立临时数据目录；保留 longbook/multibook，供同一
+            // tst_qml 进程中后续 TestCase 继续使用，避免跨 TestCase 依赖被清理。
             Settings.setValue("reading/pageMode", "scroll")
-            // 清理本文件导入的长书：tst_highlightsui 的 findTxtBook() 取最新 TXT
-            //（booksModel added_at DESC），且 loadChapter 持久化 progress/<bookId>，
-            // 不删会让后续用例拿到 longbook/multibook 并打开错误章节（全量回归失败源）
-            for (let b of Books.booksModel)
-                if (b.title === "longbook" || b.title === "multibook")
-                    Books.removeBookWithFiles(b.id, true)
         }
         function findBook(title) {
             for (let b of Books.booksModel)
@@ -568,12 +564,8 @@ Item {
             Settings.setValue("reading/pageMode", "scroll")
         }
         function cleanupTestCase() {
+            // 与 ArrowKeyPagingSmoke 相同：共享测试夹具保留到 tst_qml 进程结束。
             Settings.setValue("reading/pageMode", "scroll")
-            // 同 ArrowKeyPagingSmoke：清理本文件导入的长书，避免污染后续用例
-            //（findTxtBook 取最新 TXT + progress 持久化影响打开章节）
-            for (let b of Books.booksModel)
-                if (b.title === "longbook" || b.title === "multibook")
-                    Books.removeBookWithFiles(b.id, true)
         }
         function findBook(title) {
             for (let b of Books.booksModel)
