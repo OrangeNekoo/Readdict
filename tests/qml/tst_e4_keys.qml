@@ -320,12 +320,26 @@ Item {
             compare(cv.pageMode, "scroll", "本用例应为 scroll 模式")
             Books.currentChapter = 0
             page.loadChapter(0)
-            wait(100)
+            // 取消 loadChapter 在 onChapterChanged 时从旧窗口捕获的运行锚点事务：
+            // openPage 按前序用例留下的进度恢复视口位置（常在相邻章），loadChapter
+            // 的 onChapterChanged 会把该视口顶段落捕获为 pendingWindowAnchor；
+            // 若任其由 16ms windowAnchorTimer 应用（目标段落在新窗口 [0,1] 中存在），
+            // 视口被拽进第 1 章区域 → checkChapterActivation 激活第 1 章 →
+            // scrollChapters 重扩为 [0,1,2]，污染"单章模型"断言。生产显式跳转都先
+            // prepareExplicitNavigation 取消该事务（目录/搜索/笔记/菜单），测试直调
+            // loadChapter 需在首个事件循环轮转前自行取消。
+            cv.cancelWindowAnchor()
+            // 钳到顶部：锚点取消后视口仍停在旧恢复位置，先把视口中线留在第 0 章
+            //（checkChapterActivation 按视口中线激活），收缩为单章后 contentY=0
+            // 也保证 checkAutoNext 提前返回，不再有异步路径重扩相邻章节。
+            cv.contentY = 0
             // 清空宿主输入窗口，确保本用例的 maxY 只对应当前章节。
             page.scrollChapters = []
             cv.activeScrollChapter = 0
             cv.scrollFocusChapter = 0
             cv.rebuildScrollModel()
+            // scrollChapters 变化触发 onScrollChaptersChanged 的同步捕获一并清掉
+            cv.cancelWindowAnchor()
             wait(100)
             Books.currentChapter = 0
             cv.activeScrollChapter = 0
