@@ -539,6 +539,19 @@ Item {
                    "内容超高时 panelScroller 应可交互，实际 " + fl.interactive)
             // 记录正文滚动位置：面板滚动不得驱动阅读正文（滚动事件归属验证）
             var bodyYBefore = page.contentView.contentY
+            // 真实手势滚动：press/move/release 必须由 panelScroller 消费（不把直接
+            // 写 contentY 当作事件证据——未来若手势被误拦截此处即红灯）。面板初始
+            // contentY 为 0 → 手指上移（dy 为负）= 内容下滚（contentY 增大）。选
+            // x=8 左侧空白带，避开右侧 ScrollBar 与图标卡/滑块命中区；单次位移
+            // 80px 远超 Flickable 拖拽阈值，mouseDrag 分步移动同 tst_e4_keys。
+            fl.contentY = 0
+            var panelYBefore = fl.contentY
+            mouseDrag(fl, 8, fl.height * 0.6, 0, -80, Qt.LeftButton, Qt.NoModifier, 50)
+            tryVerify(function () { return fl.contentY > panelYBefore }, 3000,
+                      "真实拖动后 panelScroller 应滚动（手势被消费），实际 contentY="
+                      + fl.contentY)
+            compare(page.contentView.contentY, bodyYBefore,
+                    "面板真实拖动不应改变正文 contentY")
             // 滚动到底：底部对齐控件完整落入视口（缺陷：隐式高度不含底边距 → 红灯）
             fl.contentY = fl.contentHeight - fl.height
             tryVerify(function () {
