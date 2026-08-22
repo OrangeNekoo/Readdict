@@ -401,6 +401,103 @@ Item {
                       "渲染应稳定再销毁，实际 " + page.pdfView.status)
             stack.destroy()
         }
+        // 任务4：PDF 缩放百分比控制器——zoomPercent 始终反映活动视图真实
+        // renderScale（1.0 = 100%）；宽度适配/整页适配/重置更新百分比；+/− 按
+        // 10% 步进修改 renderScale；输入 150 后活动视图变为 150%（1.5）、越界
+        // 输入钳制到 25%–400%。确定性文本 PDF 夹具（两页 A4）任何环境可跑。
+        function test_pdfZoomPercentControls() {
+            // 显式复位阅读方向：paged 直接推入时 Ready 可能在布局完成前触发、
+            // 缩放保持默认 1（百分比断言失去判别力），故先按 scroll 推入再切
+            // paged——与 test_fitPageCentersNarrowPdf 同模式，不依赖前序用例残留
+            Settings.setValue("reading/pageMode", "scroll")
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            verify(stack !== null, "测试 StackView 应能创建")
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/PdfReaderPage.qml",
+                       { book: { id: 999115, title: "缩放PDF", path: TestEnv.textPdfSource } })
+            var page = stack.currentItem
+            verify(page !== null, "PdfReaderPage 应被 push 进 StackView")
+            tryVerify(function () { return page.pdfDocument.status === PdfDocument.Ready }, 15000,
+                      "文本 PDF 应加载为 Ready，实际 " + page.pdfDocument.status)
+            // 先切到 paged（与 test_fitPageCentersNarrowPdf 同模式）：确保适配计算
+            // 时视图已有确定尺寸（paged 直接推入时 Ready 可能在布局完成前触发，
+            // 缩放保持默认 1，百分比断言失去判别力）
+            page.setPageMode("paged")
+            tryVerify(function () { return page.pdfViewKind === "single" }, 3000,
+                      "缩放验证应在 paged（single）模式，实际 " + page.pdfViewKind)
+            // 图书信息 → 缩放 Sheet（面板经 bottomSheet.contentLoader 实例化）
+            page.readerShell.triggerMenuAction("info")
+            tryVerify(function () { return page.readerShell.sheetOpen }, 3000,
+                      "图书信息应打开缩放 Sheet")
+            var panel = page.readerShell.bottomSheet.contentLoader.item
+            tryVerify(function () { return panel !== null }, 3000, "缩放面板应被实例化")
+            // zoomPercent 实时反映活动视图 renderScale（1.0 = 100%）
+            tryVerify(function () {
+                return page.zoomPercent === Math.round(page.pdfView.renderScale * 100)
+            }, 3000, "zoomPercent 应等于 renderScale 百分比，实际 " + page.zoomPercent
+                  + " vs " + Math.round(page.pdfView.renderScale * 100))
+            // 宽度适配（Ready 后 setPageMode 已按视口宽适配）后应为非 100 的适配值
+            verify(page.zoomPercent !== 100, "宽度适配后百分比应非 100，实际 " + page.zoomPercent)
+            var scaleBefore = page.pdfView.renderScale
+            // +：按 10% 步进提高 renderScale 并同步百分比
+            panel.zoomPlus.clicked()
+            tryVerify(function () {
+                return page.zoomPercent === Math.round(page.pdfView.renderScale * 100)
+                    && page.pdfView.renderScale > scaleBefore + 0.05
+            }, 3000, "+ 应提高 renderScale，实际 " + page.pdfView.renderScale + "（原 " + scaleBefore + "）")
+            // −：按 10% 步进回落（回到原适配缩放）
+            panel.zoomMinus.clicked()
+            tryVerify(function () {
+                return page.zoomPercent === Math.round(page.pdfView.renderScale * 100)
+                    && Math.abs(page.pdfView.renderScale - scaleBefore) < 0.05
+            }, 3000, "− 应回落 renderScale，实际 " + page.pdfView.renderScale + "（原 " + scaleBefore + "）")
+            // 整页适配：百分比更新为整页适配计算值（≤ 宽度适配值）
+            panel.fitPageBtn.clicked()
+            tryVerify(function () {
+                return page.fitPage === true
+                    && page.zoomPercent === Math.round(page.pdfView.renderScale * 100)
+            }, 3000, "整页适配应更新百分比，实际 " + page.zoomPercent
+                  + " vs " + Math.round(page.pdfView.renderScale * 100))
+            // 重置缩放：renderScale 回到 1.0 → 100%
+            panel.resetBtn.clicked()
+            tryVerify(function () { return page.zoomPercent === 100 }, 3000,
+                      "重置后百分比应为 100，实际 " + page.zoomPercent)
+            tryVerify(function () {
+                return Math.abs(page.pdfView.renderScale - 1.0) < 0.001
+            }, 3000, "重置后 renderScale 应回到 1.0，实际 " + page.pdfView.renderScale)
+            // 宽度适配：百分比更新为宽度适配计算值（A4 页宽 < 视口宽 → 非 100）
+            panel.fitWidthBtn.clicked()
+            tryVerify(function () {
+                return page.fitPage === false
+                    && page.zoomPercent === Math.round(page.pdfView.renderScale * 100)
+                    && page.zoomPercent > 100
+            }, 3000, "宽度适配应更新百分比，实际 " + page.zoomPercent + " vs "
+                  + Math.round(page.pdfView.renderScale * 100))
+            // 输入 150 → 活动视图变为 150%（1.5），输入框文本回显 150%
+            panel.zoomInput.text = "150"
+            panel.commitZoom()
+            tryVerify(function () {
+                return Math.abs(page.pdfView.renderScale - 1.5) < 0.001
+                    && page.zoomPercent === 150
+            }, 3000, "输入 150 后活动视图应为 150%，实际 renderScale=" + page.pdfView.renderScale
+                  + " zoomPercent=" + page.zoomPercent)
+            compare(panel.zoomInput.text, "150%", "输入完成后输入框应回显 150%")
+            // 越界输入钳制：999 → 400%；10 → 25%
+            panel.zoomInput.text = "999"
+            panel.commitZoom()
+            tryVerify(function () { return page.zoomPercent === 400 }, 3000,
+                      "输入 999 应钳制到 400%，实际 " + page.zoomPercent)
+            panel.zoomInput.text = "10"
+            panel.commitZoom()
+            tryVerify(function () { return page.zoomPercent === 25 }, 3000,
+                      "输入 10 应钳制到 25%，实际 " + page.zoomPercent)
+            // 恢复默认方向，避免污染同文件后序 PDF 用例
+            Settings.setValue("reading/pageMode", "scroll")
+            // 渲染稳定后销毁，避免 QtPdfQuick 拆除竞态崩溃
+            tryVerify(function () { return page.renderSettled() }, 15000,
+                      "渲染应稳定再销毁，实际 status=" + page.pdfView.status)
+            stack.destroy()
+        }
         // 任务4：文本 PDF 朗读——确定性夹具（TestEnv.textPdfSource，两页各两句）：
         // 生产 keyClick(D) 翻页、共享壳层菜单朗读、手动翻页停止 TTS 会话、
         // 读完一页自动续读下一有文本页、末页耗尽停 TTS 并显示提示。

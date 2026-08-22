@@ -246,25 +246,102 @@ Page {
         function resetScale() { if (page.activePdfView) page.activePdfView.resetScale() }
     }
 
+    // ---- 任务4：缩放百分比控制器 ----
+    // zoomPercent：活动视图真实 renderScale 的整数百分比（1.0 = 100%），钳制显示
+    // 范围 25%–400%；zoomPercentText：可编辑输入框文本（"NNN%"）。两者均由
+    // renderScale 派生（经 pdfView 代理读活动视图）——宽度适配/整页适配/重置/
+    // +/−/方向切换后自动跟随，缩放控件始终反映真实 renderScale。
+    property int zoomPercent: {
+        const v = page.pdfView
+        if (!v || v.renderScale === undefined) return 100
+        return Math.max(25, Math.min(400, Math.round(v.renderScale * 100)))
+    }
+    property string zoomPercentText: String(page.zoomPercent) + "%"
+
     // ---- 任务4：PDF 专属缩放面板（经壳层 Sheet 承载；壳层菜单"图书信息"
-    // openInfo → 本面板）——宽度适配 / 整页适配 / 重置缩放，Ready 门控。
+    // openInfo → 本面板）——百分比控制器（− / 可编辑输入 / +）+ 宽度适配 /
+    // 整页适配 / 重置缩放，Ready 门控。输入完成（回车/失焦）经 commitZoom
+    // 校验、钳制（25%–400%）并写入活动视图 renderScale，缩放后刷新居中边距。
     Component {
         id: pdfZoomComp
         Column {
+            id: zoomPanel
             width: parent ? parent.width : 0
             spacing: 0
-            Repeater {
-                model: [
-                    { id: "fitWidth", text: qsTr("宽度适配") },
-                    { id: "fitPage", text: qsTr("整页适配") },
-                    { id: "reset", text: qsTr("重置缩放") }
-                ]
-                delegate: ItemDelegate {
-                    required property var modelData
-                    width: parent ? parent.width : 0
-                    text: modelData.text
-                    onClicked: page.onZoom(modelData.id)
+            objectName: "pdfZoomPanel"
+            // 测试/外部句柄
+            property alias zoomMinus: zoomMinus
+            property alias zoomPlus: zoomPlus
+            property alias zoomInput: zoomInput
+            property alias fitWidthBtn: fitWidthBtn
+            property alias fitPageBtn: fitPageBtn
+            property alias resetBtn: resetBtn
+            // 输入完成：读取输入框百分比，非法输入回退当前值，钳制 25%–400% 后
+            // 写入活动视图 renderScale 并刷新居中边距；随后恢复 text 绑定，使
+            // +/−/适配/重置仍能驱动输入框回显（用户输入会再次断开绑定）。
+            function commitZoom() {
+                if (page.pdfDocument.status !== PdfDocument.Ready) return
+                let pct = parseInt(String(zoomInput.text || "").replace(/[^0-9]/g, ""), 10)
+                if (isNaN(pct)) pct = Math.round(page.pdfView.renderScale * 100)
+                pct = Math.max(25, Math.min(400, pct))
+                page.pdfView.renderScale = pct / 100
+                page.updatePdfAlignment()
+                zoomInput.text = String(pct) + "%"
+                zoomInput.text = Qt.binding(function () { return page.zoomPercentText })
+            }
+            // 百分比控制器行：− / 可编辑百分比输入 / +
+            Row {
+                width: parent.width
+                leftPadding: 16
+                rightPadding: 16
+                topPadding: 10
+                bottomPadding: 10
+                spacing: 10
+                Button {
+                    id: zoomMinus
+                    width: 44
+                    height: 34
+                    text: "−"
+                    enabled: page.pdfDocument.status === PdfDocument.Ready
+                    onClicked: page.zoomBy(-10)
                 }
+                TextField {
+                    id: zoomInput
+                    width: parent.width - zoomMinus.width - zoomPlus.width - 2 * parent.spacing
+                    height: 34
+                    horizontalAlignment: TextInput.AlignHCenter
+                    inputMethodHints: Qt.ImhDigitsOnly
+                    text: page.zoomPercentText
+                    enabled: page.pdfDocument.status === PdfDocument.Ready
+                    onEditingFinished: zoomPanel.commitZoom()
+                    onAccepted: zoomPanel.commitZoom()
+                }
+                Button {
+                    id: zoomPlus
+                    width: 44
+                    height: 34
+                    text: "+"
+                    enabled: page.pdfDocument.status === PdfDocument.Ready
+                    onClicked: page.zoomBy(10)
+                }
+            }
+            ItemDelegate {
+                id: fitWidthBtn
+                width: parent.width
+                text: qsTr("宽度适配")
+                onClicked: page.onZoom("fitWidth")
+            }
+            ItemDelegate {
+                id: fitPageBtn
+                width: parent.width
+                text: qsTr("整页适配")
+                onClicked: page.onZoom("fitPage")
+            }
+            ItemDelegate {
+                id: resetBtn
+                width: parent.width
+                text: qsTr("重置缩放")
+                onClicked: page.onZoom("reset")
             }
         }
     }
@@ -664,12 +741,28 @@ Page {
     }
     // 任务4：缩放面板动作——宽度适配 / 整页适配 / 重置缩放。
     // Ready 门控：Error/Loading 状态点中面板项不得触发缩放调用（缩放依赖已加载
-    // 文档的 pagePointSize，非 Ready 调用无意义）。
+    // 文档的 pagePointSize，非 Ready 调用无意义）。zoomPercent 由 renderScale
+    // 派生，各动作后自动同步百分比；重置后显式刷新居中边距（scroll 视图无
+    // contentWidthChanged 钩子，Flickable 内容宽度变化依赖此处重算）。
     function onZoom(id) {
         if (pdfDoc.status !== PdfDocument.Ready) return
         if (id === "fitWidth") { page.fitPage = false; page.applyFitModeToActiveView() }
         else if (id === "fitPage") { page.fitPage = true; page.applyFitModeToActiveView() }
-        else if (id === "reset") { page.pdfView.resetScale() }
+        else if (id === "reset") {
+            page.pdfView.resetScale()
+            page.updatePdfAlignment()
+        }
+    }
+    // 任务4：+/− 步进缩放——按 10% 步进修改活动视图 renderScale（钳制
+    // 25%–400%），缩放后刷新整页居中边距（Flickable 内容宽度变化后对称边距需
+    // 重算，否则内容中心偏离视口中心）。
+    function zoomBy(delta) {
+        if (pdfDoc.status !== PdfDocument.Ready) return
+        const v = page.activePdfView
+        if (!v || v.renderScale === undefined) return
+        const pct = Math.max(25, Math.min(400, Math.round(v.renderScale * 100) + delta))
+        v.renderScale = pct / 100
+        page.updatePdfAlignment()
     }
     // 任务2：重试——改变 source 值强制重新触发加载（PdfDocument 无公开 reload API，
     // QML 侧唯一重载入口是 source 属性，且值必须变化才会重载）。
