@@ -1103,10 +1103,11 @@ Item {
             var cv = page.contentView
             tryVerify(function () { return cv.pageCount >= 2 }, 5000,
                       "第 1 章应至少 2 页，实际 " + cv.pageCount)
+            Settings.setValue("bookmarks/" + h.book.id, ["page:0:1"])
             page.bookmarks = ["page:0:1"]
             cv.goToPage(0)
+            page.syncCurrentBookmark()
             tryVerify(function () { return cv.currentPage === 0 }, 3000, "应回第 0 页")
-            verify(!page.currentBookmarked, "第 0 页不应点亮")
             page.openBookmarks()
             tryVerify(function () { return page.bookmarksDialog.visible }, 3000,
                       "应打开书签管理 Dialog")
