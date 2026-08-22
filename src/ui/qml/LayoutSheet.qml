@@ -10,7 +10,10 @@ import Readdict.UI 1.0
 Item {
     id: layoutSheet
     objectName: "layoutSheetPanel"
-    implicitHeight: layoutColumn.implicitHeight
+    // 完整内容高度 = layoutColumn 隐式高度 + 上下 16px 边距。KdBottomSheet 的
+    // panelScroller 依此测量 contentHeight 并门控 interactive，保证底部对齐
+    // 控件计入内容高度、滚动到底完整可见。
+    implicitHeight: layoutColumn.implicitHeight + 32
     property string pageMode: "scroll"
     property string pageWidth: "normal"
     property real lineHeight: 1.6
@@ -50,7 +53,11 @@ Item {
 
     ColumnLayout {
         id: layoutColumn
-        anchors.fill: parent
+        // 只锚定上/左/右，不锚底部：列高由内容隐式高度决定，避免与根
+        // implicitHeight 形成锚点/隐式高度循环；16px 底边距随隐式高度计入。
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
         anchors.margins: 16
         spacing: 10
 
@@ -138,4 +145,3 @@ Item {
         }
     }
 }
-

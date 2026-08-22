@@ -96,7 +96,7 @@ Item {
                 contentWidth: width
                 contentHeight: Math.max(height,
                     panelLoader.item ? panelLoader.item.implicitHeight : height)
-                flickableDirection: true ? 2 : 1
+                flickableDirection: Flickable.VerticalFlick
                 ScrollBar.vertical: ScrollBar {
                     policy: panelScroller.interactive ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
                 }
