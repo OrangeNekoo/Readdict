@@ -217,13 +217,23 @@ Page {
 
     function measureBookStep() {
         if (!page.measureView || !page.book || !page.book.id) return
+        const view = page.measureView
         const count = Books.chapterCount(page.book.id)
         if (page.measureChapterIndex >= count) {
             page.bookPageTotal = page.measurePageSum
             page.updateBookPageNumber()
             return
         }
-        // 契约4：无布局/尺寸为零等经重试预算兜底——按 1 页继续完成，不死循环
+        // 契约6：视口/隐藏测量视图宽高为 0（异步布局前/窗口未就绪）时延迟重试
+        // ——不采纳任何页数、不消耗兜底预算（旧实现 0 尺寸下 scroll 采纳畸形行高
+        // 页数、paged 16 轮后按 1 页兜底，伪造全书值）；布局就绪由
+        // onWidthChanged/onHeightChanged 统一入口重新测量，或本定时轮询在尺寸
+        // 恢复后自然继续。
+        if (view.width <= 0 || view.height <= 0) {
+            page.scheduleMeasureStep()
+            return
+        }
+        // 契约4：无布局等经重试预算兜底——按 1 页继续完成，不死循环
         if (page.measureRetries >= 16) {
             page.measuredChapterPages.push(1)
             page.measurePageSum += 1
@@ -234,7 +244,6 @@ Page {
             page.scheduleMeasureStep()
             return
         }
-        const view = page.measureView
         const target = page.measureChapterIndex
         if (!page.measureTarget) {
             // 契约2：每章开始测量先清空隐藏视图旧 pageModel/pageCount，记录本次
@@ -245,6 +254,16 @@ Page {
             view.contentY = 0
             const loaded = Books.loadChapter(page.book.id, target)
             if (!loaded || loaded.error) {
+                page.measuredChapterPages.push(1)
+                page.measurePageSum += 1
+                page.measureChapterIndex += 1
+                page.measureRetries = 0
+                page.scheduleMeasureStep()
+                return
+            }
+            // 契约6：空章节（无段落）直接按 1 页继续——不消耗重试预算，
+            // 也不依赖布局（空内容永远无委托可等）
+            if (!(loaded.paragraphs || []).length) {
                 page.measuredChapterPages.push(1)
                 page.measurePageSum += 1
                 page.measureChapterIndex += 1

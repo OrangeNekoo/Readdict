@@ -762,6 +762,7 @@ Item {
             Settings.setValue("reading/pageMode", "scroll")
             Settings.setValue("typography/fontSize", 18)
             root.width = 1100   // 视口宽度用例失败路径也复位，避免污染后续用例
+            root.height = 720   // 任务3：0 尺寸视口用例失败路径也复位高度
         }
 
         function openMulti() {
@@ -928,6 +929,77 @@ Item {
             tryVerify(function () { return page.bookPageTotal > 0 }, 10000,
                       "视口宽度变化后全书测量应重新完成")
             root.width = 1100
+            h.stack.destroy()
+        }
+
+        // 契约6：0×0 视口（异步布局前/窗口未就绪）下切换全书范围，测量必须延迟
+        // 重试——绝不把 0 尺寸下的垃圾页数或兜底 1 页采纳为全书值（旧实现 scroll
+        // 模式会采纳宽度 0 时 TextEdit 的畸形行高页数、paged 模式 16 轮后兜底 1 页），
+        // 视觉三值保持安全 0/0/0；视口就绪后经统一入口重新测量得到真实非零总数。
+        function test_zeroSizeViewportDefersMeasurement() {
+            root.width = 0
+            root.height = 0
+            var h = openMulti()
+            var page = h.page
+            tryVerify(function () { return page.contentView.height === 0 }, 3000,
+                      "0×0 视口下内容区高度应为 0，实际 " + page.contentView.height)
+            page.setProgressScope("book")
+            // 等待远超旧 16×50ms 重试预算：0 尺寸下不得发布任何页数
+            wait(1500)
+            compare(page.bookPageTotal, 0, "0 尺寸视口下全书总数必须保持 0（延迟重试）")
+            compare(page.measuredChapterPages.length, 0,
+                    "0 尺寸下不得采纳任何章节页数（含兜底 1 页）")
+            compare(page.visualPageNumber, 0, "0 尺寸下不得显示伪造页号")
+            compare(page.visualPageCount, 0, "0 尺寸下不得显示伪造页数")
+            compare(page.visualPageRatio, 0, "0 尺寸下比率应为 0")
+            verify(page.progressLabel.text.indexOf("全书 第 0 / 0 页") === 0,
+                   "0 尺寸下应显示安全全书占位，实际 " + page.progressLabel.text)
+            // 视口就绪 → 统一入口（尺寸变化）重新测量并完成
+            root.width = 1100
+            root.height = 720
+            tryVerify(function () { return page.contentView.height > 0 }, 3000,
+                      "视口恢复后内容区应有布局")
+            tryVerify(function () { return page.bookPageTotal > 0 }, 10000,
+                      "视口就绪后全书测量应在限时内完成")
+            var chapterCount = Books.chapterCount(h.book.id)
+            compare(page.measuredChapterPages.length, chapterCount,
+                    "就绪后测量数组应重新与章节数等长")
+            var sum = 0
+            for (var i = 0; i < page.measuredChapterPages.length; ++i)
+                sum += page.measuredChapterPages[i]
+            compare(page.bookPageTotal, sum, "就绪后总数应等于各章真实视觉页数之和")
+            verify(page.progressLabel.text.indexOf("全书 第 0 / 0 页") < 0,
+                   "就绪后应显示真实全书页数，实际 " + page.progressLabel.text)
+            h.stack.destroy()
+        }
+
+        // 契约6（paged 分支）：0×0 视口下 paged 页面模型因 width<=0 永不建立，
+        // 旧实现 16 轮重试后按每章 1 页兜底完成（全书=章节数，伪造值）；修复后
+        // 必须保持 0 直到视口就绪再测出真实各章 pageCount 之和。
+        function test_zeroSizeViewportDefersMeasurementInPagedMode() {
+            Settings.setValue("reading/pageMode", "paged")
+            root.width = 0
+            root.height = 0
+            var h = openMulti()
+            var page = h.page
+            compare(page.pageMode, "paged", "应处于横向分页模式")
+            page.setProgressScope("book")
+            wait(1500)
+            compare(page.bookPageTotal, 0, "0 尺寸 paged 下全书总数必须保持 0（延迟重试）")
+            compare(page.measuredChapterPages.length, 0,
+                    "0 尺寸 paged 下不得采纳兜底 1 页")
+            compare(page.visualPageCount, 0, "0 尺寸 paged 下不得显示伪造页数")
+            root.width = 1100
+            root.height = 720
+            tryVerify(function () { return page.bookPageTotal > 0 }, 10000,
+                      "视口就绪后 paged 全书测量应完成")
+            var chapterCount = Books.chapterCount(h.book.id)
+            compare(page.measuredChapterPages.length, chapterCount,
+                    "paged 就绪后测量数组应重新与章节数等长")
+            var sum = 0
+            for (var i = 0; i < page.measuredChapterPages.length; ++i)
+                sum += page.measuredChapterPages[i]
+            compare(page.bookPageTotal, sum, "paged 就绪后总数应等于各章 pageCount 之和")
             h.stack.destroy()
         }
     }
