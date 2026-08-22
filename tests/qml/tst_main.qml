@@ -814,7 +814,64 @@ Item {
                       "渲染应稳定再销毁，实际 " + page.pdfView.status)
             stack.destroy()
         }
-        // 任务4（复审）：三页 文本-图片-文本 PDF——页级自动续读必须跳过无文本页
+        // 任务2：PDF 全书进度范围——progressScope=book 时用 pdfDoc.pageCount 与
+        // 活动视图 currentPage 显示"全书 第 X / Y 页"；百分比格式随页更新；
+        // chapter 范围保持原有"第 X / Y 页"语义。确定性两页文本 PDF 夹具。
+        function test_pdfBookProgressScopeShowsTotalPagesAndPercent() {
+            Settings.setValue("reading/progressScope", "book")
+            Settings.setValue("reading/progressDisplay", "pages")
+            var id = 999140
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            verify(stack !== null, "测试 StackView 应能创建")
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/PdfReaderPage.qml",
+                       { book: { id: id, title: "进度PDF", path: TestEnv.textPdfSource } })
+            var page = stack.currentItem
+            verify(page !== null, "PdfReaderPage 应被 push 进 StackView")
+            tryVerify(function () { return page.pdfDocument.status === PdfDocument.Ready }, 15000,
+                      "文本 PDF 应加载为 Ready")
+            var doc = page.pdfDocument
+            verify(doc.pageCount >= 2, "夹具 PDF 应至少两页，实际 " + doc.pageCount)
+            compare(page.progressScope, "book", "重开应恢复全书范围")
+            // book 范围页数格式：全书 第 1 / N 页
+            tryVerify(function () {
+                return page.pageLabel.text.indexOf("全书 第 1 / " + doc.pageCount + " 页") >= 0
+            }, 5000, "book 范围应显示全书总页数，实际 '" + page.pageLabel.text + "'")
+            // 翻页后全书页号同步
+            page.nextPage()
+            tryVerify(function () { return page.pdfView.currentPage === 1 }, 5000,
+                      "应翻到第 1 页，实际 " + page.pdfView.currentPage)
+            tryVerify(function () {
+                return page.pageLabel.text.indexOf("全书 第 2 / " + doc.pageCount + " 页") >= 0
+            }, 5000, "翻页后全书页号应更新，实际 '" + page.pageLabel.text + "'")
+            // 百分比格式：末页 100%，回首页 50%（两页夹具）
+            page.setProgressDisplay("percent")
+            tryVerify(function () {
+                return page.pageLabel.text.indexOf("全书 100%") >= 0
+            }, 5000, "末页全书百分比应为 100%，实际 '" + page.pageLabel.text + "'")
+            page.previousPage()
+            tryVerify(function () { return page.pdfView.currentPage === 0 }, 5000,
+                      "应回到第 0 页，实际 " + page.pdfView.currentPage)
+            tryVerify(function () {
+                return page.pageLabel.text.indexOf("全书 50%") >= 0
+            }, 5000, "首页全书百分比应为 50%，实际 '" + page.pageLabel.text + "'")
+            // chapter 范围回到原有页数语义（无全书前缀）
+            page.setProgressScope("chapter")
+            compare(page.progressScope, "chapter", "应切回本章范围")
+            compare(String(Settings.value("reading/progressScope")), "chapter",
+                    "范围切换应持久化")
+            page.setProgressDisplay("pages")
+            tryVerify(function () {
+                return page.pageLabel.text.indexOf("全书 ") < 0
+                    && page.pageLabel.text.indexOf("1 / " + doc.pageCount + " 页") >= 0
+            }, 5000, "chapter 范围应恢复原有页数语义，实际 '" + page.pageLabel.text + "'")
+            // 渲染稳定后销毁，避免 QtPdfQuick 拆除竞态崩溃
+            tryVerify(function () { return page.renderSettled() }, 15000,
+                      "渲染应稳定再销毁，实际 " + page.pdfView.status)
+            stack.destroy()
+            Settings.setValue("reading/progressScope", "chapter")
+            Settings.setValue("reading/progressDisplay", "pages")
+        }
         //（0 → 2），且中间图片页 canReadAloud=false、原因精确、菜单朗读项 disabled。
         function test_pdfReadAloudSkipsImagePage() {
             Tts.stop()

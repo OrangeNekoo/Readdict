@@ -83,6 +83,20 @@ Page {
     // L9（P2#34）：翻页进度节流——currentPageChanged 只置 dirty，2s 合并 Timer 触发
     // 才写 Settings/DB（快翻不逐页落盘）；onDestruction 兜底 flush 不丢最后页码。
     property bool progressDirty: false
+    // 任务2：PDF 全书进度范围/格式——与文本书共用 reading/progressScope 与
+    // reading/progressDisplay 键（onCompleted 恢复）；book 范围用 pdfDoc.pageCount
+    // 与活动视图 currentPage 计算总页数与百分比，不依赖文本章节测量器；
+    // chapter 范围保持原有"第 X / Y 页"语义（PDF 无章，页即阅读单位）。
+    property string progressScope: "chapter"
+    property string progressDisplay: "pages"
+    function setProgressScope(scope) {
+        page.progressScope = scope === "book" ? "book" : "chapter"
+        Settings.setValue("reading/progressScope", page.progressScope)
+    }
+    function setProgressDisplay(display) {
+        page.progressDisplay = display === "percent" ? "percent" : "pages"
+        Settings.setValue("reading/progressDisplay", page.progressDisplay)
+    }
     // B10：关闭竞态防护——QPdfDocument 销毁（FPDF_DestroyLibrary）若撞上
     // QQuickPixmapReader 在途渲染（QPdfIOHandler 持文档指针）会 use-after-free 崩溃
     //（30MB 大 PDF 实测复现）。返回键先等渲染稳定（无在途读取）再 pop，
@@ -591,7 +605,9 @@ Page {
         }
     }
 
-    // 任务4：底部左下页码指示（壳层 Sheet 打开时隐藏，与 ReaderPage 进度标签同语义）
+    // 任务2：底部左下页码指示（壳层 Sheet 打开时隐藏，与 ReaderPage 进度标签同语义）
+    // ——进度范围 book 时显示"全书 第 X / Y 页"或"全书 Z%"，chapter 保持"第 X / Y 页"；
+    // 百分比与页号均随活动视图 currentPage 与 pdfDoc.pageCount 实时派生。
     Label {
         id: pageLabel
         anchors.left: parent.left
@@ -600,9 +616,16 @@ Page {
         anchors.bottomMargin: (page.ttsBarVisible ? readerShell.ttsBar.height : 0) + 12
         visible: !readerShell.sheetOpen
         z: 10
-        text: pdfDoc.pageCount > 0
-              ? qsTr("第 %1 / %2 页").arg(pdfView.currentPage + 1).arg(pdfDoc.pageCount)
-              : qsTr("第 - / - 页")
+        text: {
+            const total = pdfDoc.pageCount
+            const cur = total > 0 ? pdfView.currentPage + 1 : 0
+            const scope = page.progressScope === "book" ? qsTr("全书") : qsTr("本章")
+            if (total <= 0)
+                return scope + " " + qsTr("第 - / - 页")
+            if (page.progressDisplay === "percent")
+                return scope + " " + Math.round(cur / total * 100) + "%"
+            return scope + " " + qsTr("第 %1 / %2 页").arg(cur).arg(total)
+        }
         color: UITheme.lightTextPrimary
         font.pixelSize: 12
     }
@@ -1195,6 +1218,11 @@ Page {
         const saved = Settings.value("bookmarks/pdf_" + (page.book ? page.book.id : ""))
         page.pdfBookmarks = Array.isArray(saved) ? saved.slice() : []
         page.syncPdfBookmarkState()
+        // 任务2：恢复全书进度范围/格式（与文本书共用键；pageLabel 绑定据此派生）
+        const pd = Settings.value("reading/progressDisplay")
+        page.progressDisplay = pd === "percent" ? "percent" : "pages"
+        const ps = Settings.value("reading/progressScope")
+        page.progressScope = ps === "book" ? "book" : "chapter"
         // E4（PDF）：首次创建即获得 activeFocus，方向键翻页立即可用（ReaderPage 同款）
         page.forceActiveFocus()
     }
