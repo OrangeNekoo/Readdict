@@ -666,6 +666,57 @@ Item {
                       "渲染应稳定再销毁，实际 " + page.pdfView.status)
             stack.destroy()
         }
+        // 任务1：PDF 页书签管理——预置页索引数组展示为管理列表（页码标签）、
+        // 点击条目跳页并关闭 Dialog、删除后列表/持久化/顶栏状态立即同步。
+        // 确定性两页文本 PDF 夹具（TestEnv.textPdfSource），任何环境可跑。
+        function test_pdfBookmarkManageListJumpRemove() {
+            var id = 999130
+            Settings.setValue("bookmarks/pdf_" + id, [0, 1])
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            verify(stack !== null, "测试 StackView 应能创建")
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/PdfReaderPage.qml",
+                       { book: { id: id, title: "书签管理PDF", path: TestEnv.textPdfSource } })
+            var page = stack.currentItem
+            verify(page !== null, "PdfReaderPage 应被 push 进 StackView")
+            tryVerify(function () { return page.pdfDocument.status === PdfDocument.Ready }, 15000,
+                      "文本 PDF 应加载为 Ready")
+            page.openBookmarks()
+            tryVerify(function () { return page.bookmarksDialog.visible }, 3000,
+                      "openBookmarks 应打开书签管理 Dialog")
+            compare(page.bookmarkItems.length, 2, "列表应含 2 项")
+            compare(page.bookmarkItems[0].pageIndex, 0, "第一项应为第 0 页")
+            compare(page.bookmarkItems[1].pageIndex, 1, "第二项应为第 1 页")
+            verify(String(page.bookmarkItems[0].label).length > 0,
+                   "列表项应展示页码标签，实际 '" + page.bookmarkItems[0].label + "'")
+            // 点击第 2 项 → 跳转到第 2 页并关闭 Dialog
+            page.jumpToBookmark(page.bookmarkItems[1])
+            tryVerify(function () { return page.pdfView.currentPage === 1 }, 5000,
+                      "点击书签应跳到第 1 页（第 2 页），实际 " + page.pdfView.currentPage)
+            tryVerify(function () { return !page.bookmarksDialog.visible }, 3000,
+                      "跳转后书签 Dialog 应关闭")
+            // 删除第 0 页书签 → 列表与持久化刷新；当前页（第 1 页）书签仍在应点亮
+            page.openBookmarks()
+            tryVerify(function () { return page.bookmarksDialog.visible }, 3000,
+                      "应重新打开书签管理")
+            page.removeBookmark(page.bookmarkItems[0])
+            compare(page.bookmarkItems.length, 1, "删除后列表应剩 1 项")
+            var saved = Settings.value("bookmarks/pdf_" + id)
+            compare(saved.length, 1, "持久化应只剩 1 项")
+            compare(saved[0], 1, "剩余应为第 1 页")
+            tryVerify(function () { return page.currentBookmarked }, 3000,
+                      "第 1 页书签仍在应点亮顶栏")
+            // 删除当前页书签 → 列表清空、持久化清空、顶栏熄灭
+            page.removeBookmark(page.bookmarkItems[0])
+            compare(page.bookmarkItems.length, 0, "删除后列表应为空")
+            compare(Settings.value("bookmarks/pdf_" + id).length, 0, "持久化应清空")
+            tryVerify(function () { return !page.currentBookmarked }, 3000,
+                      "删除当前页书签后顶栏应熄灭")
+            // 渲染稳定后销毁，避免 QtPdfQuick 拆除竞态崩溃
+            tryVerify(function () { return page.renderSettled() }, 15000,
+                      "渲染应稳定再销毁，实际 " + page.pdfView.status)
+            stack.destroy()
+        }
         // 任务4（复审）：三页 文本-图片-文本 PDF——页级自动续读必须跳过无文本页
         //（0 → 2），且中间图片页 canReadAloud=false、原因精确、菜单朗读项 disabled。
         function test_pdfReadAloudSkipsImagePage() {

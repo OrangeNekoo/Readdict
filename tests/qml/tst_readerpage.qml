@@ -932,4 +932,136 @@ Item {
         }
     }
 
+    // 任务1：文本书签管理——章节书签列表展示（章节标题）、点击跳转、删除后
+    // 列表/持久化/顶栏状态同步刷新；覆盖 scroll 章节键与 paged 页键两种存储
+    // 格式（旧整数章节值兼容迁移期）。fixture：multibook 三章。
+    TestCase {
+        name: "BookmarkManageSmoke"
+
+        function initTestCase() {
+            Books.doSearch("")
+            Books.setFilter("")
+            Books.setSort(0)
+            var hasMulti = false
+            for (let b of Books.booksModel)
+                if (b.title === "multibook") { hasMulti = true; break }
+            if (!hasMulti) Importer.doImport(TestEnv.multiSource)
+            Settings.setValue("reading/pageMode", "scroll")
+        }
+
+        function cleanup() {
+            Settings.setValue("reading/pageMode", "scroll")
+        }
+
+        function openMulti() {
+            var multi = null
+            for (let b of Books.booksModel)
+                if (b.title === "multibook") { multi = b; break }
+            verify(multi !== null, "测试应使用多章节书")
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            verify(stack !== null, "测试 StackView 应能创建")
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/ReaderPage.qml", { book: multi })
+            var page = stack.currentItem
+            verify(page !== null, "ReaderPage 应被 push 进 StackView")
+            tryVerify(function () {
+                return page.chapter && page.chapter.paragraphs
+                    && page.chapter.paragraphs.length > 0
+            }, 3000, "打开书后应加载章节段落")
+            page.contentView.restoreScrollY = -1
+            page.contentView.restorePending = false
+            return { stack: stack, page: page, book: multi }
+        }
+
+        // scroll 章节键：列表展示章节标题、点击跳章、删除后列表/持久化/顶栏同步
+        function test_scrollChapterBookmarkListJumpRemove() {
+            var h = openMulti()
+            var page = h.page
+            page.loadChapter(0)
+            tryVerify(function () { return Books.currentChapter === 0 }, 3000,
+                      "应处于第 1 章")
+            // 预置第 1 章（章节键）与第 3 章（旧整数，兼容迁移期）书签
+            page.bookmarks = ["chapter:0", 2]
+            page.syncCurrentBookmark()
+            verify(page.currentBookmarked, "第 1 章应点亮")
+            page.openBookmarks()
+            tryVerify(function () { return page.bookmarksDialog.visible }, 3000,
+                      "openBookmarks 应打开书签管理 Dialog")
+            compare(page.bookmarkItems.length, 2, "书签列表应含 2 项")
+            compare(page.bookmarkItems[0].chapterIndex, 0, "第一项应为第 1 章")
+            compare(page.bookmarkItems[1].chapterIndex, 2, "第二项应为第 3 章（旧整数）")
+            var titles = Books.chapterTitles(h.book.id)
+            compare(page.bookmarkItems[0].label, titles[0],
+                    "列表项应展示章节标题")
+            // 点击第 2 项 → 跳转到第 3 章并关闭 Dialog
+            page.jumpToBookmark(page.bookmarkItems[1])
+            tryVerify(function () { return Books.currentChapter === 2 }, 3000,
+                      "点击书签应跳到第 3 章")
+            tryVerify(function () { return !page.bookmarksDialog.visible }, 3000,
+                      "跳转后书签 Dialog 应关闭")
+            tryVerify(function () { return page.currentBookmarked }, 3000,
+                      "跳到已收藏章节应点亮顶栏")
+            // 删除第 1 项 → 列表、持久化、顶栏状态全部刷新
+            page.openBookmarks()
+            tryVerify(function () { return page.bookmarksDialog.visible }, 3000,
+                      "应重新打开书签管理")
+            page.removeBookmark(page.bookmarkItems[0])
+            compare(page.bookmarkItems.length, 1, "删除后列表应剩 1 项")
+            var saved = Settings.value("bookmarks/" + h.book.id)
+            compare(saved.length, 1, "持久化应只剩 1 项")
+            compare(saved[0], 2, "剩余应为旧整数 2（第 3 章）")
+            tryVerify(function () { return page.currentBookmarked }, 3000,
+                      "当前章书签仍在应保持点亮")
+            page.removeBookmark(page.bookmarkItems[0])
+            compare(page.bookmarkItems.length, 0, "全部删除后列表应为空")
+            compare(Settings.value("bookmarks/" + h.book.id).length, 0,
+                    "持久化应清空")
+            tryVerify(function () { return !page.currentBookmarked }, 3000,
+                      "删除当前章书签后顶栏应熄灭")
+            h.stack.destroy()
+        }
+
+        // paged 页键：page:<章>:<页> 条目展示章标题+页数、点击回页、删除同步
+        function test_pagedPageBookmarkListJumpRemove() {
+            Settings.setValue("reading/pageMode", "paged")
+            var h = openMulti()
+            var page = h.page
+            compare(page.pageMode, "paged", "应处于横向分页模式")
+            page.loadChapter(0)
+            var cv = page.contentView
+            tryVerify(function () { return cv.pageCount >= 2 }, 5000,
+                      "第 1 章应至少 2 页，实际 " + cv.pageCount)
+            page.bookmarks = ["page:0:1"]
+            cv.goToPage(0)
+            tryVerify(function () { return cv.currentPage === 0 }, 3000, "应回第 0 页")
+            verify(!page.currentBookmarked, "第 0 页不应点亮")
+            page.openBookmarks()
+            tryVerify(function () { return page.bookmarksDialog.visible }, 3000,
+                      "应打开书签管理 Dialog")
+            compare(page.bookmarkItems.length, 1, "列表应含页键书签")
+            compare(page.bookmarkItems[0].type, "page", "条目类型应为 page")
+            compare(page.bookmarkItems[0].chapterIndex, 0, "条目章节应为第 1 章")
+            compare(page.bookmarkItems[0].page, 1, "条目页码应为 1")
+            verify(String(page.bookmarkItems[0].label).indexOf("第 2 页") >= 0,
+                   "页键条目标签应含页数，实际 " + page.bookmarkItems[0].label)
+            // 点击条目 → 跳回第 1 章第 2 页并关闭 Dialog
+            page.jumpToBookmark(page.bookmarkItems[0])
+            tryVerify(function () { return cv.currentPage === 1 }, 5000,
+                      "点击页书签应跳到第 2 页，实际 " + cv.currentPage)
+            tryVerify(function () { return !page.bookmarksDialog.visible }, 3000,
+                      "跳转后 Dialog 应关闭")
+            tryVerify(function () { return page.currentBookmarked }, 3000,
+                      "第 2 页应点亮顶栏")
+            // 删除 → 列表与顶栏同步
+            page.openBookmarks()
+            page.removeBookmark(page.bookmarkItems[0])
+            compare(page.bookmarkItems.length, 0, "删除后列表应为空")
+            compare(Settings.value("bookmarks/" + h.book.id).length, 0,
+                    "持久化应清空")
+            tryVerify(function () { return !page.currentBookmarked }, 3000,
+                      "删除当前页书签后顶栏应熄灭")
+            h.stack.destroy()
+        }
+    }
+
 }

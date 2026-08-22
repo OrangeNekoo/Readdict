@@ -116,6 +116,10 @@ Page {
     property bool pdfSelectionConsumed: false
     property var pdfBookmarks: []
     property bool currentBookmarked: false
+    // 任务1：PDF 书签管理展示模型（reloadBookmarkItems 从 pdfBookmarks 生成）——
+    // 每项 { key: 页索引, pageIndex, label: 页码标签 }；非法/越界项忽略。
+    property var bookmarkItems: []
+    property alias bookmarksDialog: pdfBookmarksDialog
 
     PdfDocument {
         id: pdfDoc
@@ -361,6 +365,59 @@ Page {
             }
             ScrollBar.vertical: ScrollBar {}
         }
+    }
+
+    // 任务1：PDF 书签管理 Dialog——列表项展示页码标签（pdfDoc.pageLabel 或
+    // "第 N 页"），行内"跳转"关闭 Dialog 并翻页，"删除"立即移除并刷新列表/
+    // 持久化/顶栏状态（标题计数随 bookmarkItems 绑定自动更新）。
+    Dialog {
+        id: pdfBookmarksDialog
+        title: qsTr("书签") + "（" + page.bookmarkItems.length + "）"
+        modal: true
+        standardButtons: Dialog.Close
+        width: 420
+        height: 480
+        contentItem: ListView {
+            id: pdfBookmarksList
+            clip: true
+            model: page.bookmarkItems
+            delegate: Rectangle {
+                width: ListView.view.width
+                height: 52
+                color: index % 2 === 0 ? "#0A000000" : "transparent"
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    spacing: 8
+                    KdIcons {
+                        name: "bookmarkFill"
+                        size: 18
+                        color: UITheme.textSecondary
+                    }
+                    Label {
+                        text: modelData.label || ""
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                        font.pixelSize: 14
+                        color: UITheme.textPrimary
+                    }
+                    Button {
+                        text: qsTr("跳转")
+                        font.pixelSize: 12
+                        onClicked: page.jumpToBookmark(modelData)
+                    }
+                    Button {
+                        text: qsTr("删除")
+                        font.pixelSize: 12
+                        onClicked: page.removeBookmark(modelData)
+                    }
+                }
+            }
+            ScrollBar.vertical: ScrollBar {}
+        }
+        onOpened: page.reloadBookmarkItems()
+        onClosed: page.forceActiveFocus()
     }
 
     // 任务3：PDF 选中文字笔记编辑；取消路径不触碰 Highlights。
@@ -820,6 +877,43 @@ Page {
         Settings.setValue("bookmarks/pdf_" + page.book.id, list)
         page.syncPdfBookmarkState(idx)
     }
+    // 任务1：从 pdfBookmarks 生成展示模型——页索引数组映射为页码标签
+    //（pdfDoc.pageLabel 优先，空/异常回退"第 N 页"）；非法/越界项忽略。
+    function reloadBookmarkItems() {
+        const items = []
+        for (const idx of page.pdfBookmarks) {
+            if (!Number.isInteger(idx) || idx < 0 || idx >= pdfDoc.pageCount) continue
+            let label = ""
+            try { label = pdfDoc.pageLabel(idx) || "" } catch (err) { label = "" }
+            if (!label) label = qsTr("第 %1 页").arg(idx + 1)
+            items.push({ key: idx, pageIndex: idx, label: label })
+        }
+        page.bookmarkItems = items
+    }
+    // 任务1：打开书签管理 Dialog——先释放壳层 Sheet/菜单（同 openContents 模式），
+    // 再刷新展示模型并打开（onOpened 也会刷新，保证最新数据）。
+    function openBookmarks() {
+        page.closeReaderShellLayers()
+        page.reloadBookmarkItems()
+        pdfBookmarksDialog.open()
+    }
+    // 任务1：书签跳转——关闭 Dialog 后走 goToPdfPage（关目录/笔记、停朗读、
+    // 钳制页范围并跳转）。
+    function jumpToBookmark(item) {
+        if (!item || !Number.isInteger(item.pageIndex) || item.pageIndex < 0) return
+        pdfBookmarksDialog.close()
+        page.goToPdfPage(item.pageIndex)
+    }
+    // 任务1：删除书签——按页索引过滤移除，写回 Settings 后刷新展示模型与顶栏
+    // 收藏态（删除当前页书签立即熄灭）。
+    function removeBookmark(item) {
+        if (!item || item.key === undefined || !page.book || !page.book.id) return
+        const list = page.pdfBookmarks.filter(function (v) { return v !== item.key })
+        page.pdfBookmarks = list
+        Settings.setValue("bookmarks/pdf_" + page.book.id, list)
+        page.reloadBookmarkItems()
+        page.syncPdfBookmarkState()
+    }
 
 
     // 记录当前页：页码写 settings.json，百分比+last_read_at 写 books（书架进度条联动）
@@ -972,6 +1066,9 @@ Page {
             page.openPdfNotes()
         }
         function toggleBookmark() { page.togglePdfBookmark() }
+        function openBookmarks() { page.openBookmarks() }
+        function jumpToBookmark(item) { page.jumpToBookmark(item) }
+        function removeBookmark(item) { page.removeBookmark(item) }
         // 壳层菜单"图书信息"→ PDF 专属缩放面板（Sheet 承载）
         function openInfo() {
             readerShell.sheetTab = "zoom"

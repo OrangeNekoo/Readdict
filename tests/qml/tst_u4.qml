@@ -610,8 +610,16 @@ Item {
             compare(page.menuModel[1].id, "toc", "第二项应为目录")
             compare(page.menuModel[2].id, "prev", "第三项应为上一章")
             compare(page.menuModel[3].id, "next", "第四项应为下一章")
-            verify(page.menuModel[4].divider === true, "朗读/导航与信息之间应有分隔线")
-            compare(page.menuModel[5].id, "info", "末项应为图书信息")
+            compare(page.menuModel[4].id, "bookmarks", "第五项应为书签")
+            verify(page.menuModel[5].divider === true, "阅读操作与信息之间应有分隔线")
+            compare(page.menuModel[6].id, "info", "末项应为图书信息")
+            // 任务1：统一书签入口——菜单书签项打开书签管理 Dialog（数据在适配器）
+            page.menuAction("bookmarks")
+            tryVerify(function () { return page.bookmarksDialog.visible }, 3000,
+                      "菜单书签项应打开书签管理 Dialog")
+            page.bookmarksDialog.close()
+            tryVerify(function () { return !page.bookmarksDialog.visible }, 3000,
+                      "书签管理 Dialog 应完全关闭")
 
             page.menuAction("info")
             tryVerify(function () { return page.infoDialog.visible }, 3000, "图书信息 Dialog 应打开")

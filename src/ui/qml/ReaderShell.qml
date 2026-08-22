@@ -15,7 +15,8 @@ import Readdict.UI 1.0
 //   supportsContents, supportsSearch, supportsNotes, supportsBookmarks,
 //   previousLabel, nextLabel,
 //   previous(), next(), startReadAloud(), stopReadAloud(),
-//   openContents(), openSearch(), openNotes(), toggleBookmark()
+//   openContents(), openSearch(), openNotes(), toggleBookmark(),
+//   openBookmarks()（可选；书签管理 Dialog 由适配器侧提供，业务数据不进壳层）
 // 上/下一项标签一律取自 previousLabel/nextLabel，绝不硬编码"上一章/下一章"。
 // 朗读禁用项（canReadAloud=false）必须 disabled、携带 readAloudUnavailableReason，
 // 且 triggerMenuAction("read") 不调用 startReadAloud、不启动 TTS、不显示 TtsBar。
@@ -90,6 +91,10 @@ Item {
           enabled: shell.prevEnabled },
         { id: "next", icon: "next", text: shell.nextLabel, act: "next",
           enabled: shell.nextEnabled },
+        // 任务1：统一书签管理入口——只触发适配器 openBookmarks()（书签 Dialog/
+        // 列表/跳转/删除全部留在适配器侧，壳层不接触 Settings 业务数据）
+        { id: "bookmarks", icon: "bookmark", text: qsTr("书签"), act: "bookmarks",
+          enabled: shell.bookmarkEnabled },
         { divider: true },
         { id: "info", icon: "info", text: qsTr("图书信息"), act: "info", enabled: true }
     ]
@@ -121,6 +126,12 @@ Item {
             break
         case "next":
             if (shell.nextEnabled && shell.reader.next) shell.reader.next()
+            break
+        case "bookmarks":
+            // 统一书签管理入口；openBookmarks 为适配器可选成员（旧假适配器缺失
+            // 时不调用、不崩溃）
+            if (shell.bookmarkEnabled && shell.reader.openBookmarks)
+                shell.reader.openBookmarks()
             break
         case "info":
             if (shell.reader.openInfo) shell.reader.openInfo()

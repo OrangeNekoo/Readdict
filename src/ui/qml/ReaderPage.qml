@@ -52,6 +52,11 @@ Page {
     // U4：当前书签章节列表（Settings bookmarks/<bookId>），只保存章节索引。
     property var bookmarks: []
     property bool currentBookmarked: false
+    // 任务1：书签管理展示模型（reloadBookmarkItems 从 bookmarks 生成稳定条目）——
+    // 每项 { type: "chapter"|"page", key, chapterIndex, page, label }；章节键展示
+    // 章节标题，页键展示"章节标题 · 第 N 页"。
+    property var bookmarkItems: []
+    property alias bookmarksDialog: bookmarksDlg
     // B10：暴露内容视图（滚动恢复冒烟测试经此读写 contentY/contentHeight）
     property alias contentView: content
     // C7：笔记列表 Dialog（冒烟测试经此打开/关闭）
@@ -156,6 +161,22 @@ Page {
             // 契约4：旧代次 Timer 触发必须丢弃
             if (page.measureTimerGeneration !== page.measureGeneration) return
             page.measureBookStep()
+        }
+    }
+
+    // 任务1：paged 页键书签跳转——loadChapter 后分页模型经 16ms 页面定时器
+    // 异步建立，等待 pageCount 就绪再 goToPage（pageCount<=0 时 goToPage 空操作）。
+    property int pendingBookmarkPage: -1
+    Timer {
+        id: bookmarkJumpTimer
+        interval: 16
+        repeat: true
+        onTriggered: {
+            if (content.pageCount <= 0) return
+            bookmarkJumpTimer.stop()
+            const pg = page.pendingBookmarkPage
+            page.pendingBookmarkPage = -1
+            if (pg >= 0) content.goToPage(pg)
         }
     }
 
@@ -561,6 +582,59 @@ Page {
         onOpened: page.reloadHighlights()
     }
 
+    // 任务1：书签管理 Dialog——列表项展示章节标题（章节键）或"章节 · 第 N 页"
+    //（页键），行内"跳转"关闭 Dialog 并定位，"删除"立即移除并刷新列表/持久化/
+    // 顶栏状态（标题计数随 bookmarkItems 绑定自动更新）。
+    Dialog {
+        id: bookmarksDlg
+        title: qsTr("书签") + "（" + page.bookmarkItems.length + "）"
+        modal: true
+        standardButtons: Dialog.Close
+        width: 420
+        height: 480
+        contentItem: ListView {
+            id: bookmarksList
+            clip: true
+            model: page.bookmarkItems
+            delegate: Rectangle {
+                width: ListView.view.width
+                height: 52
+                color: index % 2 === 0 ? "#0A000000" : "transparent"
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    spacing: 8
+                    KdIcons {
+                        name: modelData.type === "page" ? "bookmarkFill" : "bookmark"
+                        size: 18
+                        color: UITheme.textSecondary
+                    }
+                    Label {
+                        text: modelData.label || ""
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                        font.pixelSize: 14
+                        color: UITheme.textPrimary
+                    }
+                    Button {
+                        text: qsTr("跳转")
+                        font.pixelSize: 12
+                        onClicked: page.jumpToBookmark(modelData)
+                    }
+                    Button {
+                        text: qsTr("删除")
+                        font.pixelSize: 12
+                        onClicked: page.removeBookmark(modelData)
+                    }
+                }
+            }
+            ScrollBar.vertical: ScrollBar {}
+        }
+        onOpened: page.reloadBookmarkItems()
+        onClosed: page.forceActiveFocus()
+    }
+
     Dialog {
         id: infoDialog
         title: qsTr("图书信息")
@@ -797,6 +871,75 @@ Page {
         }
         page.bookmarks = list
         Settings.setValue("bookmarks/" + page.book.id, list)
+        page.syncCurrentBookmark()
+    }
+    // 任务1：从 bookmarks 生成稳定展示模型。bookmarks 已由 normalizeBookmarks
+    // 保证合法（旧整数/章节键/页键），这里仍做防御解析（非法项忽略）；章节标题
+    // 取 Books.chapterTitles（越界回退"第 N 章"占位，不依赖加载状态）。
+    function reloadBookmarkItems() {
+        const titles = page.book && page.book.id ? (Books.chapterTitles(page.book.id) || []) : []
+        const list = Array.isArray(page.bookmarks) ? page.bookmarks : []
+        const items = []
+        for (let i = 0; i < list.length; ++i) {
+            const v = list[i]
+            let type = null
+            let key = null
+            let ch = -1
+            let pg = -1
+            if (typeof v === "number") {
+                if (Number.isSafeInteger(v) && v >= 0) { type = "chapter"; key = v; ch = v }
+            } else if (typeof v === "string") {
+                let m = /^chapter:(\d+)$/.exec(v)
+                if (m) { type = "chapter"; key = "chapter:" + Number(m[1]); ch = Number(m[1]) }
+                else {
+                    m = /^page:(\d+):(\d+)$/.exec(v)
+                    if (m) { type = "page"; key = "page:" + Number(m[1]) + ":" + Number(m[2])
+                             ch = Number(m[1]); pg = Number(m[2]) }
+                }
+            }
+            if (!type) continue
+            const title = titles[ch] || qsTr("第 %1 章").arg(ch + 1)
+            items.push({
+                type: type,
+                key: key,
+                chapterIndex: ch,
+                page: pg,
+                label: type === "page" ? title + " · " + qsTr("第 %1 页").arg(pg + 1) : title
+            })
+        }
+        page.bookmarkItems = items
+    }
+    // 任务1：打开书签管理 Dialog（先刷新展示模型，保证每次打开是最新数据）。
+    function openBookmarks() {
+        page.reloadBookmarkItems()
+        bookmarksDlg.open()
+    }
+    // 任务1：书签跳转——章节键定位章首（同目录跳转的显式导航）；paged 页键
+    // 等待分页模型就绪后 goToPage（loadChapter 后 pageModel 异步建立）。
+    // scroll 模式下的页键（旧数据残留）按章节处理。
+    function jumpToBookmark(item) {
+        if (!item || item.chapterIndex === undefined || item.chapterIndex < 0) return
+        bookmarksDlg.close()
+        content.prepareExplicitNavigation()
+        page.loadChapter(item.chapterIndex)
+        if (item.type === "page" && content.pageMode === "paged") {
+            page.pendingBookmarkPage = item.page
+            bookmarkJumpTimer.restart()
+        } else {
+            content.focusScrollParagraph(item.chapterIndex, 0)
+        }
+    }
+    // 任务1：删除书签——按存储原值（key）过滤移除，写回 Settings 后刷新展示
+    // 模型与顶栏收藏态（删除当前页/章书签立即熄灭）。
+    function removeBookmark(item) {
+        if (!item || item.key === undefined || !page.book || !page.book.id) return
+        const list = Array.isArray(page.bookmarks) ? page.bookmarks.slice() : []
+        const kept = []
+        for (let i = 0; i < list.length; ++i)
+            if (list[i] !== item.key) kept.push(list[i])
+        page.bookmarks = kept
+        Settings.setValue("bookmarks/" + page.book.id, kept)
+        page.reloadBookmarkItems()
         page.syncCurrentBookmark()
     }
     function ttsForChapter(loaded, index, stopCurrent) {
@@ -1314,6 +1457,9 @@ Page {
         function openSearch() { searchDlg.open() }
         function openNotes() { notesDlg.open() }
         function toggleBookmark() { page.toggleBookmark() }
+        function openBookmarks() { page.openBookmarks() }
+        function jumpToBookmark(item) { page.jumpToBookmark(item) }
+        function removeBookmark(item) { page.removeBookmark(item) }
         function openInfo() { infoDialog.open() }
     }
 
