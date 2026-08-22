@@ -129,6 +129,49 @@ Item {
             sheet.setAlign.connect(function (value) { align = value })
             sheet.alignSlider.selectValue("center")
             compare(align, "center", "对齐滑块应发 setAlign")
+
+            // 平面 −/+ 视觉契约：显式背景 + 透明 + 零边框（当前描边圆角背景 →
+            // border.width 断言红灯；颜色与显式背景为契约锁定）
+            verify(Qt.colorEqual(sheet.alignSlider.minusBtn.background.color, "transparent"),
+                   "对齐减号按钮应为透明平面背景")
+            verify(Qt.colorEqual(sheet.alignSlider.plusBtn.background.color, "transparent"),
+                   "对齐加号按钮应为透明平面背景")
+            compare(sheet.alignSlider.minusBtn.background.border.width, 0,
+                    "对齐减号按钮不应有描边边框")
+            compare(sheet.alignSlider.plusBtn.background.border.width, 0,
+                    "对齐加号按钮不应有描边边框")
+            // 真实 clicked() 必须继续经 nudge() 驱动选择（行为契约，非仅几何）
+            sheet.alignSlider.plusBtn.clicked()
+            compare(align, "right", "加号按钮点击应经 nudge 选中右对齐")
+            sheet.alignSlider.minusBtn.clicked()
+            compare(align, "center", "减号按钮点击应经 nudge 回到居中")
+            sheet.alignSlider.minusBtn.clicked()
+            compare(align, "left", "减号按钮应钳在左边界")
+            sheet.alignSlider.minusBtn.clicked()
+            compare(align, "left", "越界减号应钳住不变")
+            loader.destroy()
+        }
+
+        // 布局面板完整内容高度契约：小视口下内容必须超高（内部滚动前提），且
+        // 底部对齐控件（根坐标，含根 16px 边距）必须计入 implicitHeight——
+        // 当前 implicitHeight = layoutColumn.implicitHeight 不含底边距 → 红灯。
+        function test_layoutContentHeightExceedsSmallViewport() {
+            var loader = layoutComp.createObject(root)
+            loader.width = 400
+            loader.height = 200 // 小于完整内容高度的小视口，模拟 Sheet 内受限高度
+            var sheet = loader.item
+            verify(sheet !== null, "LayoutSheet 应能加载")
+            tryVerify(function () {
+                return sheet.modeItems.count === 2 && sheet.marginItems.count === 3
+                       && sheet.lineItems.count === 3
+            }, 3000, "三组图标卡应完成实例化")
+            verify(sheet.implicitHeight > sheet.height,
+                   "布局面板完整内容高度必须超过小视口（implicitHeight="
+                   + sheet.implicitHeight + "，视口=" + sheet.height + "）")
+            var alignBottom = sheet.alignSlider.mapToItem(sheet, 0, sheet.alignSlider.height).y
+            verify(alignBottom <= sheet.implicitHeight,
+                   "底部左中右配置必须计入布局面板内容高度（alignSlider 底部 "
+                   + alignBottom + " 超出 implicitHeight " + sheet.implicitHeight + "）")
             loader.destroy()
         }
     }

@@ -510,6 +510,48 @@ Item {
             h.stack.destroy()
         }
 
+        // 布局面板独立滚动：面板完整内容超出 panelScroller 视口 → interactive 为真；
+        // 滚动到底后底部对齐控件完整落入视口（当前 implicitHeight 不含根底边距，
+        // contentHeight 短 16px → 滚动到底对齐控件底部仍超出视口 → 红灯）；面板
+        // contentY 变化不得驱动阅读正文 contentView.contentY（滚动事件归属）。
+        function test_layoutSheetScrollsInternally() {
+            var h = openPage()
+            var page = h.page
+            page.controlsHideDelay = 100000
+            page.sheetTab = "layout"
+            page.handleContentTap(600)
+            tryVerify(function () { return page.sheetOpen }, 3000, "Sheet 应弹出")
+            var sheet = page.bottomSheet
+            var fl = sheet.panelScroller
+            tryVerify(function () { return fl !== undefined }, 3000,
+                      "panelScroller 应暴露")
+            tryVerify(function () {
+                var panel = sheet.contentLoader.item
+                return panel !== null && panel.objectName === "layoutSheetPanel"
+            }, 3000, "内容应为布局面板")
+            var panel = sheet.contentLoader.item
+            // 布局内容超高（内部滚动前提，interactive 门控阈值 height+1）
+            tryVerify(function () {
+                return fl.contentHeight > fl.height + 1
+            }, 3000, "布局面板内容应超高（contentHeight=" + fl.contentHeight
+                    + "，视口=" + fl.height + "）")
+            verify(fl.interactive === true,
+                   "内容超高时 panelScroller 应可交互，实际 " + fl.interactive)
+            // 记录正文滚动位置：面板滚动不得驱动阅读正文（滚动事件归属验证）
+            var bodyYBefore = page.contentView.contentY
+            // 滚动到底：底部对齐控件完整落入视口（缺陷：隐式高度不含底边距 → 红灯）
+            fl.contentY = fl.contentHeight - fl.height
+            tryVerify(function () {
+                var bottom = panel.alignSlider.mapToItem(fl, 0, panel.alignSlider.height).y
+                return bottom <= fl.height
+            }, 3000, "滚到底后对齐控件应完整可见（alignSlider 底部 "
+                    + panel.alignSlider.mapToItem(fl, 0, panel.alignSlider.height).y
+                    + " 超出视口 " + fl.height + "）")
+            compare(page.contentView.contentY, bodyYBefore,
+                    "面板内部滚动不应改变正文 contentY")
+            h.stack.destroy()
+        }
+
         // 更多面板：自动续章、深色跟随与左下角页数/百分比显示格式及范围。
         function test_morePanelToggles() {
             Settings.setValue("reading/progressDisplay", "pages")

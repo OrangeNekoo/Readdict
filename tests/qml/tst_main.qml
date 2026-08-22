@@ -431,6 +431,16 @@ Item {
                       "图书信息应打开缩放 Sheet")
             var panel = page.readerShell.bottomSheet.contentLoader.item
             tryVerify(function () { return panel !== null }, 3000, "缩放面板应被实例化")
+            verify(panel.zoomMinus.background !== null, "缩放减号按钮必须显式提供背景")
+            verify(panel.zoomPlus.background !== null, "缩放加号按钮必须显式提供背景")
+            verify(Qt.colorEqual(panel.zoomMinus.background.color, "transparent"),
+                   "缩放减号按钮应为透明平面背景")
+            verify(Qt.colorEqual(panel.zoomPlus.background.color, "transparent"),
+                   "缩放加号按钮应为透明平面背景")
+            compare(panel.zoomMinus.background.border.width, 0,
+                    "缩放减号按钮不应有边框")
+            compare(panel.zoomPlus.background.border.width, 0,
+                    "缩放加号按钮不应有边框")
             // zoomPercent 实时反映活动视图 renderScale（1.0 = 100%）
             tryVerify(function () {
                 return page.zoomPercent === Math.round(page.pdfView.renderScale * 100)
