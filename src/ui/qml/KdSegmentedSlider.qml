@@ -34,12 +34,10 @@ Item {
             Layout.preferredWidth: 40
             Layout.fillHeight: true
             font.pixelSize: 18
-            // Kindle 描边按钮风格：无填充、圆角 6、边框随深浅主题
+            // 平面 −/+ 风格：透明背景、零边框，仅文字随主题/禁用态
             background: Rectangle {
-                radius: 6
                 color: "transparent"
-                border.color: minusButton.enabled ? UITheme.borderDefault : UITheme.textDisabled
-                border.width: 1
+                border.width: 0
             }
             contentItem: Text {
                 text: minusButton.text
@@ -92,10 +90,8 @@ Item {
             Layout.fillHeight: true
             font.pixelSize: 18
             background: Rectangle {
-                radius: 6
                 color: "transparent"
-                border.color: plusButton.enabled ? UITheme.borderDefault : UITheme.textDisabled
-                border.width: 1
+                border.width: 0
             }
             contentItem: Text {
                 text: plusButton.text

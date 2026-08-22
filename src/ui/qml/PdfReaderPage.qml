@@ -313,10 +313,21 @@ Page {
                 spacing: 10
                 Button {
                     id: zoomMinus
-                    width: 44
-                    height: 34
+                    width: 28
+                    height: 32
                     text: "−"
                     enabled: page.pdfDocument.status === PdfDocument.Ready
+                    background: Rectangle {
+                        color: "transparent"
+                        border.width: 0
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: parent.enabled ? UITheme.textPrimary : UITheme.textDisabled
+                        font.pixelSize: 24
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
                     onClicked: page.zoomBy(-10)
                 }
                 TextField {
@@ -332,10 +343,21 @@ Page {
                 }
                 Button {
                     id: zoomPlus
-                    width: 44
-                    height: 34
+                    width: 28
+                    height: 32
                     text: "+"
                     enabled: page.pdfDocument.status === PdfDocument.Ready
+                    background: Rectangle {
+                        color: "transparent"
+                        border.width: 0
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: parent.enabled ? UITheme.textPrimary : UITheme.textDisabled
+                        font.pixelSize: 24
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
                     onClicked: page.zoomBy(10)
                 }
             }
