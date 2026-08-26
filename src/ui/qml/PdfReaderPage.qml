@@ -630,7 +630,8 @@ Page {
 
     // 任务2：底部左下页码指示（壳层 Sheet 打开时隐藏，与 ReaderPage 进度标签同语义）
     // ——进度范围 book 时显示"全书 第 X / Y 页"或"全书 Z%"，chapter 保持"第 X / Y 页"；
-    // 百分比与页号均随活动视图 currentPage 与 pdfDoc.pageCount 实时派生。
+    // 当前页随活动视图 currentPage 实时派生；总页数按导入缓存的 book.pageCount 优先、
+    // pdfDoc.pageCount 兜底。
     Label {
         id: pageLabel
         anchors.left: parent.left

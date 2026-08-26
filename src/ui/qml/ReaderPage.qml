@@ -194,7 +194,7 @@ Page {
             pageMode: page.pageMode
         }
     }
-    // 任务X：全书页数缓存签名——排版 + 翻页方式 + 视口宽高的确定性串。
+    // 任务6：全书页数缓存签名——排版 + 翻页方式 + 视口宽高的确定性串。
     // 视口未就绪（宽高<=0）返回空串：此时不查/不写缓存，退回测量路径。
     function pageCacheSignature() {
         if (!page.book || !page.book.id) return ""

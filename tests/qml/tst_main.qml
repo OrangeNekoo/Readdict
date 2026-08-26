@@ -892,6 +892,9 @@ Item {
         function test_pdfProgressUsesCachedPageCount() {
             var src = TestEnv.textPdfSource
             if (src.length === 0) skip("无 PDF 夹具")
+            // 显式设置进度范围/格式（不依赖默认值），断言自包含
+            Settings.setValue("reading/progressScope", "book")
+            Settings.setValue("reading/progressDisplay", "pages")
             var loader = pdfReaderComp.createObject(root, { width: 800, height: 1000 })
             var page = loader.item
             page.book = { id: 999030, title: "缓存PDF", path: src, pageCount: 320 }
@@ -899,7 +902,12 @@ Item {
             tryVerify(function () {
                 return page.pageLabel.text.indexOf("/ 320 页") >= 0
             }, 5000, "总页数应取缓存 320，实际 '" + page.pageLabel.text + "'")
+            // 渲染稳定后销毁，避免 QtPdfQuick 拆除竞态崩溃
+            tryVerify(function () { return page.pdfView.status === Image.Ready }, 15000,
+                      "首页渲染应完成，实际 " + page.pdfView.status)
             loader.destroy()
+            Settings.setValue("reading/progressScope", "chapter")
+            Settings.setValue("reading/progressDisplay", "pages")
         }
         //（0 → 2），且中间图片页 canReadAloud=false、原因精确、菜单朗读项 disabled。
         function test_pdfReadAloudSkipsImagePage() {

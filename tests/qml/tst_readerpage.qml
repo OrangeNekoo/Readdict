@@ -1040,12 +1040,21 @@ Item {
             var page = h.page
             page.setProgressScope("book")
             tryVerify(function () { return page.bookPageTotal > 0 }, 10000)
+            var sig = page.pageCacheSignature()
             h.stack.destroy()
             Settings.setValue("typography/fontSize", 24)   // 改字号 → 签名变化
             var h2 = openMulti()
             var p2 = h2.page
             p2.setProgressScope("book")
             tryVerify(function () { return p2.bookPageTotal > 0 }, 10000, "签名变化后应重测")
+            // 强回归：重测必须把新签名行写回缓存——取新签名查库必须命中且 total
+            // 有值；若实现"不校验签名恒命中"则不会产生新行，此断言能揪出。
+            var sig2 = p2.pageCacheSignature()
+            verify(sig2 !== "", "重测后应能产出非空新签名")
+            verify(sig2 !== sig, "字号变化后签名应变化，实际 '" + sig2 + "'")
+            var cached2 = Books.loadBookPageCache(p2.book.id, sig2)
+            verify(cached2.total !== undefined && cached2.total > 0,
+                   "新签名行应已写回缓存且 total 有值，实际 " + JSON.stringify(cached2))
             Settings.setValue("typography/fontSize", 18)   // 复位
             h2.stack.destroy()
         }

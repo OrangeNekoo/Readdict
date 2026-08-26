@@ -393,6 +393,20 @@ private slots:
         Book b; b.title = "PDF书"; b.format = "PDF"; b.path = "/x/a.pdf"; b.pageCount = 320;
         const qint64 id = mgr.addBook(b);
         const QVariantMap m = mgr.bookByIdModel(id);
+        // 12 个业务键存在性：QVariant 默认转换对缺键同样通过（toDouble()==0、
+        // toString()==""），键被误删只有 contains 能揪出。
+        QVERIFY(m.contains("id"));
+        QVERIFY(m.contains("title"));
+        QVERIFY(m.contains("author"));
+        QVERIFY(m.contains("publisher"));
+        QVERIFY(m.contains("category"));
+        QVERIFY(m.contains("format"));
+        QVERIFY(m.contains("path"));
+        QVERIFY(m.contains("cover"));
+        QVERIFY(m.contains("progress"));
+        QVERIFY(m.contains("readSeconds"));
+        QVERIFY(m.contains("lastReadAt"));
+        QVERIFY(m.contains("pageCount"));
         QCOMPARE(m.value("id").toLongLong(), id);
         QCOMPARE(m.value("title").toString(), QString("PDF书"));
         QCOMPARE(m.value("author").toString(), QString());

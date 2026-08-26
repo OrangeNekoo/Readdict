@@ -87,6 +87,8 @@ Item {
           enabled: shell.readEnabled, disabledReason: shell.readUnavailableReason },
         { id: "toc", icon: "toc", text: qsTr("目录"), act: "toc",
           enabled: shell.tocEnabled },
+        // 统一书签管理入口——只触发适配器 openBookmarks()，书签 Dialog/列表/
+        // 跳转/删除全部留在适配器侧，壳层不接触 Settings 业务数据。
         { id: "bookmarks", icon: "bookmark", text: qsTr("书签"), act: "bookmarks",
           enabled: shell.bookmarkEnabled },
         { id: "prev", icon: "prev", text: shell.prevLabel, act: "prev",
