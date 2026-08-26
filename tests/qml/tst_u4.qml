@@ -663,9 +663,9 @@ Item {
                       "菜单项应就绪")
             compare(page.menuModel[0].id, "read", "第一项应为朗读")
             compare(page.menuModel[1].id, "toc", "第二项应为目录")
-            compare(page.menuModel[2].id, "prev", "第三项应为上一章")
-            compare(page.menuModel[3].id, "next", "第四项应为下一章")
-            compare(page.menuModel[4].id, "bookmarks", "第五项应为书签")
+            compare(page.menuModel[2].id, "bookmarks", "第三项应为书签")
+            compare(page.menuModel[3].id, "prev", "第四项应为上一项")
+            compare(page.menuModel[4].id, "next", "第五项应为下一项")
             verify(page.menuModel[5].divider === true, "阅读操作与信息之间应有分隔线")
             compare(page.menuModel[6].id, "info", "末项应为图书信息")
             // 任务1：统一书签入口——菜单书签项打开书签管理 Dialog（数据在适配器）
