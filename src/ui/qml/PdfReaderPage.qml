@@ -119,6 +119,10 @@ Page {
     // 任务4（本计划）：朗读句高亮句柄（测试/上层断言可见性与几何）
     property alias sentenceHighlightPaged: pagedHighlight
     property alias sentenceHighlightScroll: scrollHighlight
+    // 任务4（本计划）：scroll 模式内部 TableView 句柄缓存（pdfScrollPageImagePos
+    // 扫描 children 时写入），供 Connections 监听 contentYChanged 实时重算高亮；
+    // 视图常驻不销毁，句柄跨方向切换保持有效；无子项时保持旧值，重扫自愈。
+    property var scrollTable: null
     // 活动会话归属：仅本页 startPdfReadAloud 启动、且未被手动翻页/目录跳转/返回/
     // Error/外部停止打断的朗读会话，才处理 Tts.chapterCompleted（防旧页继续发声）。
     property bool ttsSessionActive: false
@@ -948,6 +952,7 @@ Page {
         const kids = multiView ? multiView.children : []
         for (const k of kids) {
             if (!k || k.contentY === undefined || typeof k.itemAtCell !== "function") continue
+            page.scrollTable = k   // 缓存句柄供 Connections 监听 contentYChanged
             const holder = k.itemAtCell(0, page.pdfView.currentPage)
             if (!holder) return null
             const size = pdfDoc.pagePointSize(page.pdfView.currentPage)
@@ -1311,6 +1316,14 @@ Page {
             if (ch !== page.ttsSessionChapter) return
             page.continuePdfTtsToNextTextPage()
         }
+    }
+
+    // 任务4（本计划）：scroll 模式朗读中同页滚动——currentPage 不变但视口随
+    // contentY 移动，内部 TableView 的 contentYChanged 触发高亮重算（否则高亮
+    // 停在旧视口位置直到下一句推进）；target 为 null（未扫描到句柄）时静默空转。
+    Connections {
+        target: page.scrollTable
+        function onContentYChanged() { page.updateSentenceHighlight() }
     }
 
     // ---- 任务4：PDF 阅读适配器（统一契约，ReaderShell 只读）----

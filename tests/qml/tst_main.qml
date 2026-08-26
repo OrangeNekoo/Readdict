@@ -1061,6 +1061,15 @@ Item {
                    "scroll 高亮 x 应在视口内：x=" + shl.x + " view=" + page.width)
             verify(shl.y >= 0 && shl.y < page.height,
                    "scroll 高亮 y 应在视口内：y=" + shl.y + " view=" + page.height)
+            // 同页滚动：currentPage 不变但视口移动——内部 TableView contentYChanged
+            // 应触发高亮重算（scrollTable 句柄缓存 + Connections），几何随滚动变化
+            var st = page.scrollTable
+            verify(st !== null && st !== undefined, "应缓存内部 TableView 句柄")
+            var yBefore = shl.y
+            st.contentY = st.contentY + 80
+            tryVerify(function () { return shl.visible === true && Math.abs(shl.y - (yBefore - 80)) < 1.5 }, 3000,
+                      "同页滚动后高亮 y 应随 contentY 移动：y0=" + yBefore + " y1=" + shl.y + " cY=" + st.contentY)
+            st.contentY = 0
             Tts.stop()
             tryVerify(function () { return shl.visible === false }, 3000,
                       "停止后 scroll 高亮应隐藏")
