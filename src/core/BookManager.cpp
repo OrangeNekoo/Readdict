@@ -321,6 +321,10 @@ QVariantMap BookManager::bookToMap(const Book &b) {
     m.insert("format", b.format);
     m.insert("path", b.path);
     m.insert("cover", b.cover);
+    m.insert("progress", b.progress);
+    m.insert("readSeconds", b.readSeconds);
+    m.insert("lastReadAt", b.lastReadAt);
+    m.insert("addedAt", b.addedAt);
     m.insert("pageCount", b.pageCount);
     return m;
 }

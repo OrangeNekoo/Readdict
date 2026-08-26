@@ -384,6 +384,29 @@ private slots:
         mgr.removeBook(id);
         QCOMPARE(mgr.loadBookPageCache(id, "sig-A").value("total").toInt(), 0); // 级联清理
     }
+    void bookToMapExposesAllFields() {
+        // 防盲区回归：bookToMap 是 booksModel/recentBooks/bookByIdModel 的唯一 map 构造源，
+        // 字段被误删会让 QML（进度角标/信息弹窗/tst_main.qml 断言）静默丢字段。
+        QTemporaryDir dir;
+        const QString dbPath = dir.filePath("t.db");
+        BookManager mgr(dbPath, "readdict_btm_test");
+        Book b; b.title = "PDF书"; b.format = "PDF"; b.path = "/x/a.pdf"; b.pageCount = 320;
+        const qint64 id = mgr.addBook(b);
+        const QVariantMap m = mgr.bookByIdModel(id);
+        QCOMPARE(m.value("id").toLongLong(), id);
+        QCOMPARE(m.value("title").toString(), QString("PDF书"));
+        QCOMPARE(m.value("author").toString(), QString());
+        QCOMPARE(m.value("publisher").toString(), QString());
+        QCOMPARE(m.value("category").toString(), QString());
+        QCOMPARE(m.value("format").toString(), QString("PDF"));
+        QCOMPARE(m.value("path").toString(), QString("/x/a.pdf"));
+        QCOMPARE(m.value("cover").toString(), QString());
+        QCOMPARE(m.value("progress").toDouble(), 0.0);
+        QCOMPARE(m.value("readSeconds").toLongLong(), 0);
+        QCOMPARE(m.value("lastReadAt").toString(), QString());
+        QVERIFY(!m.value("addedAt").toString().isEmpty()); // addBook 时由 DB 填当前 ISO 时间
+        QCOMPARE(m.value("pageCount").toInt(), 320);
+    }
 private:
     // L6：独立文件库（dbPath）用例的加书辅助——books.path 为 UNIQUE 列，序号保证唯一
     qint64 addSampleBook(BookManager &m, const QString &category = QString()) {
