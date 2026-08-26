@@ -12,7 +12,8 @@
 #include <QSet>
 #include <QFile>
 #include <QFileInfo>
-
+#include <QJsonDocument>
+#include <QJsonArray>
 BookManager::BookManager(const QString &dbPath, const QString &connection, QObject *parent)
     : QObject(parent) {
     DatabaseManager dbm(dbPath, connection);
@@ -22,12 +23,13 @@ BookManager::BookManager(const QString &dbPath, const QString &connection, QObje
 qint64 BookManager::addBook(const Book &b) {
     const bool inTx = m_db.transaction(); // 失败则退回自动提交，写入仍会执行
     QSqlQuery q(m_db);
-    q.prepare("INSERT INTO books(title,author,publisher,category,format,path,cover,progress,added_at)"
-              " VALUES(?,?,?,?,?,?,?,?,?)");
+    q.prepare("INSERT INTO books(title,author,publisher,category,format,path,cover,progress,added_at,page_count)"
+              " VALUES(?,?,?,?,?,?,?,?,?,?)");
     q.addBindValue(b.title); q.addBindValue(b.author); q.addBindValue(b.publisher);
     q.addBindValue(b.category); q.addBindValue(b.format); q.addBindValue(b.path);
     q.addBindValue(b.cover); q.addBindValue(b.progress);
     q.addBindValue(QDateTime::currentDateTime().toString(Qt::ISODate));
+    q.addBindValue(b.pageCount);
     if (!q.exec()) { if (inTx) m_db.rollback(); return -1; }
     const qint64 id = q.lastInsertId().toLongLong();
     // books_fts 是 external-content 表，索引不会自动填充；两条写入同事务，保证原子一致。
@@ -56,6 +58,12 @@ void BookManager::removeBook(qint64 id) {
     h.addBindValue(id);
     if (!h.exec())
         qWarning() << "removeBook: 划线清理失败:" << h.lastError().text();
+    // 页缓存级联清理：book_page_cache 按 book_id 关联，删书不清则残留孤儿行
+    QSqlQuery pc(m_db);
+    pc.prepare("DELETE FROM book_page_cache WHERE book_id=?");
+    pc.addBindValue(id);
+    if (!pc.exec())
+        qWarning() << "removeBook: book_page_cache 清理失败:" << pc.lastError().text();
     // L9（P2#27）：阅读进度键残留清理——progress/<id>（章节索引）与
     // progress/scroll_<id>（滚动偏移）。键按 bookId 命名，删书不清则永久残留；
     // 自增 id 不复用，不会串扰，但 settings.json 只增不减
@@ -123,7 +131,7 @@ void BookManager::updateCover(qint64 id, const QString &cover) {
 QVector<Book> BookManager::selectBooks(const QString &where, const QString &order) const {
     QVector<Book> out;
     QSqlQuery q(m_db);
-    q.exec("SELECT id,title,author,publisher,category,format,path,cover,progress,read_seconds,last_read_at,added_at"
+    q.exec("SELECT id,title,author,publisher,category,format,path,cover,progress,read_seconds,last_read_at,added_at,page_count"
            " FROM books " + where + " " + order);
     while (q.next()) {
         Book b;
@@ -133,6 +141,7 @@ QVector<Book> BookManager::selectBooks(const QString &where, const QString &orde
         b.path = q.value(6).toString(); b.cover = q.value(7).toString();
         b.progress = q.value(8).toDouble(); b.readSeconds = q.value(9).toLongLong();
         b.lastReadAt = q.value(10).toString(); b.addedAt = q.value(11).toString();
+        b.pageCount = q.value(12).toInt();
         out.append(b);
     }
     return out;
@@ -140,7 +149,7 @@ QVector<Book> BookManager::selectBooks(const QString &where, const QString &orde
 
 Book BookManager::bookById(qint64 id) const {
     QSqlQuery q(m_db);
-    q.prepare("SELECT id,title,author,publisher,category,format,path,cover,progress,read_seconds,last_read_at,added_at"
+    q.prepare("SELECT id,title,author,publisher,category,format,path,cover,progress,read_seconds,last_read_at,added_at,page_count"
               " FROM books WHERE id=?");
     q.addBindValue(id);
     if (!q.exec() || !q.next()) return Book();
@@ -151,6 +160,7 @@ Book BookManager::bookById(qint64 id) const {
     b.path = q.value(6).toString(); b.cover = q.value(7).toString();
     b.progress = q.value(8).toDouble(); b.readSeconds = q.value(9).toLongLong();
     b.lastReadAt = q.value(10).toString(); b.addedAt = q.value(11).toString();
+    b.pageCount = q.value(12).toInt();
     return b;
 }
 
@@ -186,6 +196,7 @@ QVector<Book> BookManager::search(const QString &query) const {
         b.path = q.value(6).toString(); b.cover = q.value(7).toString();
         b.progress = q.value(8).toDouble(); b.readSeconds = q.value(9).toLongLong();
         b.lastReadAt = q.value(10).toString(); b.addedAt = q.value(11).toString();
+        b.pageCount = q.value(12).toInt();   // 在 b.addedAt = q.value(11) 之后追加
         out.append(b);
     }
     return out;
@@ -310,10 +321,7 @@ QVariantMap BookManager::bookToMap(const Book &b) {
     m.insert("format", b.format);
     m.insert("path", b.path);
     m.insert("cover", b.cover);
-    m.insert("progress", b.progress);
-    m.insert("readSeconds", b.readSeconds);
-    m.insert("lastReadAt", b.lastReadAt);
-    m.insert("addedAt", b.addedAt);
+    m.insert("pageCount", b.pageCount);
     return m;
 }
 
@@ -358,6 +366,48 @@ void BookManager::setCategory(qint64 bookId, const QString &category) {
     q.addBindValue(category);
     q.addBindValue(bookId);
     if (q.exec()) emit booksChanged();
+}
+
+void BookManager::setPageCount(qint64 id, int count) {
+    QSqlQuery q(m_db);
+    q.prepare("UPDATE books SET page_count=? WHERE id=?");
+    q.addBindValue(count);
+    q.addBindValue(id);
+    if (!q.exec()) qWarning() << "setPageCount 失败:" << q.lastError().text();
+}
+
+QVariantMap BookManager::loadBookPageCache(qint64 bookId, const QString &signature) {
+    QVariantMap out;
+    QSqlQuery q(m_db);
+    q.prepare("SELECT total, pages FROM book_page_cache WHERE book_id=? AND signature=?");
+    q.addBindValue(bookId);
+    q.addBindValue(signature);
+    if (!q.exec() || !q.next()) return out;
+    out.insert("total", q.value(0).toInt());
+    const QJsonDocument doc = QJsonDocument::fromJson(q.value(1).toString().toUtf8());
+    if (doc.isArray()) {
+        QVariantList pages;
+        const QJsonArray arr = doc.array();
+        for (const QJsonValue &v : arr) pages.append(v.toInt());
+        out.insert("pages", pages);
+    }
+    return out;
+}
+
+void BookManager::saveBookPageCache(qint64 bookId, const QString &signature,
+                                    int total, const QVariantList &pages) {
+    QJsonArray arr;
+    for (const QVariant &p : pages) arr.append(p.toInt());
+    const QString json = QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact));
+    QSqlQuery q(m_db);
+    q.prepare("INSERT OR REPLACE INTO book_page_cache(book_id,signature,total,pages,updated_at)"
+              " VALUES(?,?,?,?,?)");
+    q.addBindValue(bookId);
+    q.addBindValue(signature);
+    q.addBindValue(total);
+    q.addBindValue(json);
+    q.addBindValue(QDateTime::currentDateTime().toString(Qt::ISODate));
+    if (!q.exec()) qWarning() << "saveBookPageCache 失败:" << q.lastError().text();
 }
 
 void BookManager::doSearch(const QString &query) {

@@ -57,6 +57,10 @@ public:
     // L6（P0#7）：按 id 全库查单书（QML 友好 map），不受 filter/search 影响——
     // 全文搜索结果跳转时目标书可能不在当前过滤后的书架模型中
     Q_INVOKABLE QVariantMap bookByIdModel(qint64 id) const;
+    Q_INVOKABLE void setPageCount(qint64 id, int count);
+    Q_INVOKABLE QVariantMap loadBookPageCache(qint64 bookId, const QString &signature);
+    Q_INVOKABLE void saveBookPageCache(qint64 bookId, const QString &signature,
+                                       int total, const QVariantList &pages);
     // L6（P1#14）：总章数（chapterTitles/loadChapter 解析时刷新的缓存值；
     // 无缓存时按需 documentFor 计算）——chapterProgress 绑定不再每次重算 chapterTitles
     Q_INVOKABLE int chapterCount(qint64 bookId);

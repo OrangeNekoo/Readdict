@@ -355,6 +355,35 @@ private slots:
         QCOMPARE(all.at(2).toMap().value("id").toLongLong(), a);
         QCOMPARE(m.recentBooks(2).size(), 2);        // limit 截断
     }
+    void pageCountPersistsAndExposes() {
+        QTemporaryDir dir;
+        const QString dbPath = dir.filePath("t.db");
+        BookManager mgr(dbPath, "readdict_pc_test");
+        Book b; b.title = "PDF书"; b.format = "PDF"; b.path = "/x/a.pdf"; b.pageCount = 320;
+        const qint64 id = mgr.addBook(b);
+        QVERIFY(id > 0);
+        QCOMPARE(mgr.bookById(id).pageCount, 320);
+        QCOMPARE(mgr.bookByIdModel(id).value("pageCount").toInt(), 320);
+        mgr.setPageCount(id, 321);
+        QCOMPARE(mgr.bookById(id).pageCount, 321);
+    }
+    void bookPageCacheRoundtrip() {
+        QTemporaryDir dir;
+        const QString dbPath = dir.filePath("t.db");
+        BookManager mgr(dbPath, "readdict_bpc_test");
+        Book b; b.title = "t"; b.format = "TXT"; b.path = "/x/t.txt";
+        const qint64 id = mgr.addBook(b);
+        const QVariantList pages = QVariantList{10, 20, 30};
+        mgr.saveBookPageCache(id, "sig-A", 60, pages);
+        const QVariantMap got = mgr.loadBookPageCache(id, "sig-A");
+        QCOMPARE(got.value("total").toInt(), 60);
+        QCOMPARE(got.value("pages").toList(), pages);
+        QVERIFY(mgr.loadBookPageCache(id, "sig-B").isEmpty());      // 未命中
+        mgr.saveBookPageCache(id, "sig-A", 61, QVariantList{11, 20, 30}); // upsert 覆盖
+        QCOMPARE(mgr.loadBookPageCache(id, "sig-A").value("total").toInt(), 61);
+        mgr.removeBook(id);
+        QCOMPARE(mgr.loadBookPageCache(id, "sig-A").value("total").toInt(), 0); // 级联清理
+    }
 private:
     // L6：独立文件库（dbPath）用例的加书辅助——books.path 为 UNIQUE 列，序号保证唯一
     qint64 addSampleBook(BookManager &m, const QString &category = QString()) {
