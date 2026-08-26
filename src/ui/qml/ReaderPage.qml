@@ -194,9 +194,45 @@ Page {
             pageMode: page.pageMode
         }
     }
+    // 任务X：全书页数缓存签名——排版 + 翻页方式 + 视口宽高的确定性串。
+    // 视口未就绪（宽高<=0）返回空串：此时不查/不写缓存，退回测量路径。
+    function pageCacheSignature() {
+        if (!page.book || !page.book.id) return ""
+        const t = page.typography || {}
+        const w = content.width, h = content.height
+        if (w <= 0 || h <= 0) return ""
+        return [String(t.fontFamily), String(t.fontSize), String(t.lineHeight),
+                String(t.align), String(t.pageWidth), page.pageMode,
+                Math.round(w), Math.round(h)].join("\u0001")
+    }
+    // 命中缓存：pages 与章数等长、每项为正整数、total=求和 → 载入并返回 true。
+    function tryLoadBookPageCache(sig) {
+        const cached = Books.loadBookPageCache(page.book.id, sig)
+        if (!cached || cached.total === undefined || !Array.isArray(cached.pages)) return false
+        const count = Books.chapterCount(page.book.id)
+        if (cached.pages.length !== count) return false
+        let sum = 0
+        for (let i = 0; i < count; ++i) {
+            const n = Number(cached.pages[i])
+            if (!Number.isInteger(n) || n < 1) return false
+            sum += n
+        }
+        if (sum !== Number(cached.total)) return false
+        page.measuredChapterPages = cached.pages
+        page.bookPageTotal = sum
+        page.updateBookPageNumber()
+        return true
+    }
+    function saveBookPageCache() {
+        const sig = page.pageCacheSignature()
+        if (!sig || page.bookPageTotal <= 0) return
+        Books.saveBookPageCache(page.book.id, sig, page.bookPageTotal, page.measuredChapterPages)
+    }
     function measureBookPages() {
         if (!page.book || !page.book.id) return
         if (!page.measureView) page.measureView = measureContentComp.createObject(page)
+        const sig = page.pageCacheSignature()
+        if (sig && page.tryLoadBookPageCache(sig)) return   // 缓存命中，即时载入
         page.measureGeneration += 1
         page.measureChapterIndex = 0
         page.measurePageSum = 0
@@ -222,6 +258,7 @@ Page {
         if (page.measureChapterIndex >= count) {
             page.bookPageTotal = page.measurePageSum
             page.updateBookPageNumber()
+            page.saveBookPageCache()          // 新增
             return
         }
         // 契约6：视口/隐藏测量视图宽高为 0（异步布局前/窗口未就绪）时延迟重试

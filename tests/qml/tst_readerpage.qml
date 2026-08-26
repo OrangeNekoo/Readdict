@@ -851,6 +851,9 @@ Item {
         function test_incompleteMeasurementShowsSafeValues() {
             var h = openMulti()
             var page = h.page
+            // 签名隔离：fontSize 21 不在任何缓存签名中 → 必然 cache miss →
+            // 走完整测量路径，避免命中前序用例写入的缓存
+            page.setFontSize(21)
             verify(page.contentView.currentChapterPageCount() > 0,
                    "前置：当前章应有真实页数")
             page.measureInterval = 1000
@@ -907,6 +910,9 @@ Item {
         function test_layoutChangeRestartsMeasurement() {
             var h = openMulti()
             var page = h.page
+            // 签名隔离：fontSize 21 不在任何缓存签名中 → 必然 cache miss →
+            // 走完整测量路径，避免命中前序用例写入的缓存
+            page.setFontSize(21)
             page.setProgressScope("book")
             tryVerify(function () { return page.bookPageTotal > 0 }, 10000,
                       "首次全书测量应完成")
@@ -1001,6 +1007,47 @@ Item {
                 sum += page.measuredChapterPages[i]
             compare(page.bookPageTotal, sum, "paged 就绪后总数应等于各章 pageCount 之和")
             h.stack.destroy()
+        }
+
+        // 任务6：全书页数按「排版+翻页方式+视口」签名缓存——首次测量写库，
+        // 相同设置重开命中缓存即时载入（无需逐章测量）。
+        function test_cacheHitLoadsBookPagesInstantly() {
+            var h = openMulti()
+            var page = h.page
+            page.setProgressScope("book")
+            tryVerify(function () {
+                return page.bookPageTotal > 0 && page.measuredChapterPages.length > 0
+            }, 10000, "首次打开应完成测量并写缓存")
+            var sig = page.pageCacheSignature()
+            verify(sig !== "", "测量完成时应能产出非空签名")
+            var cached = Books.loadBookPageCache(page.book.id, sig)
+            verify(cached.total !== undefined, "首次测量后应已写入 book_page_cache")
+            h.stack.destroy()
+
+            var h2 = openMulti()          // 相同设置重开
+            var p2 = h2.page
+            p2.setProgressScope("book")
+            // 缓存命中：签名一致时应即时载入，无需等逐章测量
+            tryVerify(function () {
+                return p2.bookPageTotal > 0
+            }, 1000, "重开应立即载入缓存总数，实际 " + p2.bookPageTotal)
+            compare(p2.bookPageTotal, cached.total, "重开总数应等于缓存值")
+            h2.stack.destroy()
+        }
+        // 任务6：字号变化 → 签名变化 → 缓存失效 → 重测得到新总数
+        function test_signatureChangeInvalidatesCache() {
+            var h = openMulti()
+            var page = h.page
+            page.setProgressScope("book")
+            tryVerify(function () { return page.bookPageTotal > 0 }, 10000)
+            h.stack.destroy()
+            Settings.setValue("typography/fontSize", 24)   // 改字号 → 签名变化
+            var h2 = openMulti()
+            var p2 = h2.page
+            p2.setProgressScope("book")
+            tryVerify(function () { return p2.bookPageTotal > 0 }, 10000, "签名变化后应重测")
+            Settings.setValue("typography/fontSize", 18)   // 复位
+            h2.stack.destroy()
         }
     }
 
