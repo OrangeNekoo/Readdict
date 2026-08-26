@@ -1,6 +1,7 @@
 #include <QtTest>
 #include <QSqlQuery>
 #include <QSqlError>
+#include <QSqlRecord>
 #include "core/DatabaseManager.h"
 
 // L9（P2#32）：迁移失败已致命化（qFatal 终止进程，与 open 失败同等）——失败路径
@@ -16,13 +17,15 @@ private slots:
         QVERIFY(db.tables().contains("categories"));
         QVERIFY(db.tables().contains("highlights"));
         QVERIFY(db.tables().contains("books_fts"));
-        QCOMPARE(m_mgr->schemaVersion(), 2);
+        QVERIFY(db.tables().contains("book_page_cache"));          // 新表
+        QVERIFY(db.record("books").contains("page_count"));        // 新列
+        QCOMPARE(m_mgr->schemaVersion(), 3);
     }
     void reopensWithSameVersion() {
         QTemporaryDir dir;
         const QString path = dir.filePath("t.db");
-        { DatabaseManager a(path); QCOMPARE(a.schemaVersion(), 2); }
-        { DatabaseManager b(path); QCOMPARE(b.schemaVersion(), 2); }
+        { DatabaseManager a(path); QCOMPARE(a.schemaVersion(), 3); }
+        { DatabaseManager b(path); QCOMPARE(b.schemaVersion(), 3); }
     }
 private:
     std::unique_ptr<DatabaseManager> m_mgr;

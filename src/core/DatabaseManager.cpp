@@ -64,4 +64,19 @@ void DatabaseManager::migrate() {
             || !q2.exec("PRAGMA user_version = 2") || !q2.exec("COMMIT"))
             qFatal("数据库迁移 v2 失败: %s", qPrintable(q2.lastError().text()));
     }
+    if (v < 3) {
+        QSqlQuery q3(m_db);
+        if (!q3.exec("BEGIN")
+            || !q3.exec("ALTER TABLE books ADD COLUMN page_count INTEGER DEFAULT 0")
+            || !q3.exec("CREATE TABLE IF NOT EXISTS book_page_cache("
+                        "book_id INTEGER NOT NULL,"
+                        "signature TEXT NOT NULL,"
+                        "total INTEGER NOT NULL,"
+                        "pages TEXT NOT NULL,"
+                        "updated_at TEXT NOT NULL,"
+                        "PRIMARY KEY (book_id, signature))")
+            || !q3.exec("PRAGMA user_version = 3")
+            || !q3.exec("COMMIT"))
+            qFatal("数据库迁移 v3 失败: %s", qPrintable(q3.lastError().text()));
+    }
 }
