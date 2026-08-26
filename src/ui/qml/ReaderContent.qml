@@ -1447,22 +1447,28 @@ Flickable {
                 return htmlSrc
             }
 
-            // C7：选择起点（Text.selectionStart，文档字符流坐标）→ 段内句子序号。
-            // 纯文本段文档流 = 各句拼接（span 标记不占字符），逐句长度累加定位
-            function sentenceIndexAt(docPos) {
-                var acc = 0
+            // 任务5：句索引定位改用 selectedText 精确匹配——富文本段文档流含块
+            // 分隔符（<p>/<br> 各占 1 字符，selectionStart 已含它们），旧"按句子
+            // 长度累加"与真实文档坐标错位，选中段内后句会把句索引算偏（划线/笔记
+            // 落错句、跳转错位）；按选中文本匹配段内各句返回句序号，未命中回退 -1
+            //（不落错句）
+            function sentenceIndexByText(selText) {
+                if (!selText) return -1
+                var t = selText.trim()
                 for (var k = 0; k < para.sentenceCount; k++) {
-                    acc += para.sentences[k].length
-                    if (docPos < acc) return k
+                    var s = (para.sentences[k] || "").trim()
+                    if (s.length > 0 && t.indexOf(s) >= 0) return k
                 }
-                return para.sentenceCount - 1 // 段尾选择（含全选）钳制到末句
+                return -1
             }
             function handleSelection() {
-                if (txt.selectedText.length > 0)
-                    flick.showSelectionToolbar(txt, para.sentenceStart + para.sentenceIndexAt(txt.selectionStart),
+                if (txt.selectedText.length > 0) {
+                    var k = para.sentenceIndexByText(txt.selectedText)
+                    flick.showSelectionToolbar(txt, k >= 0 ? para.sentenceStart + k : para.sentenceStart,
                                                txt.selectedText)
-                else
+                } else {
                     flick.hideSelectionToolbar()
+                }
             }
         }
     }
@@ -1601,12 +1607,18 @@ Flickable {
         // 视口固定：内容坐标 = 视口目标 + 滚动偏移（contentX 恒为 0，公式保留一般性）
         x: flick.contentX + flick.selBarVpX
         y: flick.contentY + flick.selBarVpY
-        width: 166   // 3 按钮 × 52 + 间距（Rectangle 不随子项自动撑宽）
+        // 任务5：删除划线按钮仅在已划线句选中时出现（4 按钮时 4×52+3×2=214）
+        width: delBtn.visible ? 214 : 166   // 3/4 按钮 × 52 + 间距（Rectangle 不随子项自动撑宽）
         height: 34
         radius: 6
         color: "#EE303030"
         z: 10
+        // 任务5：delBtn 可见性变化可能发生在工具条隐藏期间（划线落库在 clearSelection
+        // 之后经 highlightsChanged 异步刷新），隐藏态 Row 不自动重排；显示时强制
+        // 重排，保证 delBtn 落在第 4 槽位（否则停留默认 x=0 与「复制」重叠）
+        onVisibleChanged: if (visible) selRow.forceLayout()
         Row {
+            id: selRow
             anchors.fill: parent
             spacing: 2
             component SelBtn: Button {
@@ -1641,6 +1653,21 @@ Flickable {
             SelBtn {
                 lbl: qsTr("笔记")
                 onClicked: flick.openNoteDialog()
+            }
+            // 任务5：删除划线——仅当选中句已划线（highlightMap 命中）时可见；
+            // 点击后删除该划线并收起选择（未命中/无 id 时不误删）
+            SelBtn {
+                id: delBtn
+                visible: flick.highlightMap[(flick.chapter.title || "") + "|" + flick.selSentenceIndex] != null
+                // 任务5：可见性变化立即强制 Row 重排（可见性变化可能发生在工具条
+                // 隐藏期间，隐藏态 Row 不自动重排；selBar 显示时另有兜底重排）
+                onVisibleChanged: selRow.forceLayout()
+                lbl: qsTr("删除划线")
+                onClicked: {
+                    var mk = flick.highlightMap[(flick.chapter.title || "") + "|" + flick.selSentenceIndex]
+                    if (mk && mk.id > 0) Highlights.removeHighlight(mk.id)
+                    flick.clearSelection()
+                }
             }
         }
     }

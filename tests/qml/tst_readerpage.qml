@@ -17,6 +17,13 @@ Item {
     id: root
     width: 1100; height: 720
 
+    // 任务5：富文本句索引回归 fixture 宿主——ReaderContent 独立加载（同 tst_highlightsui
+    // 模式）。书中无真实富文本段，用内存章节注入含 <b> 的富文本段驱动真实选择链路。
+    Component {
+        id: richContentComp
+        Loader { source: "qrc:/qt/qml/Readdict/ui/qml/ReaderContent.qml" }
+    }
+
     TestCase {
         name: "ReaderNavSmoke"
 
@@ -409,6 +416,66 @@ Item {
             verify(reader.text === firstSentence,
                    "剪贴板内容应等于选中文本，实际=" + reader.text)
             reader.destroy()
+            h.stack.destroy()
+        }
+
+        // 任务5：工具条「删除划线」——选中句已划线时按钮可见（highlightMap 命中），
+        // 点击后 Highlights.removeHighlight(id) + clearSelection：划线清除、工具条收起；
+        // 未划线句选中时按钮隐藏。
+        function test_deleteHighlightFromToolbar() {
+            var h = openPage()
+            var page = h.page
+            var cv = page.contentView
+            page.controlsHideDelay = 100000
+            page.controlsVisible = false
+            page.sheetOpen = false
+            wait(50)
+            // 幂等：清掉本书残留划线（重复运行/中断遗留），保证断言确定
+            var stale = Highlights.highlightsForBook(page.book.id)
+            for (var i = 0; i < stale.length; i++)
+                Highlights.removeHighlight(stale[i].id)
+            // 选中首段首句 → 划线按钮 → 色块 → 落库
+            var firstSentence = (page.chapter.paragraphs[0].sentences
+                                 && page.chapter.paragraphs[0].sentences[0]) || "首句"
+            cv.simulateSelection(0, firstSentence)
+            tryVerify(function () { return cv.selectionToolbar.visible }, 3000,
+                      "选择后工具条应出现")
+            var row = cv.selectionToolbar.children[0]
+            var markBtn = row.children[1]   // 「划线」按钮
+            var bp = markBtn.mapToItem(cv, markBtn.width / 2, markBtn.height / 2)
+            mouseClick(cv, bp.x, bp.y)
+            tryVerify(function () { return cv.colorToolbar.visible }, 3000,
+                      "点划线按钮应展开色板")
+            var cRow = cv.colorToolbar.children[0]
+            var swatch = cRow.children[0]
+            var sp = swatch.mapToItem(cv, swatch.width / 2, swatch.height / 2)
+            mouseClick(cv, sp.x, sp.y)
+            tryVerify(function () {
+                var rows = Highlights.highlightsForBook(page.book.id)
+                return rows.length === 1 && rows[0].sentenceIndex === 0
+            }, 3000, "划线应落库（句 0）")
+            // 再选中同一句 → 「删除划线」按钮出现
+            cv.simulateSelection(0, firstSentence)
+            tryVerify(function () { return cv.selectionToolbar.visible }, 3000,
+                      "再次选择后工具条应出现")
+            // 工具条结构：selBar(Rectangle) → Row → [复制, 划线, 笔记, 删除划线]（声明序）
+            var delBtn = row.children[3]   // 「删除划线」按钮
+            verify(delBtn !== undefined && delBtn.text.length > 0, "工具条应含删除划线按钮")
+            tryVerify(function () { return delBtn.visible }, 3000,
+                      "已划线句选中时删除按钮应可见")
+            // 真实点击删除按钮 → 划线清除 + 工具条收起
+            var dp = delBtn.mapToItem(cv, delBtn.width / 2, delBtn.height / 2)
+            mouseClick(cv, dp.x, dp.y)
+            tryVerify(function () {
+                return Highlights.highlightsForBook(page.book.id).length === 0
+            }, 3000, "点击删除划线后划线应清除")
+            tryVerify(function () { return !cv.selectionToolbar.visible }, 3000,
+                      "删除后工具条应收起")
+            // 未划线句选中 → 删除按钮不可见
+            cv.simulateSelection(0, firstSentence)
+            tryVerify(function () { return cv.selectionToolbar.visible }, 3000,
+                      "选择后工具条应出现")
+            verify(!delBtn.visible, "未划线句选中时删除按钮应隐藏")
             h.stack.destroy()
         }
 
@@ -1207,6 +1274,59 @@ Item {
             tryVerify(function () { return !page.currentBookmarked }, 3000,
                       "删除当前页书签后顶栏应熄灭")
             h.stack.destroy()
+        }
+    }
+
+    // 任务5：划线句索引修复（§4b）——富文本段框选段内非首句 → 笔记 → 落库
+    // sentenceIndex 必须指向被选句。旧"按句子长度累加"定位在含块分隔符的富文本
+    // 文档上错位（<p> 块边界各占 1 个文档字符，selectionStart 已含它们），选中
+    // 段内第 3 句会被算成第 4 句；改为 selectedText 精确匹配后应指向被选句。
+    // 真实驱动：对委托 TextEdit 直接 select() 注入文档坐标选区，走
+    // onSelectedTextChanged → handleSelection → 精确匹配（真实生产链路）。
+    TestCase {
+        name: "ReaderSentenceIndexSmoke"
+
+        function test_richTextNoteUsesCorrectSentence() {
+            var loader = richContentComp.createObject(root)
+            loader.width = 800; loader.height = 600
+            var c = loader.item
+            verify(c !== null, "ReaderContent 应能加载")
+            c.typography = { fontFamily: "Source Han Sans VF", fontSize: 18, lineHeight: 1.6,
+                             align: "left", pageWidth: "normal" }
+            c.bookId = 9010
+            // 幂等清理：防上次运行残留污染断言
+            var stale = Highlights.highlightsForBook(9010)
+            for (var i = 0; i < stale.length; i++)
+                Highlights.removeHighlight(stale[i].id)
+            // 富文本段：4 块 × 各 1 句（每块边界 1 个文档分隔符，含在 selectionStart 内）
+            c.chapter = { title: "章", paragraphs: [
+                { text: "好。行！妙。奇！",
+                  html: "<p><b>好。</b></p><p><b>行！</b></p><p><b>妙。</b></p><p><b>奇！</b></p>",
+                  level: 0, imagePath: "",
+                  sentences: ["好。", "行！", "妙。", "奇！"] }
+            ]}
+            tryVerify(function () { return c.paragraphRepeater.itemAt(0) !== null }, 3000,
+                      "富文本段应渲染完成")
+            var txt = c.paragraphRepeater.itemAt(0).textItem
+            // 文档坐标：好。=0-1，分隔符=2，行！=3-4，分隔符=5，妙。=6-7
+            txt.select(6, 8)
+            verify(txt.selectedText === "妙。", "应选中段内第 3 句，实际 " + txt.selectedText)
+            tryVerify(function () { return c.selectionToolbar.visible }, 3000,
+                      "选择后工具条应出现")
+            verify(c.selSentenceIndex === 2,
+                   "句索引应精确匹配段内第 3 句（全局 2），实际 " + c.selSentenceIndex)
+            c.openNoteDialog()
+            verify(c.noteDialog.visible, "笔记 Dialog 应打开")
+            c.noteTextArea.text = "富文本句笔记"
+            c.noteDialog.accept()
+            var list = Highlights.highlightsForBook(9010)
+            verify(list.length === 1, "笔记入口应先建划线，实际 " + JSON.stringify(list))
+            compare(list[0].sentenceIndex, 2,
+                    "落库句索引应指向被选句（段内第 3 句 = 全局 2），实际 " + list[0].sentenceIndex)
+            compare(list[0].chapter, "章")
+            compare(list[0].note, "富文本句笔记")
+            Highlights.removeHighlight(list[0].id)
+            loader.destroy()
         }
     }
 
