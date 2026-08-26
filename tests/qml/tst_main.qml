@@ -1917,6 +1917,30 @@ Item {
             compare(named.length, 1, "同名保存应覆盖而非追加")
             h.destroy()
         }
+        // 任务3（§2c）：切内置主题应重置默认字号（18），切回自定义主题应恢复其保存字号
+        function test_builtinThemeResetsFontSize() {
+            var h = openReader(findBook("TXT", "multibook"))
+            var page = h.item
+            page.setFontSize(24)
+            compare(page.typography.fontSize, 24, "先自定义字号 24")
+            page.setBackgroundMode("dark")
+            compare(page.typography.fontSize, 18, "切内置主题应重置默认字号 18，实际 " + page.typography.fontSize)
+            h.destroy()
+        }
+        function test_customThemeRestoresFontSize() {
+            var h = openReader(findBook("TXT", "multibook"))
+            var page = h.item
+            page.setFontSize(20)
+            var panel = page.bottomSheet.contentLoader.item
+            // 经主题面板保存当前设置为预设（字号 20）
+            page.sheetTab = "theme"
+            // 直接走 applyThemePreset 验证恢复路径
+            page.applyThemePreset({ name: "T", bg: "light", fontFamily: "思源宋体 VF", fontSize: 20, lineHeight: 1.6 })
+            page.setFontSize(24)
+            page.applyThemePreset({ name: "T", bg: "light", fontFamily: "思源宋体 VF", fontSize: 20, lineHeight: 1.6 })
+            compare(page.typography.fontSize, 20, "切回自定义主题应恢复其字号 20，实际 " + page.typography.fontSize)
+            h.destroy()
+        }
     }
     TestCase {
         name: "CoverSmoke"

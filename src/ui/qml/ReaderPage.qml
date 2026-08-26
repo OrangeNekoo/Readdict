@@ -1209,6 +1209,12 @@ Page {
         Settings.setValue("themes/active", "")
         page.bgMode = mode
         Settings.setValue("background/mode", mode)
+        // 内置主题 = 默认排版：切背景同时重置字号/字体/行距
+        Settings.setValue("typography/fontFamily", "思源宋体 VF")
+        Settings.setValue("typography/fontSize", 18)
+        Settings.setValue("typography/lineHeight", 1.6)
+        page.fontFamily = "思源宋体 VF"
+        page.typography = page.typographyFromSettings()
         const panel = bottomSheet.contentLoader.item
         if (panel && panel.refresh) panel.refresh()
     }
