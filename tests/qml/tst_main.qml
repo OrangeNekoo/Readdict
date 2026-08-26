@@ -1897,6 +1897,26 @@ Item {
             compare(page2.chapter.title, t3, "重开应恢复到第 3 章（" + t3 + "）")
             loader2.destroy()
         }
+        // 主题保存弹窗（§2a/2b）：输入框自适应可见高度 + 同名保存覆盖而非追加
+        // （openReader 返回 Loader，page=h.item；清理用 h.destroy()）
+        function test_themeSaveDialogOverwrite() {
+            var h = openReader(findBook("TXT", "multibook"))
+            var page = h.item
+            page.sheetTab = "theme"
+            var panel = page.bottomSheet.contentLoader.item
+            verify(panel && panel.openSaveDialog, "主题面板应就绪")
+            panel.openSaveDialog()
+            verify(panel.saveDialog.visible, "保存弹窗应打开")
+            tryVerify(function () { return panel.themeNameField.height >= 30 }, 2000,
+                      "输入框应有可见高度，实际 " + panel.themeNameField.height)
+            // 同名覆盖：保存 X 两次，themes/custom 仍一项且为第二次
+            panel.saveCurrentTheme("测试预设")
+            panel.saveCurrentTheme("测试预设")
+            var custom = Settings.value("themes/custom")
+            var named = custom.filter(function (p) { return p.name === "测试预设" })
+            compare(named.length, 1, "同名保存应覆盖而非追加")
+            h.destroy()
+        }
     }
     TestCase {
         name: "CoverSmoke"

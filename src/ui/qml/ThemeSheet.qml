@@ -177,7 +177,6 @@ Item {
         modal: true
         standardButtons: Dialog.Ok | Dialog.Cancel
         width: 320
-        height: 180
         contentItem: ColumnLayout {
             anchors.fill: parent
             anchors.margins: 16
@@ -190,6 +189,7 @@ Item {
             TextField {
                 id: nameField
                 Layout.fillWidth: true
+                Layout.preferredHeight: 40
                 placeholderText: qsTr("如：夜间护眼")
                 selectByMouse: true
             }
