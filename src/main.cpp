@@ -199,6 +199,8 @@ int main(int argc, char *argv[]) {
     // C8 复审：存量书索引回填——功能上线前已入库的书没有全文索引。延迟到事件循环
     // 起来后逐本执行（书与书之间让出，UI 保持响应），回填失败不影响启动。
     QTimer::singleShot(0, importer, [importer] { importer->backfillMissingIndexes(); });
+    // 任务3：存量 PDF 书缺固定页数（page_count）——启动后异步逐本补页数
+    QTimer::singleShot(0, importer, [importer] { importer->backfillPageCounts(); });
     // C7：TextEdit 行距助手（段落改 TextEdit 渲染后 lineHeight 属性不可用，见 ReaderTextHelper.h）
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "ReaderText", new ReaderTextHelper);
     // C5：TTS 控制器按 settings.json 的 tts/ 分区构建引擎（system/openai），

@@ -10,6 +10,9 @@
 #include <QImage>
 #include <QDir>
 #include <QTemporaryDir>
+#include <QPageSize>
+#include <QPdfWriter>
+#include <QPainter>
 
 #include <zip.h>   // minizip 写端（构造测试 EPUB）
 #include <zlib.h>
@@ -217,6 +220,21 @@ static QString makeBadOpfEpub(const QString &path) {
         {QStringLiteral("OEBPS/Text/ch1.xhtml"), ch1.toUtf8()},
     };
     return writeZipFile(path, entries) ? path : QString();
+}
+
+// 确定性两页 PDF 发生器（镜像 tst_qmlmain.cpp 的 writeTextPdf）：QPdfWriter
+// 按 72dpi A4 写两页文本，页数固定为 2——供导入取页数/存量回填用例锁定值。
+static bool writeTwoPagePdf(const QString &path) {
+    QPdfWriter writer(path);
+    writer.setPageSize(QPageSize(QPageSize::A4));
+    writer.setResolution(72);
+    QPainter painter(&writer);
+    if (!painter.isActive()) return false;
+    painter.drawText(100, 100, QStringLiteral("page one"));
+    writer.newPage();
+    painter.drawText(100, 100, QStringLiteral("page two"));
+    painter.end();
+    return true;
 }
 
 // 任务4 复审：description 良构但其后正文 XML 错配的 FB2
@@ -501,6 +519,37 @@ private slots:
         SearchEngine se(dbPath);
         QTRY_VERIFY_WITH_TIMEOUT(!se.search(id, "魔女").isEmpty(), 5000);
         QCOMPARE(se.search(id, "魔女")[0].paragraphIndex, 0);
+    }
+
+    // 任务3：PDF 导入取固定页数——QPdfWriter 生成的两页 PDF 导入后
+    // pageCount 随 addBook 落库（books 表 page_count 列）。
+    void pdfImportCapturesPageCount() {
+        QTemporaryDir libDir, srcDir;
+        const QString pdf = srcDir.filePath("two.pdf");
+        QVERIFY(writeTwoPagePdf(pdf));
+        BookImporter imp(libDir.path(), ":memory:");
+        QVERIFY(imp.importFile(pdf).isEmpty());
+        QCOMPARE(imp.books().size(), 1);
+        QCOMPARE(imp.books()[0].pageCount, 2);
+    }
+
+    // 任务3：存量回填——直接经 BookManager 入库（pageCount=0）的旧 PDF 书，
+    // backfillPageCounts 异步逐本补固定页数（QTRY 驱动事件循环使 singleShot 生效）。
+    void backfillPageCountsExistingBooks() {
+        QTemporaryDir libDir;
+        const QString dbPath = libDir.filePath("lib.db");
+        const QString pdf = libDir.filePath("two.pdf");
+        QVERIFY(writeTwoPagePdf(pdf));
+        {
+            BookManager mgr(dbPath, "readdict_bpcfill");
+            Book b; b.title = "旧PDF"; b.format = "PDF"; b.path = pdf; b.pageCount = 0;
+            const qint64 id = mgr.addBook(b);
+            QVERIFY(id > 0);
+        }
+        BookImporter imp(libDir.path(), dbPath);
+        imp.backfillPageCounts();   // 异步逐本；QTRY 驱动事件循环
+        BookManager mgr(dbPath, "readdict_bpcfill2");
+        QTRY_VERIFY_WITH_TIMEOUT(mgr.bookById(mgr.books().first().id).pageCount == 2, 5000);
     }
 
     // B2：refreshCovers 存量书封面刷新——导入带封面 EPUB（真实封面 cover_*.png）

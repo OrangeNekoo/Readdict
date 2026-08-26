@@ -252,6 +252,7 @@ QString BookImporter::adoptFile(const QString &pathInLibrary) {
 QString BookImporter::registerBook(const QString &destPath, const QString &format,
                                    qint64 *importedId) {
     const QString coverDir = m_libraryDir + "/covers/";
+    int pageCount = 0;
     // 任务4：注册前以最小开销解析一次元数据（EPUB 只扫 OPF、FB2 完整扫描 XML
     // 校验良构但不收 binary/正文、MOBI 只 init/load+EXTH，避免整书二次解析）。
     // 标题元数据优先、文件名兜底；解析失败（含缺 spine/畸形 OPF、FB2 尾部 XML
@@ -279,7 +280,8 @@ QString BookImporter::registerBook(const QString &destPath, const QString &forma
         }
     } else if (format == "PDF") {
         // PDF 渲染首页为真实封面（B9）；加载/渲染失败回退占位。
-        const QString realCover = extractPdfCover(destPath, coverDir);
+        // 加载成功后回传固定页数（pageCountOut）随 addBook 落库。
+        const QString realCover = extractPdfCover(destPath, coverDir, &pageCount);
         if (!realCover.isEmpty()) {
             cover = realCover;
             rollbackCover = realCover;
@@ -295,7 +297,7 @@ QString BookImporter::registerBook(const QString &destPath, const QString &forma
     b.title = title;
     b.author = meta.author;
     b.publisher = meta.publisher;
-    b.format = format; b.path = destPath; b.cover = cover;
+    b.format = format; b.path = destPath; b.cover = cover; b.pageCount = pageCount;
     // addBook 返回 -1 表示写入失败（如 path 唯一约束冲突、FTS 索引写入失败），此时回滚文件副作用。
     const qint64 id = m_books->addBook(b);
     if (id < 0) {
@@ -383,7 +385,8 @@ QString BookImporter::extractEpubCover(const QString &epubPath, const QString &c
     return path;
 }
 
-QString BookImporter::extractPdfCover(const QString &pdfPath, const QString &coverDir) {
+QString BookImporter::extractPdfCover(const QString &pdfPath, const QString &coverDir,
+                                      int *pageCountOut) {
     QPdfDocument doc;
     doc.load(pdfPath);
     // 加载可能异步完成（QPdfDocument::load 返回后 status 为 Loading）：同步轮询等待
@@ -395,6 +398,7 @@ QString BookImporter::extractPdfCover(const QString &pdfPath, const QString &cov
         qWarning() << "BookImporter: PDF 封面提取失败（无法加载），保留占位封面" << pdfPath;
         return {};
     }
+    if (pageCountOut) *pageCountOut = doc.pageCount();
     QImage img = doc.render(0, QSize(300, 400));
     if (img.isNull()) {
         m_lastError = QStringLiteral("PDF 首页渲染失败，封面回退占位");
@@ -470,6 +474,31 @@ void BookImporter::backfillNext() {
     }
 }
 
+void BookImporter::backfillPageCounts() {
+    if (m_dbPath == QLatin1String(":memory:")) return;
+    m_pageCountQueue = m_books->books();
+    QTimer::singleShot(0, this, [this] { backfillPageCountsNext(); });
+}
+
+// 私有：从队列逐本补固定页数。非 PDF 与已有页数的书廉价跳过（本 tick 内连续
+// 出队）；缺页数的 PDF 则加载文档取 pageCount（可能耗时），写入后 singleShot(0)
+// 调度下一本，让出事件循环——UI 在书与书之间可响应。加载失败的书保持 pageCount=0，
+// 下次启动回填会重试（页数读取开销小，不做失败标记）。
+void BookImporter::backfillPageCountsNext() {
+    while (!m_pageCountQueue.isEmpty()) {
+        const Book b = m_pageCountQueue.takeFirst();
+        if (b.format != QLatin1String("PDF") || b.pageCount > 0) continue;
+        QPdfDocument doc;
+        doc.load(b.path);
+        for (int i = 0; i < 200 && doc.status() == QPdfDocument::Status::Loading; ++i)
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        if (doc.status() == QPdfDocument::Status::Ready && doc.pageCount() > 0)
+            m_books->setPageCount(b.id, doc.pageCount());
+        QTimer::singleShot(0, this, [this] { backfillPageCountsNext(); });
+        return;
+    }
+}
+
 QVector<Book> BookImporter::books() const {
     return m_books->books();
 }
@@ -502,7 +531,7 @@ int BookImporter::refreshCovers() {
         if (b.format == "EPUB")
             newCover = extractEpubCover(b.path, coverDir);
         else if (b.format == "PDF")
-            newCover = extractPdfCover(b.path, coverDir);
+            newCover = extractPdfCover(b.path, coverDir, nullptr);
         else
             continue;
         if (newCover.isEmpty() || newCover == b.cover) continue;

@@ -25,6 +25,8 @@ public:
     // （功能上线前已入库的书没有全文索引）。逐本经事件循环调度（每本索引后
     // singleShot(0) 让出），UI 在书与书之间保持响应；PDF 无章节模型跳过。
     void backfillMissingIndexes();
+    // 启动回填：对缺 page_count 的存量 PDF 书自动补固定页数（逐本让出事件循环）。
+    void backfillPageCounts();
     QVector<Book> books() const;
     // 最近一次导入的非致命错误（如 EPUB 解析失败导致封面回退占位）；成功或
     // 无错误时为空串。致命错误仍由 importFile 的返回值表达。
@@ -49,6 +51,8 @@ private:
     QString registerBook(const QString &destPath, const QString &format, qint64 *importedId);
     // 回填队列的逐本处理（经 QTimer::singleShot 调度）
     void backfillNext();
+    // page_count 回填队列的逐本处理（经 QTimer::singleShot 调度）
+    void backfillPageCountsNext();
     static QString coverPathFor(const QString &title, const QString &destDir);
     QString generatePlaceholderCover(const QString &title, const QString &destDir) const;
     // 从 EPUB 提取封面（OPF cover 声明优先，其次 DocumentModel 首个内嵌图片），
@@ -56,10 +60,12 @@ private:
     QString extractEpubCover(const QString &epubPath, const QString &coverDir);
     // 从 PDF 渲染第 1 页为封面（QPdfDocument），缩放到 300x400 存为
     // covers/cover_<书文件 md5>.png；加载/渲染失败返回空串（回退占位）。
-    QString extractPdfCover(const QString &pdfPath, const QString &coverDir);
+    // pageCountOut（可选）：加载成功后回传固定页数（doc.pageCount()）。
+    QString extractPdfCover(const QString &pdfPath, const QString &coverDir, int *pageCountOut);
     QString m_libraryDir;
     QString m_dbPath;
     QString m_lastError;
     class BookManager *m_books;
     QVector<Book> m_backfillQueue;  // 存量书回填队列（逐本出队，空=完成）
+    QVector<Book> m_pageCountQueue; // page_count 回填队列（逐本出队，空=完成）
 };
