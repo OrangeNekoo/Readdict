@@ -640,7 +640,8 @@ Page {
         visible: !readerShell.sheetOpen
         z: 10
         text: {
-            const total = pdfDoc.pageCount
+            const total = (page.book && page.book.pageCount > 0)
+                          ? page.book.pageCount : pdfDoc.pageCount
             const cur = total > 0 ? pdfView.currentPage + 1 : 0
             const scope = page.progressScope === "book" ? qsTr("全书") : qsTr("本章")
             if (total <= 0)

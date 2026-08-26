@@ -887,6 +887,20 @@ Item {
             Settings.setValue("reading/progressScope", "chapter")
             Settings.setValue("reading/progressDisplay", "pages")
         }
+        // 任务5：PDF 全书进度总页数缓存优先——book.pageCount 注入 320（真实两页），
+        // 标签应显示缓存值；文档就绪前即可显总数。
+        function test_pdfProgressUsesCachedPageCount() {
+            var src = TestEnv.textPdfSource
+            if (src.length === 0) skip("无 PDF 夹具")
+            var loader = pdfReaderComp.createObject(root, { width: 800, height: 1000 })
+            var page = loader.item
+            page.book = { id: 999030, title: "缓存PDF", path: src, pageCount: 320 }
+            tryVerify(function () { return page.pdfDocument.status === PdfDocument.Ready }, 15000)
+            tryVerify(function () {
+                return page.pageLabel.text.indexOf("/ 320 页") >= 0
+            }, 5000, "总页数应取缓存 320，实际 '" + page.pageLabel.text + "'")
+            loader.destroy()
+        }
         //（0 → 2），且中间图片页 canReadAloud=false、原因精确、菜单朗读项 disabled。
         function test_pdfReadAloudSkipsImagePage() {
             Tts.stop()
