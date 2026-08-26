@@ -441,6 +441,11 @@ Item {
                     "缩放减号按钮不应有边框")
             compare(panel.zoomPlus.background.border.width, 0,
                     "缩放加号按钮不应有边框")
+            // + 按钮必须完全在缩放面板可视区内（不得被右缘裁掉）
+            tryVerify(function () {
+                return panel.zoomPlus.x + panel.zoomPlus.width <= panel.width
+            }, 3000, "+ 按钮应完全在缩放面板可视区内，plus.x=" + panel.zoomPlus.x
+                  + " panel.width=" + panel.width)
             // zoomPercent 实时反映活动视图 renderScale（1.0 = 100%）
             tryVerify(function () {
                 return page.zoomPercent === Math.round(page.pdfView.renderScale * 100)

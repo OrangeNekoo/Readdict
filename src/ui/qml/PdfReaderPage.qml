@@ -306,8 +306,8 @@ Page {
             // 百分比控制器行：− / 可编辑百分比输入 / +
             Row {
                 width: parent.width
-                leftPadding: 16
-                rightPadding: 16
+                leftPadding: 12
+                rightPadding: 12
                 topPadding: 10
                 bottomPadding: 10
                 spacing: 10
@@ -332,7 +332,8 @@ Page {
                 }
                 TextField {
                     id: zoomInput
-                    width: parent.width - zoomMinus.width - zoomPlus.width - 2 * parent.spacing
+                    width: parent.width - parent.leftPadding - parent.rightPadding
+                           - zoomMinus.width - zoomPlus.width - 2 * parent.spacing
                     height: 34
                     horizontalAlignment: TextInput.AlignHCenter
                     inputMethodHints: Qt.ImhDigitsOnly
