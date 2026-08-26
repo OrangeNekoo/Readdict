@@ -31,6 +31,7 @@
 #include "core/SettingsStore.h"
 #include "sync/SyncController.h"
 #include "tts/TtsController.h"
+#include "ui/PdfTextGeometry.h"
 #include "ui/ReaderTextHelper.h"
 #include "ui/LanguageController.h"
 
@@ -339,6 +340,8 @@ int main(int argc, char *argv[]) {
     // C8：Search 单例（固定连接名，与生产 main.cpp 对齐）——全文搜索 QML 冒烟
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Search",
                                  new SearchEngine(appData + "/t.db", QStringLiteral("readdict_search")));
+    // 任务4：PDF 朗读逐句高亮 C++ 桥（同生产 main.cpp）
+    qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "PdfText", new PdfTextGeometry);
     // C7：TextEdit 行距助手（同生产 main.cpp）
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "ReaderText", new ReaderTextHelper);
     // D6：语言控制器（同生产 main.cpp；初始 zh_CN，测试资源已编入三份 .qm）

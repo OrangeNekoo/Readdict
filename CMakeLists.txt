@@ -61,6 +61,9 @@ qt_add_executable(Readdict
     src/ui/ReaderTextHelper.h
     src/ui/LanguageController.cpp
     src/ui/LanguageController.h
+    # 任务4：PDF 朗读逐句高亮 C++ 桥（QPdfDocument::getSelectionAtIndex → QRectF）
+    src/ui/PdfTextGeometry.cpp
+    src/ui/PdfTextGeometry.h
     src/sync/SyncController.cpp
     src/sync/SyncController.h
     src/sync/SyncManager.cpp

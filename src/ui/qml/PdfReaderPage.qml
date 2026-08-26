@@ -109,6 +109,16 @@ Page {
     property var pdfSentences: []
     // 当前页是否可朗读（有文本层）：驱动适配器 canReadAloud 与壳层朗读项 enabled
     property bool pdfCanReadAloud: false
+    // 任务4（本计划）：逐句高亮——pdfPageText 缓存整页文本串（PdfSelection.selectAll
+    // 结果，与 splitSentences 同一串）；pdfSentenceOffsets 为每句在该串中的
+    // {start, length} 字符区间（getSelectionAtIndex 的索引即此偏移）；Tts.currentIndex
+    // 推进时经 C++ 桥 PdfText.sentenceBounds 取页坐标矩形 → renderScale 映射为像素
+    // 叠加高亮（见 updateSentenceHighlight）。
+    property string pdfPageText: ""
+    property var pdfSentenceOffsets: []
+    // 任务4（本计划）：朗读句高亮句柄（测试/上层断言可见性与几何）
+    property alias sentenceHighlightPaged: pagedHighlight
+    property alias sentenceHighlightScroll: scrollHighlight
     // 活动会话归属：仅本页 startPdfReadAloud 启动、且未被手动翻页/目录跳转/返回/
     // Error/外部停止打断的朗读会话，才处理 Tts.chapterCompleted（防旧页继续发声）。
     property bool ttsSessionActive: false
@@ -195,7 +205,20 @@ Page {
         // 同时重提取当前页文本（朗读能力随页变化）并同步书签高亮。
         onCurrentPageChanged: page.viewCurrentPageChanged(this)
         // 任务2：窗口尺寸改变后重算居中（multi 无 margin API，内部已居中，空操作）
-        onWidthChanged: page.updatePdfAlignment()
+        // 任务4（本计划）：窗口尺寸改变后重算居中 + 朗读高亮位置
+        onWidthChanged: { page.updatePdfAlignment(); page.updateSentenceHighlight() }
+        // 任务4（本计划）：clip 防止朗读句高亮越出视图边界画到顶栏区域
+        clip: true
+        // 任务4（本计划）：朗读句高亮（scroll 模式）——叠加在当前页图像上，位置
+        // 经内部 TableView 当前页委托 mapToItem 计算（见 pdfScrollPageImagePos），
+        // 随滚动/缩放/翻页由 updateSentenceHighlight 重算。
+        Rectangle {
+            id: scrollHighlight
+            visible: false
+            color: "#55FFEB3B"
+            radius: 2
+            z: 10
+        }
         // 轻点：切换壳层显隐状态（唤出顶栏/Sheet 或关闭——ReaderPage 同款交互）；
         // 页面上 Qt 内部 TapHandler（链接/文本选择）接管处例外，边缘/间隙仍可唤出。
         TapHandler {
@@ -216,9 +239,19 @@ Page {
         anchors.bottomMargin: page.ttsBarVisible ? readerShell.ttsBar.height : 0
         document: pdfDoc
         onCurrentPageChanged: page.viewCurrentPageChanged(this)
-        // 任务2：视口尺寸/内容宽度（缩放）变化后重算整页居中边距
-        onWidthChanged: page.updatePdfAlignment()
-        onContentWidthChanged: page.updatePdfAlignment()
+        // 任务4（本计划）：视口尺寸/内容宽度（缩放）变化后重算居中 + 朗读高亮
+        onWidthChanged: { page.updatePdfAlignment(); page.updateSentenceHighlight() }
+        onContentWidthChanged: { page.updatePdfAlignment(); page.updateSentenceHighlight() }
+        // 任务4（本计划）：朗读句高亮（paged 模式）——本视图是 Flickable，声明子项
+        // 自动进入 contentItem 随内容滚动；页图像位于内容坐标原点，句矩形 =
+        // points × renderScale，无需换算视口滚动偏移。
+        Rectangle {
+            id: pagedHighlight
+            visible: false
+            color: "#55FFEB3B"
+            radius: 2
+            z: 5
+        }
         // 单点：切换壳层显隐状态（唤出顶栏/Sheet 或关闭——ReaderPage 同款交互）；
         // 缩放切换由壳层 Sheet 的 PDF 专属缩放面板承担（旧双击切换收编，见 onZoom）。
         TapHandler {
@@ -234,14 +267,15 @@ Page {
     QtObject {
         id: pdfViewProxy
         property var view: page.activePdfView
-        property int currentPage: view && view.currentPage !== undefined ? view.currentPage : -1
         property real renderScale: view && view.renderScale !== undefined ? view.renderScale : 1
+        property int currentPage: view && view.currentPage !== undefined ? view.currentPage : -1
         onRenderScaleChanged: {
             // 写回透传：外部（测试/未来 UI）赋值代理 renderScale 时转发活动视图；
             // 活动视图自身缩放变化时二者相等，不构成回路。
             const v = page.activePdfView
             if (v && v.renderScale !== undefined && page.pdfView.renderScale !== v.renderScale)
                 v.renderScale = page.pdfView.renderScale
+            page.updateSentenceHighlight()   // 任务4（本计划）：缩放变化重算句高亮像素
         }
         property int status: {
             const v = page.activePdfView
@@ -709,6 +743,7 @@ Page {
         page.pageMode = mode
         page.applyFitModeToActiveView()
         page.restoreAfterSwitch()
+        page.updateSentenceHighlight()   // 任务4（本计划）：方向切换后按活动视图重算
     }
 
     // 按当前 fitPage 状态缩放活动视图；文档未就绪跳过，Ready 处理器与方向切换
@@ -839,14 +874,41 @@ Page {
     // 不重写语言规则）。
     function extractPageText(pageIndex) {
         if (pdfDoc.status !== PdfDocument.Ready
-                || pageIndex < 0 || pageIndex >= pdfDoc.pageCount) return []
+                || pageIndex < 0 || pageIndex >= pdfDoc.pageCount) {
+            page.pdfPageText = ""
+            page.pdfSentenceOffsets = []
+            return []
+        }
         try {
             pdfTextSel.page = pageIndex
             pdfTextSel.selectAll()
             const text = pdfTextSel.text ? String(pdfTextSel.text) : ""
-            if (!text.trim()) return []
-            return ReaderText.splitSentences(text)
+            if (!text.trim()) {
+                page.pdfPageText = ""
+                page.pdfSentenceOffsets = []
+                return []
+            }
+            const sentences = ReaderText.splitSentences(text)
+            // 任务4（本计划）：句偏移——句子是整页文本的连续子串（SentenceSplitter
+            // 保留原文空白/换行），从 pos 起向后精确匹配即得 {start, length} 字符区间；
+            // 找不到（防御，不应出现）则跳过该句。偏移与 Tts.setSentences 的句子
+            // 数组一一对应，getSelectionAtIndex 的索引即此偏移。
+            const offsets = []
+            const kept = []
+            let pos = 0
+            for (const s of sentences) {
+                const idx = text.indexOf(s, pos)
+                if (idx < 0) continue
+                offsets.push({ start: idx, length: s.length })
+                kept.push(s)
+                pos = idx + s.length
+            }
+            page.pdfPageText = text
+            page.pdfSentenceOffsets = offsets
+            return kept
         } catch (err) {
+            page.pdfPageText = ""
+            page.pdfSentenceOffsets = []
             return []
         }
     }
@@ -856,6 +918,74 @@ Page {
         const s = page.extractPageText(idx)
         page.pdfSentences = s
         page.pdfCanReadAloud = s.length > 0
+        page.updateSentenceHighlight()   // 任务4（本计划）：新页句偏移就绪后重算高亮
+    }
+
+    // ---- 任务4（本计划）：朗读逐句高亮 ----
+    // 当前朗读句的页坐标矩形（points）：Tts.currentIndex → pdfSentenceOffsets 的
+    // 字符区间 → C++ 桥 PdfText.sentenceBounds（QPdfDocument::getSelectionAtIndex →
+    // boundingRectangle，与 extractPageText 同一整页文本串的偏移）；文档未就绪 /
+    // 无偏移 / 桥返回空矩形时返回 null（高亮隐藏）。
+    function currentSentenceRect() {
+        const idx = Tts.currentIndex
+        const offs = page.pdfSentenceOffsets
+        if (!offs || idx < 0 || idx >= offs.length) return null
+        const o = offs[idx]
+        if (!o || !(o.length > 0)) return null
+        if (pdfDoc.status !== PdfDocument.Ready) return null
+        const r = PdfText.sentenceBounds(pdfDoc, page.pdfView.currentPage, o.start, o.length)
+        if (!r || !(r.width > 0) || !(r.height > 0)) return null
+        return r
+    }
+    // scroll 模式：当前页图像左上角在 multiView 坐标系的像素位置。PdfMultiPageView
+    // 内部是 TableView（无公开句柄），经可见子项定位：唯一带 contentY/itemAtCell
+    // 的子项即内部 TableView；itemAtCell(0, currentPage) 得当前页委托；委托内
+    // 页图像 paper anchors.centerIn 水平居中、竖向填满（宽 = 页像素宽，高 = 行高），
+    // 故图像左边缘 = 委托宽的一半减页宽一半。委托未实例化（翻页/布局瞬时）返回
+    // null（高亮暂隐，下个触发重算）。
+    function pdfScrollPageImagePos() {
+        // multiView 是本页组件内的 id（对外不可见，page.multiView 为 undefined）
+        const kids = multiView ? multiView.children : []
+        for (const k of kids) {
+            if (!k || k.contentY === undefined || typeof k.itemAtCell !== "function") continue
+            const holder = k.itemAtCell(0, page.pdfView.currentPage)
+            if (!holder) return null
+            const size = pdfDoc.pagePointSize(page.pdfView.currentPage)
+            const pw = size.width * page.pdfView.renderScale
+            return holder.mapToItem(multiView, (holder.width - pw) / 2, 0)
+        }
+        return null
+    }
+    // 统一高亮刷新：仅播放/暂停态（Tts.state != 0）且矩形有效时显示；按活动视图
+    // 把 points 矩形 ×renderScale 映射为视图像素——paged 在 Flickable 内容坐标
+    // （页图像位于内容原点），scroll 叠加在当前页图像上（pdfScrollPageImagePos）。
+    function updateSentenceHighlight() {
+        const r = page.currentSentenceRect()
+        const scale = page.pdfView.renderScale || 1
+        const active = Tts.state !== 0 && r !== null
+        if (page.pageMode === "paged") {
+            scrollHighlight.visible = false
+            pagedHighlight.visible = active
+            if (!active) return
+            pagedHighlight.x = r.x * scale
+            pagedHighlight.y = r.y * scale
+            pagedHighlight.width = r.width * scale
+            pagedHighlight.height = r.height * scale
+            return
+        }
+        pagedHighlight.visible = false
+        if (!active) { scrollHighlight.visible = false; return }
+        const pos = page.pdfScrollPageImagePos()
+        if (!pos) {
+            scrollHighlight.visible = false
+            highlightRetryTimer.restart()   // 委托未就绪：0ms 后重算（自愈）
+            return
+        }
+        scrollHighlight.visible = true
+        scrollHighlight.x = pos.x + r.x * scale
+        scrollHighlight.y = pos.y + r.y * scale
+        scrollHighlight.width = r.width * scale
+        scrollHighlight.height = r.height * scale
     }
 
     // 开始朗读：先验证文本可用（空文本绝不触碰 TTS），再装载句子并播放。
@@ -1149,16 +1279,32 @@ Page {
         onTriggered: page.ttsExhaustedHint = false
     }
 
+    // 任务4（本计划）：scroll 高亮重试——内部 TableView 的当前页委托在翻页/方向
+    // 切换/缩放后可能晚于同步触发创建（itemAtCell 返回 null），0ms 后重算直至
+    // 委托出现（高亮自愈），避免在 delegate 就绪前永久隐藏。
+    Timer {
+        id: highlightRetryTimer
+        interval: 16
+        repeat: false
+        onTriggered: page.updateSentenceHighlight()
+    }
+
     // 任务4：PDF 朗读会话专用 TTS 接线——只处理本页拥有的活动会话：
     //   · chapterCompleted：页级续读（找下一有文本页）或耗尽停止 + 提示；
     //   · state→0 且会话激活：启动 0ms 清理（外部 stop 时收回会话归属）。
     Connections {
         target: Tts
         function onStateChanged(state) {
+            page.updateSentenceHighlight()   // 任务4（本计划）：开始/停止/暂停都刷新高亮
             if (state === 0 && page.ttsSessionActive) {
                 page.ttsPendingStop = true
                 sessionCleanupTimer.restart()
             }
+        }
+        // 任务4（本计划）：句游标推进（setSentences/next/previous/setCurrentIndex）
+        // → 重算当前句高亮矩形（offset → PdfText.sentenceBounds → 像素）
+        function onSentenceChanged() {
+            page.updateSentenceHighlight()
         }
         function onChapterCompleted(ch) {
             if (!page.ttsSessionActive) return

@@ -19,6 +19,7 @@
 #include "core/SearchEngine.h"
 #include "core/SettingsStore.h"
 #include "sync/SyncController.h"
+#include "ui/PdfTextGeometry.h"
 #include "tts/TtsController.h"
 #include "ui/ReaderTextHelper.h"
 #include "ui/LanguageController.h"
@@ -201,6 +202,9 @@ int main(int argc, char *argv[]) {
     QTimer::singleShot(0, importer, [importer] { importer->backfillMissingIndexes(); });
     // 任务3：存量 PDF 书缺固定页数（page_count）——启动后异步逐本补页数
     QTimer::singleShot(0, importer, [importer] { importer->backfillPageCounts(); });
+    // 任务4：PDF 朗读逐句高亮 C++ 桥（QPdfDocument::getSelectionAtIndex → QRectF，
+    // QML 经 PdfText.sentenceBounds(pdfDoc, page, start, len) 取句矩形叠加高亮）
+    qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "PdfText", new PdfTextGeometry);
     // C7：TextEdit 行距助手（段落改 TextEdit 渲染后 lineHeight 属性不可用，见 ReaderTextHelper.h）
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "ReaderText", new ReaderTextHelper);
     // C5：TTS 控制器按 settings.json 的 tts/ 分区构建引擎（system/openai），

@@ -96,6 +96,15 @@ target_include_directories(tst_readertexthelper PRIVATE ../src ../src/parsers)
 target_link_libraries(tst_readertexthelper PRIVATE Qt6::Test Qt6::Quick Qt6::Gui)
 add_test(NAME tst_readertexthelper COMMAND tst_readertexthelper)
 
+# 任务4：PDF 朗读逐句高亮 C++ 桥（PdfTextGeometry）——字符区间 → 页坐标矩形。
+qt_add_executable(tst_pdfgeometry
+    tst_pdfgeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/PdfTextGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/PdfTextGeometry.h
+)
+target_link_libraries(tst_pdfgeometry PRIVATE Qt6::Test Qt6::Gui Qt6::Pdf Qt6::Qml)
+add_test(NAME tst_pdfgeometry COMMAND tst_pdfgeometry)
+target_include_directories(tst_pdfgeometry PRIVATE ../src ../src/ui)
 qt_add_executable(tst_textparser tst_textparser.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/SentenceSplitter.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/parsers/TextParser.cpp)
 target_include_directories(tst_textparser PRIVATE ../src ../src/parsers)
 target_link_libraries(tst_textparser PRIVATE Qt6::Test)
@@ -208,6 +217,9 @@ qt_add_executable(tst_qml
     # C7：TextEdit 行距助手（段落渲染用 TextEdit）
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/ReaderTextHelper.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/ReaderTextHelper.h
+    # 任务4：PDF 朗读逐句高亮 C++ 桥（PdfText 单例，QML 侧取句矩形）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/PdfTextGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/PdfTextGeometry.h
     # D6：语言控制器（Lang 单例，QML 冒烟驱动三语切换）
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/LanguageController.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/LanguageController.h

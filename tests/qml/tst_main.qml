@@ -997,6 +997,78 @@ Item {
             verify(page.readerAdapter.canGoNext === false, "单页时下一页应禁用")
             loader.destroy()
         }
+        // 任务4（本计划）：朗读逐句高亮——确定性两页文本 PDF（TestEnv.textPdfSource）：
+        // paged 模式句偏移（pdfSentenceOffsets）随整页文本就绪；启动朗读后高亮矩形
+        // visible 且几何有效，Tts.currentIndex 推进时几何随句变化（同句单行，x 变），
+        // 停止后隐藏；scroll 模式同样显示且位置落在当前页图像视口内（经内部
+        // TableView 委托定位，见 pdfScrollPageImagePos）。
+        function test_pdfSentenceHighlightTracksTts() {
+            Settings.setValue("reading/pageMode", "scroll")   // 复位，避免残留方向污染
+            Tts.stop()
+            Tts.reconfigure("openai", "https://api.openai.com/v1", "", "tts-1", "nova", 1.0)
+            var stack = Qt.createQmlObject(
+                "import QtQuick; import QtQuick.Controls; StackView { anchors.fill: parent; }", root)
+            verify(stack !== null, "测试 StackView 应能创建")
+            stack.push("qrc:/qt/qml/Readdict/ui/qml/PdfReaderPage.qml",
+                       { book: { id: 999161, title: "高亮PDF", path: TestEnv.textPdfSource } })
+            var page = stack.currentItem
+            verify(page !== null, "PdfReaderPage 应被 push 进 StackView")
+            var doc = page.pdfDocument
+            tryVerify(function () { return doc.status === PdfDocument.Ready }, 15000,
+                      "文本 PDF 应加载为 Ready，实际 " + doc.status)
+            // paged：句偏移随整页文本就绪（每页两句）
+            page.setPageMode("paged")
+            tryVerify(function () { return page.pdfViewKind === "single" }, 3000,
+                      "高亮验证应在 paged（single）模式，实际 " + page.pdfViewKind)
+            tryVerify(function () { return page.pdfSentenceOffsets.length === 2 }, 3000,
+                      "第 0 页应有 2 个句偏移，实际 " + page.pdfSentenceOffsets.length)
+            var off0 = page.pdfSentenceOffsets[0]
+            verify(off0.start === 0 && off0.length > 0,
+                   "首句偏移应从 0 开始，实际 " + JSON.stringify(off0))
+            // 启动朗读 → 高亮显示第一句且几何有效
+            page.readerShell.triggerMenuAction("read")
+            tryVerify(function () { return Tts.state === 1 }, 3000,
+                      "菜单朗读应启动 TTS，实际 state=" + Tts.state)
+            var hl = page.sentenceHighlightPaged
+            tryVerify(function () { return hl.visible === true }, 3000,
+                      "朗读中 paged 高亮应可见")
+            var x0 = hl.x, y0 = hl.y, w0 = hl.width
+            verify(y0 >= 0 && hl.height > 0, "paged 高亮 y/height 应有效：y=" + y0 + " h=" + hl.height)
+            verify(w0 > 0 && x0 >= 0, "paged 高亮 x/width 应有效：x=" + x0 + " w=" + w0)
+            // 推进到第二句（同文本行，x 变化）→ 高亮几何随句变化
+            Tts.next()
+            tryVerify(function () { return Tts.currentIndex === 1 }, 3000,
+                      "next 应推进到第 2 句，实际 " + Tts.currentIndex)
+            tryVerify(function () { return hl.visible === true && hl.x !== x0 }, 3000,
+                      "第二句高亮 x 应变化：x0=" + x0 + " x1=" + hl.x)
+            // 停止 → 隐藏
+            Tts.stop()
+            tryVerify(function () { return hl.visible === false }, 3000,
+                      "停止后 paged 高亮应隐藏")
+            // scroll：同样显示且位置落在当前页图像视口内
+            page.setPageMode("scroll")
+            tryVerify(function () { return page.pdfViewKind === "multi" }, 3000,
+                      "scroll 应使用 multi，实际 " + page.pdfViewKind)
+            page.readerShell.triggerMenuAction("read")
+            tryVerify(function () { return Tts.state === 1 }, 3000,
+                      "scroll 模式应可朗读，实际 state=" + Tts.state)
+            var shl = page.sentenceHighlightScroll
+            tryVerify(function () { return shl.visible === true }, 3000,
+                      "朗读中 scroll 高亮应可见")
+            verify(shl.width > 0 && shl.height > 0, "scroll 高亮几何应有效：w=" + shl.width + " h=" + shl.height)
+            // multiView 是本页内部 id（对外不可见），用页面尺寸作为视口上界
+            verify(shl.x >= 0 && shl.x < page.width,
+                   "scroll 高亮 x 应在视口内：x=" + shl.x + " view=" + page.width)
+            verify(shl.y >= 0 && shl.y < page.height,
+                   "scroll 高亮 y 应在视口内：y=" + shl.y + " view=" + page.height)
+            Tts.stop()
+            tryVerify(function () { return shl.visible === false }, 3000,
+                      "停止后 scroll 高亮应隐藏")
+            // 渲染稳定后销毁，避免 QtPdfQuick 拆除竞态崩溃
+            tryVerify(function () { return page.renderSettled() }, 15000,
+                      "渲染应稳定再销毁，实际 " + page.pdfView.status)
+            stack.destroy()
+        }
     }
     TestCase {
         name: "ReaderShellSmoke"
