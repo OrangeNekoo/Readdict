@@ -1058,6 +1058,23 @@ Item {
             Settings.setValue("typography/fontSize", 18)   // 复位
             h2.stack.destroy()
         }
+        // 任务1：打开/关闭 Sheet（顶栏使正文 topMargin 缩 40px、content.height 变化）
+        // 不得重算全书页数——签名与测量高度取 Sheet 关闭时的稳定视口高度，代次不变。
+        function test_sheetToggleDoesNotRemeasure() {
+            var h = openMulti()
+            var page = h.page
+            page.setProgressScope("book")
+            tryVerify(function () { return page.bookPageTotal > 0 }, 10000, "首测应完成")
+            var gen0 = page.measureGeneration
+            page.sheetOpen = true          // 模拟开菜单
+            wait(300)
+            compare(page.measureGeneration, gen0, "开 Sheet 不应重测（generation 不变）")
+            compare(page.bookPageTotal, page.bookPageTotal, "总数不变")
+            page.sheetOpen = false
+            wait(300)
+            compare(page.measureGeneration, gen0, "关 Sheet 不应重测")
+            h.stack.destroy()
+        }
     }
 
     // 任务1：文本书签管理——章节书签列表展示（章节标题）、点击跳转、删除后

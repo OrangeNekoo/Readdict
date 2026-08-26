@@ -188,7 +188,7 @@ Page {
             // 任务3：content 为本组件 id（词法解析）。旧实现写 page.content——
             // id 非父对象属性，测量视图恒为 0×0，正文永不布局、测量永不完成。
             width: content.width
-            height: content.height
+            height: content.height + (page.sheetOpen ? readerShell.topToolbar.height : 0)
             textColor: page.effectiveBg === "dark" ? UITheme.darkTextPrimary : UITheme.lightTextPrimary
             typography: page.typography
             pageMode: page.pageMode
@@ -199,26 +199,31 @@ Page {
     function pageCacheSignature() {
         if (!page.book || !page.book.id) return ""
         const t = page.typography || {}
-        const w = content.width, h = content.height
+        const w = content.width, h = content.height + (page.sheetOpen ? readerShell.topToolbar.height : 0)
         if (w <= 0 || h <= 0) return ""
         return [String(t.fontFamily), String(t.fontSize), String(t.lineHeight),
                 String(t.align), String(t.pageWidth), page.pageMode,
                 Math.round(w), Math.round(h)].join("\u0001")
     }
     // 命中缓存：pages 与章数等长、每项为正整数、total=求和 → 载入并返回 true。
+    // 任务1：缓存命中校验。注意 QML/C++ 桥把 saveBookPageCache 写入的嵌套 QVariantList
+    // 暴露为数组样对象（typeof=object、Array.isArray=false、可 length/索引访问），
+    // 故用 length+索引校验而非 Array.isArray，否则缓存永不命中、每次重测。
     function tryLoadBookPageCache(sig) {
         const cached = Books.loadBookPageCache(page.book.id, sig)
-        if (!cached || cached.total === undefined || !Array.isArray(cached.pages)) return false
+        if (!cached || cached.total === undefined) return false
+        const pages = cached.pages
+        if (!pages || typeof pages !== "object" || typeof pages.length !== "number") return false
         const count = Books.chapterCount(page.book.id)
-        if (cached.pages.length !== count) return false
+        if (pages.length !== count) return false
         let sum = 0
         for (let i = 0; i < count; ++i) {
-            const n = Number(cached.pages[i])
+            const n = Number(pages[i])
             if (!Number.isInteger(n) || n < 1) return false
             sum += n
         }
         if (sum !== Number(cached.total)) return false
-        page.measuredChapterPages = cached.pages
+        page.measuredChapterPages = pages
         page.bookPageTotal = sum
         page.updateBookPageNumber()
         return true
