@@ -1328,6 +1328,85 @@ Item {
             Highlights.removeHighlight(list[0].id)
             loader.destroy()
         }
+
+        // 任务5（第1轮审查）：纯文本段框选**部分句** → 必须按 selectionStart 落在
+        // 被选中句所在句（旧"精确匹配"必 miss 会退到段首句，把划线/笔记落错句）。
+        // 文档流 = 各句拼接（span 不占字符）：句0=0-5，句1=6-11，句2=12-17；
+        // select(7,10) 选中句 1 的局部"是第二"（selectionStart=7 → 句 1）。
+        function test_plainPartialSelectionUsesSelectionStart() {
+            var loader = richContentComp.createObject(root)
+            loader.width = 800; loader.height = 600
+            var c = loader.item
+            verify(c !== null, "ReaderContent 应能加载")
+            c.typography = { fontFamily: "Source Han Sans VF", fontSize: 18, lineHeight: 1.6,
+                             align: "left", pageWidth: "normal" }
+            c.bookId = 9011
+            var stale = Highlights.highlightsForBook(9011)
+            for (var i = 0; i < stale.length; i++)
+                Highlights.removeHighlight(stale[i].id)
+            // 纯文本段（无任何标记）：3 句
+            c.chapter = { title: "章", paragraphs: [
+                { text: "这是第一句。这是第二句。这是第三句。",
+                  html: "这是第一句。这是第二句。这是第三句。",
+                  level: 0, imagePath: "",
+                  sentences: ["这是第一句。", "这是第二句。", "这是第三句。"] }
+            ]}
+            tryVerify(function () { return c.paragraphRepeater.itemAt(0) !== null }, 3000,
+                      "纯文本段应渲染完成")
+            var txt = c.paragraphRepeater.itemAt(0).textItem
+            txt.select(7, 10)
+            verify(txt.selectedText === "是第二", "应选中句 1 的局部，实际 " + txt.selectedText)
+            tryVerify(function () { return c.selectionToolbar.visible }, 3000,
+                      "部分句选中工具条应出现")
+            verify(c.selSentenceIndex === 1,
+                   "部分句选中句索引应指向所在句（全局 1），实际 " + c.selSentenceIndex)
+            c.openNoteDialog()
+            verify(c.noteDialog.visible, "笔记 Dialog 应打开")
+            c.noteTextArea.text = "部分句笔记"
+            c.noteDialog.accept()
+            var list = Highlights.highlightsForBook(9011)
+            verify(list.length === 1, "笔记入口应先建划线，实际 " + JSON.stringify(list))
+            compare(list[0].sentenceIndex, 1,
+                    "落库句索引应指向被选中句所在句（全局 1）而非段首句，实际 "
+                    + list[0].sentenceIndex)
+            compare(list[0].note, "部分句笔记")
+            Highlights.removeHighlight(list[0].id)
+            loader.destroy()
+        }
+
+        // 任务5（第1轮审查）：富文本段框选**部分句**（selectedText 不完整包含任何
+        // 整句）→ 精确匹配未命中 → 隐藏工具条、不落库（不回退段首句）。
+        function test_richPartialSelectionHidesToolbar() {
+            var loader = richContentComp.createObject(root)
+            loader.width = 800; loader.height = 600
+            var c = loader.item
+            verify(c !== null, "ReaderContent 应能加载")
+            c.typography = { fontFamily: "Source Han Sans VF", fontSize: 18, lineHeight: 1.6,
+                             align: "left", pageWidth: "normal" }
+            c.bookId = 9012
+            var stale = Highlights.highlightsForBook(9012)
+            for (var i = 0; i < stale.length; i++)
+                Highlights.removeHighlight(stale[i].id)
+            c.chapter = { title: "章", paragraphs: [
+                { text: "好。行！妙。奇！",
+                  html: "<p><b>好。</b></p><p><b>行！</b></p><p><b>妙。</b></p><p><b>奇！</b></p>",
+                  level: 0, imagePath: "",
+                  sentences: ["好。", "行！", "妙。", "奇！"] }
+            ]}
+            tryVerify(function () { return c.paragraphRepeater.itemAt(0) !== null }, 3000,
+                      "富文本段应渲染完成")
+            var txt = c.paragraphRepeater.itemAt(0).textItem
+            // 选中「妙」局部（妙。=6-7，只选 6）
+            txt.select(6, 7)
+            verify(txt.selectedText === "妙", "应选中句 2 的局部，实际 " + txt.selectedText)
+            verify(!c.selectionToolbar.visible, "富文本部分句选中不应弹出工具条（不落错句）")
+            compare(c.selSentenceIndex, -1, "未命中时句索引应保持 -1")
+            c.openNoteDialog()
+            verify(!c.noteDialog.visible, "未命中时笔记 Dialog 不应打开")
+            compare(Highlights.highlightsForBook(9012).length, 0,
+                    "未命中时不应落库任何划线")
+            loader.destroy()
+        }
     }
 
 }

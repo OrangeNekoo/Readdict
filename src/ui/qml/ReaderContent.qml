@@ -1447,11 +1447,20 @@ Flickable {
                 return htmlSrc
             }
 
-            // 任务5：句索引定位改用 selectedText 精确匹配——富文本段文档流含块
-            // 分隔符（<p>/<br> 各占 1 字符，selectionStart 已含它们），旧"按句子
-            // 长度累加"与真实文档坐标错位，选中段内后句会把句索引算偏（划线/笔记
-            // 落错句、跳转错位）；按选中文本匹配段内各句返回句序号，未命中回退 -1
-            //（不落错句）
+            // 任务5（第1轮审查）：句索引定位——纯文本段与富文本段分开处理：
+            // · 纯文本段文档流 = 各句拼接（span 标记不占字符），selectionStart 与
+            //   "按句长累加"一致（含部分句选中），走长度累加最准；
+            // · 富文本段文档流含块分隔符（<p>/<br> 各占 1 字符），selectionStart 与
+            //   长度累加错位，走 selectedText 精确匹配；未命中（部分句选中）隐藏
+            //   工具条，不落错句（不回退段首句）。
+            function sentenceIndexAt(docPos) {
+                var acc = 0
+                for (var k = 0; k < para.sentenceCount; k++) {
+                    acc += para.sentences[k].length
+                    if (docPos < acc) return k
+                }
+                return para.sentenceCount - 1 // 段尾选择（含全选）钳制到末句
+            }
             function sentenceIndexByText(selText) {
                 if (!selText) return -1
                 var t = selText.trim()
@@ -1463,9 +1472,13 @@ Flickable {
             }
             function handleSelection() {
                 if (txt.selectedText.length > 0) {
-                    var k = para.sentenceIndexByText(txt.selectedText)
-                    flick.showSelectionToolbar(txt, k >= 0 ? para.sentenceStart + k : para.sentenceStart,
-                                               txt.selectedText)
+                    var k = para.hasMarkup(para.mixedHtml)
+                        ? para.sentenceIndexByText(txt.selectedText)
+                        : para.sentenceIndexAt(txt.selectionStart)
+                    if (k >= 0)
+                        flick.showSelectionToolbar(txt, para.sentenceStart + k, txt.selectedText)
+                    else
+                        flick.hideSelectionToolbar()
                 } else {
                     flick.hideSelectionToolbar()
                 }
