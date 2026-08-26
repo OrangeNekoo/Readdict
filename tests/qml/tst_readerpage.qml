@@ -918,6 +918,9 @@ Item {
         function test_incompleteMeasurementShowsSafeValues() {
             var h = openMulti()
             var page = h.page
+            // 清空本书页数缓存：保证 setFontSize(21) 必然 cache miss 走完整测量
+            //（fontSize 21 签名可能已被本套件前序用例写入，不清则命中缓存不重测）
+            Books.clearBookPageCache(h.book.id)
             // 签名隔离：fontSize 21 不在任何缓存签名中 → 必然 cache miss →
             // 走完整测量路径，避免命中前序用例写入的缓存
             page.setFontSize(21)
@@ -977,6 +980,9 @@ Item {
         function test_layoutChangeRestartsMeasurement() {
             var h = openMulti()
             var page = h.page
+            // 清空本书页数缓存：保证 setFontSize(21) 必然 cache miss 走完整测量
+            //（fontSize 21 签名可能已被本套件前序用例写入，不清则命中缓存不重测）
+            Books.clearBookPageCache(h.book.id)
             // 签名隔离：fontSize 21 不在任何缓存签名中 → 必然 cache miss →
             // 走完整测量路径，避免命中前序用例写入的缓存
             page.setFontSize(21)

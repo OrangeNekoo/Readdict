@@ -414,6 +414,14 @@ void BookManager::saveBookPageCache(qint64 bookId, const QString &signature,
     if (!q.exec()) qWarning() << "saveBookPageCache 失败:" << q.lastError().text();
 }
 
+void BookManager::clearBookPageCache(qint64 bookId) {
+    QSqlQuery q(m_db);
+    q.prepare("DELETE FROM book_page_cache WHERE book_id=?");
+    q.addBindValue(bookId);
+    if (!q.exec())
+        qWarning() << "clearBookPageCache 失败:" << q.lastError().text();
+}
+
 void BookManager::doSearch(const QString &query) {
     m_searchQuery = query;
     emit booksChanged();

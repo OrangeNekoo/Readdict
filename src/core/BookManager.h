@@ -61,6 +61,9 @@ public:
     Q_INVOKABLE QVariantMap loadBookPageCache(qint64 bookId, const QString &signature);
     Q_INVOKABLE void saveBookPageCache(qint64 bookId, const QString &signature,
                                        int total, const QVariantList &pages);
+    // 清空一书全部页数缓存（按 book_id 删行）：需保证"全新测量"的路径
+    //（如测试用例）主动失效缓存，避免命中前序写入的缓存行而不重测
+    Q_INVOKABLE void clearBookPageCache(qint64 bookId);
     // L6（P1#14）：总章数（chapterTitles/loadChapter 解析时刷新的缓存值；
     // 无缓存时按需 documentFor 计算）——chapterProgress 绑定不再每次重算 chapterTitles
     Q_INVOKABLE int chapterCount(qint64 bookId);
