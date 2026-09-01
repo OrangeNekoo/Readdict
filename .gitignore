@@ -88,3 +88,6 @@ CMakeLists.txt.user*
 /.omp
 /.superpowers
 /docs/superpowers
+
+# README 素材原图（处理后归档至 docs/screenshots）
+/images/
