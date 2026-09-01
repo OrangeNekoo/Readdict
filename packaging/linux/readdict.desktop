@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Readdict
+GenericName=E-book Reader
+Comment=A quiet open-source e-book reader
+Exec=Readdict
+Icon=readdict
+Categories=Office;Viewer;
+Keywords=ebook;reader;epub;mobi;pdf;
+Terminal=false
+StartupWMClass=Readdict
