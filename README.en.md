@@ -4,7 +4,6 @@
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Qt](https://img.shields.io/badge/Qt-6.11-41CD52.svg)](https://www.qt.io/)
-[![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#building-from-source)
 
 Readdict is a desktop e-book reader built with **Qt 6 / QML**, focused on a calm, paper-like reading experience without distractions. It supports EPUB, MOBI/AZW3, FB2, TXT and PDF, with built-in text-to-speech (TTS), highlighting, WebDAV sync and flexible typography.
 
@@ -102,7 +101,6 @@ Readdict stands on the shoulders of these great open-source projects — many th
 | [minizip](https://github.com/madler/zlib/tree/develop/contrib/minizip) (zlib contrib) | EPUB container unzip | Info-ZIP License |
 | [Source Han Sans / Serif](https://github.com/adobe-fonts) | Bundled variable fonts | SIL OFL 1.1 |
 | [Smiley Sans](https://github.com/atelier-anchor/smiley-sans) | Bundled font | SIL OFL 1.1 |
-| [Project Gutenberg](https://www.gutenberg.org/) | Public-domain demo book in the screenshots | Public domain |
 
 Thanks also to the Qt / QML community and the open-source reader projects that inspired this one.
 
@@ -115,5 +113,3 @@ This project is released under the [**GNU General Public License v3.0**](LICENSE
 - Third-party sources and fonts under [`third_party/`](third_party/) and [`fronts/`](fronts/) keep their original licenses (see the table above) and are provided alongside this repository.
 
 ---
-
-*Readdict — addicted to reading, not to notifications.* 📖

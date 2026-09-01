@@ -4,7 +4,6 @@
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Qt](https://img.shields.io/badge/Qt-6.11-41CD52.svg)](https://www.qt.io/)
-[![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#从源码构建)
 
 Readdict 是一款基于 **Qt 6 / QML** 构建的桌面电子书阅读器，专注于干净纸感界面上不打扰的阅读体验。支持 EPUB、MOBI/AZW3、FB2、TXT 与 PDF，内置朗读（TTS）、高亮划线、WebDAV 同步与灵活的排版定制。
 
@@ -102,7 +101,6 @@ Readdict 站在以下优秀开源项目的肩膀上，衷心感谢：
 | [minizip](https://github.com/madler/zlib/tree/develop/contrib/minizip)（zlib contrib） | EPUB 容器 zip 解包 | Info-ZIP License |
 | [思源黑体 / 思源宋体](https://github.com/adobe-fonts) | 内置可变字体 | SIL OFL 1.1 |
 | [得意黑 Smiley Sans](https://github.com/atelier-anchor/smiley-sans) | 内置字体 | SIL OFL 1.1 |
-| [Project Gutenberg](https://www.gutenberg.org/) | 截图中的公版演示书目 | 公版 |
 
 同时感谢 Qt / QML 社区与所有开源阅读器先行者提供的灵感。
 
@@ -115,5 +113,3 @@ Readdict 站在以下优秀开源项目的肩膀上，衷心感谢：
 - [`third_party/`](third_party/) 与 [`fronts/`](fronts/) 内的第三方源码及字体分别保留其原始许可证（见上表），随仓库一并提供。
 
 ---
-
-*Readdict — addicted to reading, not to notifications.* 📖
