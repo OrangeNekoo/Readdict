@@ -99,7 +99,7 @@ Readdict stands on the shoulders of these great open-source projects — many th
 | [Qt](https://www.qt.io/) | Application framework (UI / PDF / TTS / multimedia / network) | LGPLv3 / GPLv3 |
 | [libmobi](https://github.com/bfabiszewski/libmobi) | MOBI / AZW3 parsing | LGPL-3.0-or-later |
 | [zlib](https://github.com/madler/zlib) | Compression | zlib License |
-| minizip (zlib contrib) | EPUB container unzip | Info-ZIP License |
+| [minizip](https://github.com/madler/zlib/tree/develop/contrib/minizip) (zlib contrib) | EPUB container unzip | Info-ZIP License |
 | [Source Han Sans / Serif](https://github.com/adobe-fonts) | Bundled variable fonts | SIL OFL 1.1 |
 | [Smiley Sans](https://github.com/atelier-anchor/smiley-sans) | Bundled font | SIL OFL 1.1 |
 | [Project Gutenberg](https://www.gutenberg.org/) | Public-domain demo book in the screenshots | Public domain |

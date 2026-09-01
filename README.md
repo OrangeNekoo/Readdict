@@ -99,7 +99,7 @@ Readdict 站在以下优秀开源项目的肩膀上，衷心感谢：
 | [Qt](https://www.qt.io/) | 应用框架（UI / PDF / TTS / 多媒体 / 网络） | LGPLv3 / GPLv3 |
 | [libmobi](https://github.com/bfabiszewski/libmobi) | MOBI / AZW3 格式解析 | LGPL-3.0-or-later |
 | [zlib](https://github.com/madler/zlib) | 压缩基础库 | zlib License |
-| minizip（zlib contrib） | EPUB 容器 zip 解包 | Info-ZIP License |
+| [minizip](https://github.com/madler/zlib/tree/develop/contrib/minizip)（zlib contrib） | EPUB 容器 zip 解包 | Info-ZIP License |
 | [思源黑体 / 思源宋体](https://github.com/adobe-fonts) | 内置可变字体 | SIL OFL 1.1 |
 | [得意黑 Smiley Sans](https://github.com/atelier-anchor/smiley-sans) | 内置字体 | SIL OFL 1.1 |
 | [Project Gutenberg](https://www.gutenberg.org/) | 截图中的公版演示书目 | 公版 |
