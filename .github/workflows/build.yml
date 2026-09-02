@@ -30,10 +30,8 @@ jobs:
   # 官方 Updates.xml，下载 7z 分包解压部署，并按 Qt 版本做缓存。
   # 另：Qt 6.11 起 Qt PDF 不在主库元数据中，需从 extensions/qtpdf 扩展库安装。
   build-windows:
-    name: Windows x64 (zip)
+    name: Windows x64 (zip + installer)
     runs-on: windows-latest
-    env:
-      QT_ROOT: ${{ runner.temp }}\Qt\6.11.1\msvc2022_64
     steps:
       - uses: actions/checkout@v4
 
@@ -52,7 +50,7 @@ jobs:
           $ProgressPreference = 'SilentlyContinue'
           $sevenZip = "C:\Program Files\7-Zip\7z.exe"
           if (!(Test-Path $sevenZip)) { throw "未找到 7-Zip: $sevenZip" }
-          $root = "${{ runner.temp }}\Qt\6.11.1"
+          $root = "$env:RUNNER_TEMP\Qt\6.11.1"
           $dest = "$root\6.11.1\msvc2022_64"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
@@ -89,8 +87,9 @@ jobs:
       - name: Add Qt to PATH
         shell: pwsh
         run: |
-          "${{ env.QT_ROOT }}\bin" >> $env:GITHUB_PATH
-          "CMAKE_PREFIX_PATH=${{ env.QT_ROOT }}" >> $env:GITHUB_ENV
+          $qtRoot = "$env:RUNNER_TEMP\Qt\6.11.1\msvc2022_64"
+          "$qtRoot\bin" >> $env:GITHUB_PATH
+          "CMAKE_PREFIX_PATH=$qtRoot" >> $env:GITHUB_ENV
 
       - name: Configure (MSVC x64)
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -A x64
@@ -102,6 +101,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          # ref 名可能含 /（如 ci/github-actions），不能进文件名
+          $ver = "${{ github.ref_name }}" -replace '/','-'
           $exe = "build/Release/Readdict.exe"
           if (!(Test-Path $exe)) { throw "构建产物不存在: $exe" }
           windeployqt --release --qmldir src/ui/qml $exe
@@ -120,13 +121,25 @@ jobs:
             if (!(Test-Path $f)) { throw "字体缺失: $f" }
             Copy-Item $f "pkg/share/readdict/fonts/"
           }
-          Compress-Archive -Path "pkg/*" -DestinationPath "Readdict-${{ github.ref_name }}-windows-x64.zip" -Force
-          Remove-Item -Recurse -Force pkg
+          Compress-Archive -Path "pkg/*" -DestinationPath "Readdict-$ver-windows-x64.zip" -Force
+          "ARTIFACT_VERSION=$ver" >> $env:GITHUB_ENV
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) { throw "未找到 Inno Setup: $iscc" }
+          & $iscc "/DMyAppVersion=$env:ARTIFACT_VERSION" packaging/windows/setup.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup 打包失败" }
+          Move-Item "packaging/windows/installer/Readdict-*-windows-x64-setup.exe" .
 
       - uses: actions/upload-artifact@v4
         with:
           name: Readdict-windows-x64
-          path: Readdict-*-windows-x64.zip
+          path: |
+            Readdict-*-windows-x64.zip
+            Readdict-*-windows-x64-setup.exe
           if-no-files-found: error
 
   # ------------------------------------------------------------------ Linux
@@ -219,7 +232,7 @@ jobs:
           chmod +x linuxdeploy-x86_64.AppImage
           EXTRA_QT_PLUGINS="qtbase;qtdeclarative;qtquickcontrols2;qtsvg;qtmultimedia;qtpdf;qttts;qttexttospeech" \
           QML_SOURCES_PATHS="$GITHUB_WORKSPACE/src/ui/qml" \
-          OUTPUT="Readdict-${{ github.ref_name }}-linux-x86_64.AppImage" \
+          OUTPUT="Readdict-$(echo '${{ github.ref_name }}' | tr / -)-linux-x86_64.AppImage" \
           ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \
             -e AppDir/usr/bin/Readdict \
@@ -292,7 +305,7 @@ jobs:
           test -d build/Readdict.app
           # ditto 保留 Mach-O 签名与扩展属性，保证 ad-hoc 签名不被破坏
           ditto -c -k --sequesterRsrc --keepParent build/Readdict.app \
-            "Readdict-${{ github.ref_name }}-macos-arm64.zip"
+            "Readdict-$(echo '${{ github.ref_name }}' | tr / -)-macos-arm64.zip"
           ls -lh Readdict-*.zip
 
       - uses: actions/upload-artifact@v4
