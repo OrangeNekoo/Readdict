@@ -340,9 +340,11 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------- Release
+  # 仅在三个构建 job 全部成功后运行（needs 语义保证三端都绿才发版）：
+  #   - push v* 标签 → 创建正式 Release，产物带版本号
+  #   - push main    → 更新固定的 nightly 预发行版，产物每次覆盖
   release:
     name: Publish release
-    if: startsWith(github.ref, 'refs/tags/v')
     needs: [build-windows, build-linux, build-macos]
     runs-on: ubuntu-latest
     permissions:
@@ -354,8 +356,33 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - name: Attach to GitHub Release
+      - name: Rename nightly artifacts
+        if: startsWith(github.ref, 'refs/heads/main')
+        run: |
+          cd dist
+          for f in *-windows-x64.zip;        do mv "$f" "Readdict-nightly-windows-x64.zip"; done
+          for f in *-windows-x64-setup.exe;  do mv "$f" "Readdict-nightly-windows-x64-setup.exe"; done
+          for f in *-linux-x86_64.AppImage;  do mv "$f" "Readdict-nightly-linux-x86_64.AppImage"; done
+          for f in *-macos-arm64.dmg;        do mv "$f" "Readdict-nightly-macos-arm64.dmg"; done
+          ls -lh
+
+      - name: Attach to versioned Release (tags)
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
+
+      - name: Update nightly pre-release (main builds)
+        if: startsWith(github.ref, 'refs/heads/main')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: "Nightly Build（最新自动构建）"
+          prerelease: true
+          make_latest: false
+          body: |
+            main 分支三平台自动构建（${{ github.sha }}）。
+            下载后 Windows 安装程序与 macOS dmg 均为未签名版本，
+            首次打开可能需右键 →「打开」绕过系统提示。
+          files: dist/*
