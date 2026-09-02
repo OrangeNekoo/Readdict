@@ -273,7 +273,7 @@ jobs:
 
   # ------------------------------------------------------------------ macOS
   build-macos:
-    name: macOS ARM (app zip)
+    name: macOS ARM (dmg)
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -323,18 +323,20 @@ jobs:
           cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
           cmake --build build --target deploy_script
 
-      - name: Zip bundle
+      - name: Create DMG
         run: |
           test -d build/Readdict.app
-          # ditto 保留 Mach-O 签名与扩展属性，保证 ad-hoc 签名不被破坏
-          ditto -c -k --sequesterRsrc --keepParent build/Readdict.app \
-            "Readdict-$(echo '${{ github.ref_name }}' | tr / -)-macos-arm64.zip"
-          ls -lh Readdict-*.zip
+          # UDZO 压缩镜像；用户打开后拖拽 .app 安装
+          hdiutil create -volname "Readdict" \
+            -srcfolder build/Readdict.app \
+            -ov -format UDZO \
+            "Readdict-$(echo '${{ github.ref_name }}' | tr / -)-macos-arm64.dmg"
+          ls -lh Readdict-*.dmg
 
       - uses: actions/upload-artifact@v4
         with:
           name: Readdict-macos-arm64
-          path: Readdict-*-macos-arm64.zip
+          path: Readdict-*-macos-arm64.dmg
           if-no-files-found: error
 
   # ---------------------------------------------------------------- Release
