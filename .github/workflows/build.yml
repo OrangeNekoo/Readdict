@@ -33,7 +33,7 @@ jobs:
     name: Windows x64 (zip + installer)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Cache Qt
         id: cache-qt
@@ -143,7 +143,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup 打包失败" }
           Move-Item "packaging/windows/installer/Readdict-*-windows-x64-setup.exe" .
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: Readdict-windows-x64
           path: |
@@ -159,7 +159,7 @@ jobs:
       # AppImage 工具免 FUSE 自解压运行
       APPIMAGE_EXTRACT_AND_RUN: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install runtime dependencies
         run: |
@@ -265,7 +265,7 @@ jobs:
             --output appimage
           ls -lh Readdict-*.AppImage
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: Readdict-linux-x86_64
           path: Readdict-*-linux-x86_64.AppImage
@@ -276,7 +276,7 @@ jobs:
     name: macOS ARM (dmg)
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Qt ${{ env.QT_VERSION }}
         uses: jurplel/install-qt-action@v4
@@ -333,7 +333,7 @@ jobs:
             "Readdict-$(echo '${{ github.ref_name }}' | tr / -)-macos-arm64.dmg"
           ls -lh Readdict-*.dmg
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: Readdict-macos-arm64
           path: Readdict-*-macos-arm64.dmg
@@ -349,7 +349,7 @@ jobs:
       contents: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           merge-multiple: true
           path: dist
