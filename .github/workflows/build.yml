@@ -92,7 +92,14 @@ jobs:
           "CMAKE_PREFIX_PATH=$qtRoot" >> $env:GITHUB_ENV
 
       - name: Configure (MSVC x64)
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -A x64
+        shell: pwsh
+        run: |
+          $qtRoot = "$env:RUNNER_TEMP\Qt\6.11.1\msvc2022_64"
+          Write-Host "QtRoot=$qtRoot"
+          Write-Host "Qt6Config.cmake 存在: $(Test-Path "$qtRoot\lib\cmake\Qt6\Qt6Config.cmake")"
+          Get-ChildItem "$qtRoot\lib\cmake" -ErrorAction SilentlyContinue |
+            Select-Object -First 10 -ExpandProperty Name
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -A x64 "-DCMAKE_PREFIX_PATH=$qtRoot"
 
       - name: Build
         run: cmake --build build --config Release --target Readdict
@@ -169,7 +176,7 @@ jobs:
           host: linux
           target: desktop
           arch: linux_gcc_64
-          modules: qtmultimedia qtsvg qtspeech
+          modules: qtmultimedia qtspeech
           cache: true
 
       - name: Install Qt PDF extension
@@ -262,7 +269,7 @@ jobs:
           host: mac
           target: desktop
           arch: clang_64
-          modules: qtmultimedia qtsvg qtspeech
+          modules: qtmultimedia qtspeech
           cache: true
 
       - name: Install Qt PDF extension
