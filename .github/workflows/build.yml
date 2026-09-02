@@ -223,7 +223,7 @@ jobs:
           # 删除依赖外部客户端库的 Qt 插件（plugin-qt 会扫描整个插件目录；
           # 仅保留内置 SQLite；speech-dispatcher TTS 插件同理排除）
           rm -f "$QT_ROOT_DIR"/plugins/sqldrivers/libqsql{mimer,psql,mysql,oci,db2,ibase,odbc}.so
-          rm -f "$QT_ROOT_DIR"/plugins/texttospeech/libqttexttospeech_speechd.so
+          rm -f "$QT_ROOT_DIR"/plugins/texttospeech/libqtexttospeech_speechd.so
           mkdir -p AppDir/usr/bin \
                    AppDir/usr/share/readdict/fonts \
                    AppDir/usr/share/applications \
