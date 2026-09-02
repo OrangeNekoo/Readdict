@@ -50,8 +50,8 @@ jobs:
           $ProgressPreference = 'SilentlyContinue'
           $sevenZip = "C:\Program Files\7-Zip\7z.exe"
           if (!(Test-Path $sevenZip)) { throw "未找到 7-Zip: $sevenZip" }
-          $root = "$env:RUNNER_TEMP\Qt\6.11.1"
-          $dest = "$root\6.11.1\msvc2022_64"
+          # 分片 7z 内容无目录前缀，直接解压到 Qt 根（与下方 PATH 写入一致）
+          $dest = "$env:RUNNER_TEMP\Qt\6.11.1\msvc2022_64"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
           # 主库（base + 全部 addon，Qt 6.11 起 PDF/WebEngine 已移出主库）
@@ -79,8 +79,8 @@ jobs:
               }
             }
           }
-          # 关键产物存在性校验（core 库与 PDF 扩展）
-          foreach ($f in @("$dest\bin\Qt6Core.dll", "$dest\lib\cmake\Qt6Pdf")) {
+          # 关键产物存在性校验（core 库、CMake 配置与 PDF 扩展）
+          foreach ($f in @("$dest\bin\Qt6Core.dll", "$dest\lib\cmake\Qt6\Qt6Config.cmake", "$dest\lib\cmake\Qt6Pdf")) {
             if (!(Test-Path $f)) { throw "Qt 部署不完整，缺失: $f" }
           }
 
@@ -95,10 +95,6 @@ jobs:
         shell: pwsh
         run: |
           $qtRoot = "$env:RUNNER_TEMP\Qt\6.11.1\msvc2022_64"
-          Write-Host "QtRoot=$qtRoot"
-          Write-Host "Qt6Config.cmake 存在: $(Test-Path "$qtRoot\lib\cmake\Qt6\Qt6Config.cmake")"
-          Get-ChildItem "$qtRoot\lib\cmake" -ErrorAction SilentlyContinue |
-            Select-Object -First 10 -ExpandProperty Name
           cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -A x64 "-DCMAKE_PREFIX_PATH=$qtRoot"
 
       - name: Build
@@ -235,8 +231,11 @@ jobs:
       - name: Build AppImage (linuxdeploy + qt plugin)
         run: |
           set -euo pipefail
+          # linuxdeploy 与 qt 插件是两个独立 AppImage，插件须在 PATH 中可见
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          chmod +x linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
+          export PATH="$PWD:$PATH"
           EXTRA_QT_PLUGINS="qtbase;qtdeclarative;qtquickcontrols2;qtsvg;qtmultimedia;qtpdf;qttts;qttexttospeech" \
           QML_SOURCES_PATHS="$GITHUB_WORKSPACE/src/ui/qml" \
           OUTPUT="Readdict-$(echo '${{ github.ref_name }}' | tr / -)-linux-x86_64.AppImage" \
