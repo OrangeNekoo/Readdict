@@ -24,21 +24,73 @@ env:
 
 jobs:
   # ---------------------------------------------------------------- Windows
+  # 注：aqtinstall（含最新 3.3.0）尚未支持 Qt 6.11 Windows 的新版元数据结构
+  # （Updates.xml 移入 qt6_6111_msvc2022_64 分架构子目录），install-qt-action
+  # 在 Windows 上会报 "Failed to locate XML data"。故此处绕过 aqt：直接解析
+  # 官方 Updates.xml，下载 7z 分包解压部署，并按 Qt 版本做缓存。
+  # 另：Qt 6.11 起 Qt PDF 不在主库元数据中，需从 extensions/qtpdf 扩展库安装。
   build-windows:
     name: Windows x64 (zip)
     runs-on: windows-latest
+    env:
+      QT_ROOT: ${{ runner.temp }}\Qt\6.11.1\msvc2022_64
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Qt ${{ env.QT_VERSION }}
-        uses: jurplel/install-qt-action@v4
+      - name: Cache Qt
+        id: cache-qt
+        uses: actions/cache@v4
         with:
-          version: ${{ env.QT_VERSION }}
-          host: windows
-          target: desktop
-          arch: win64_msvc2022_64
-          modules: qtpdf
-          cache: true
+          path: ${{ runner.temp }}\Qt\6.11.1
+          key: qt-${{ env.QT_VERSION }}-windows-msvc2022_64
+
+      - name: Install Qt (manual 7z deployment, main + qtpdf extension)
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+          if (!(Test-Path $sevenZip)) { throw "未找到 7-Zip: $sevenZip" }
+          $root = "${{ runner.temp }}\Qt\6.11.1"
+          $dest = "$root\6.11.1\msvc2022_64"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+
+          # 主库（base + 全部 addon，Qt 6.11 起 PDF/WebEngine 已移出主库）
+          $repos = @(
+            "https://download.qt.io/online/qtsdkrepository/windows_x86/desktop/qt6_6111/qt6_6111_msvc2022_64",
+            "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtpdf/6111/msvc2022_64"
+          )
+          foreach ($meta in $repos) {
+            [xml]$xml = (Invoke-WebRequest "$meta/Updates.xml" -UseBasicParsing).Content
+            $pkgs = $xml.Updates.PackageUpdate | Where-Object {
+              $_.Name -and $_.DownloadableArchives -and
+              $_.Name -notmatch 'debug_information|_examples|_doc|_src|qtwebengine'
+            }
+            if (!$pkgs) { throw "Updates.xml 未解析到任何包: $meta" }
+            Write-Host "[$meta] 待安装包数: $($pkgs.Count)"
+            foreach ($p in $pkgs) {
+              foreach ($archive in ($p.DownloadableArchives -split ',\s*|\s+')) {
+                if (!$archive -or $archive -match '^qtdoc-') { continue }  # 跳过文档分片
+                $url = "$meta/$($p.Name)/$($p.Version)$archive"
+                $tmp = Join-Path $env:RUNNER_TEMP $archive
+                Invoke-WebRequest $url -OutFile $tmp -UseBasicParsing
+                & $sevenZip x $tmp -o"$dest" -y -bso0 -bsp0
+                if ($LASTEXITCODE -ne 0) { throw "解压失败: $archive" }
+                Remove-Item $tmp
+              }
+            }
+          }
+          # 关键产物存在性校验（core 库与 PDF 扩展）
+          foreach ($f in @("$dest\bin\Qt6Core.dll", "$dest\lib\cmake\Qt6Pdf")) {
+            if (!(Test-Path $f)) { throw "Qt 部署不完整，缺失: $f" }
+          }
+
+      - name: Add Qt to PATH
+        shell: pwsh
+        run: |
+          "${{ env.QT_ROOT }}\bin" >> $env:GITHUB_PATH
+          "CMAKE_PREFIX_PATH=${{ env.QT_ROOT }}" >> $env:GITHUB_ENV
 
       - name: Configure (MSVC x64)
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -A x64
@@ -104,8 +156,38 @@ jobs:
           host: linux
           target: desktop
           arch: linux_gcc_64
-          modules: qtpdf
+          modules: qtmultimedia qtsvg qtspeech
           cache: true
+
+      - name: Install Qt PDF extension
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet py7zr
+          python3 - <<'PY'
+          import os, tempfile, urllib.request
+          import xml.etree.ElementTree as ET
+          import py7zr
+          meta = "https://download.qt.io/online/qtsdkrepository/linux_x64/extensions/qtpdf/6111/x86_64"
+          pkg = "extensions.qtpdf.6111.linux_gcc_64"
+          root = os.environ["QT_ROOT_DIR"]
+          xml = ET.fromstring(urllib.request.urlopen(f"{meta}/Updates.xml").read())
+          n = 0
+          for p in xml.findall(".//PackageUpdate"):
+              archives = (p.findtext("DownloadableArchives") or "").replace(",", " ").split()
+              if not archives:
+                  continue
+              ver = p.findtext("Version")
+              for a in archives:
+                  url = f"{meta}/{pkg}/{ver}{a}"
+                  tmp = tempfile.NamedTemporaryFile(suffix=".7z", delete=False).name
+                  urllib.request.urlretrieve(url, tmp)
+                  with py7zr.SevenZipFile(tmp) as z:
+                      z.extractall(root)
+                  os.unlink(tmp)
+                  n += 1
+          print(f"qtpdf 扩展分片安装数: {n}")
+          assert os.path.isdir(os.path.join(root, "lib", "cmake", "Qt6Pdf")), "Qt6Pdf 部署失败"
+          PY
 
       - name: Configure & build
         run: |
@@ -167,8 +249,38 @@ jobs:
           host: mac
           target: desktop
           arch: clang_64
-          modules: qtpdf
+          modules: qtmultimedia qtsvg qtspeech
           cache: true
+
+      - name: Install Qt PDF extension
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet py7zr
+          python3 - <<'PY'
+          import os, tempfile, urllib.request
+          import xml.etree.ElementTree as ET
+          import py7zr
+          meta = "https://download.qt.io/online/qtsdkrepository/mac_x64/extensions/qtpdf/6111/clang_64"
+          pkg = "extensions.qtpdf.6111.clang_64"
+          root = os.environ["QT_ROOT_DIR"]
+          xml = ET.fromstring(urllib.request.urlopen(f"{meta}/Updates.xml").read())
+          n = 0
+          for p in xml.findall(".//PackageUpdate"):
+              archives = (p.findtext("DownloadableArchives") or "").replace(",", " ").split()
+              if not archives:
+                  continue
+              ver = p.findtext("Version")
+              for a in archives:
+                  url = f"{meta}/{pkg}/{ver}{a}"
+                  tmp = tempfile.NamedTemporaryFile(suffix=".7z", delete=False).name
+                  urllib.request.urlretrieve(url, tmp)
+                  with py7zr.SevenZipFile(tmp) as z:
+                      z.extractall(root)
+                  os.unlink(tmp)
+                  n += 1
+          print(f"qtpdf 扩展分片安装数: {n}")
+          assert os.path.isdir(os.path.join(root, "lib", "cmake", "Qt6Pdf")), "Qt6Pdf 部署失败"
+          PY
 
       - name: Build self-contained .app (deploy_script)
         run: |
