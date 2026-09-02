@@ -133,6 +133,11 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           if (!(Test-Path $iscc)) { throw "未找到 Inno Setup: $iscc" }
+          # runner 的 Inno Setup 不含简中语言文件，取自 issrc 官方 Unofficial 目录
+          $isl = "packaging/windows/ChineseSimplified.isl"
+          Invoke-WebRequest `
+            "https://github.com/jrsoftware/issrc/raw/main/Files/Languages/Unofficial/ChineseSimplified.isl" `
+            -OutFile $isl -UseBasicParsing
           & $iscc "/DMyAppVersion=$env:ARTIFACT_VERSION" packaging/windows/setup.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup 打包失败" }
           Move-Item "packaging/windows/installer/Readdict-*-windows-x64-setup.exe" .
@@ -236,8 +241,18 @@ jobs:
           wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
           chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
           export PATH="$PWD:$PATH"
+
+          # Readdict.Backend / Readdict.UI 由 C++ 端注册，源码目录无对应 qmldir，
+          # qmlimportscanner 会报 Missing module——用空模块声明喂饱扫描器
+          mkdir -p /tmp/qml-dummy/Readdict/Backend /tmp/qml-dummy/Readdict/UI
+          printf 'module Readdict.Backend\n' > /tmp/qml-dummy/Readdict/Backend/qmldir
+          printf 'module Readdict.UI\n'       > /tmp/qml-dummy/Readdict/UI/qmldir
+
+          # 排除依赖外部客户端库的 SQL 驱动（仅保留内置 SQLite）与
+          # speech-dispatcher TTS 插件（运行时目标系统未装该库）
+          export EXCLUDE_PLUGINS="qsqlmimer,qsqlpsql,qsqlmysql,qsqloci,qsqldb2,qsqlibase,qsqltds,qtexttospeech_speechd"
           EXTRA_QT_PLUGINS="qtbase;qtdeclarative;qtquickcontrols2;qtsvg;qtmultimedia;qtpdf;qttts;qttexttospeech" \
-          QML_SOURCES_PATHS="$GITHUB_WORKSPACE/src/ui/qml" \
+          QML_SOURCES_PATHS="/tmp/qml-dummy:$GITHUB_WORKSPACE/src/ui/qml" \
           OUTPUT="Readdict-$(echo '${{ github.ref_name }}' | tr / -)-linux-x86_64.AppImage" \
           ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \
