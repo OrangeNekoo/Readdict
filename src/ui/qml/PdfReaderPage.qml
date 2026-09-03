@@ -151,7 +151,7 @@ Page {
 
     PdfDocument {
         id: pdfDoc
-        source: book.path ? "file://" + book.path : ""
+        source: book.path ? FileUrl.fromPath(book.path) : ""
         // 文档就绪后：先按可用阅读区宽度适配（否则默认 renderScale=1 窄页右侧留白），
         // 再跳转到保存页（progress/pdf_<bookId>），放开进度写入并提取首页文本；
         // 重试/重载（restoreDone 已 true）只刷新文本不重复恢复。
@@ -858,7 +858,7 @@ Page {
     // 改用非空但不存在的占位 file URL：合法 URL → QPdfDocument::load 打开失败 →
     // 静默置 Error（QFile::open 失败路径无控制台警告），随后恢复真实 source 完成重载。
     function retryLoad() {
-        const src = page.book.path ? "file://" + page.book.path : ""
+        const src = page.book.path ? FileUrl.fromPath(page.book.path) : ""
         if (src.length === 0) return
         pdfDoc.source = "file:///__readdict_reload__"
         pdfDoc.source = src

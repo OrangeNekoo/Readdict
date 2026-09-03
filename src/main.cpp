@@ -23,6 +23,7 @@
 #include "ui/PdfTextGeometry.h"
 #include "tts/TtsController.h"
 #include "ui/ReaderTextHelper.h"
+#include "ui/FileUrl.h"
 #include "ui/LanguageController.h"
 
 // D7：加载 fronts/ 下的可变字体（思源黑体 VF / 思源宋体 VF / 得意黑）。
@@ -211,6 +212,8 @@ int main(int argc, char *argv[]) {
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "PdfText", new PdfTextGeometry);
     // C7：TextEdit 行距助手（段落改 TextEdit 渲染后 lineHeight 属性不可用，见 ReaderTextHelper.h）
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "ReaderText", new ReaderTextHelper);
+    // 本地路径 → file URL 统一入口（"file://"+path 手拼在 Windows 盘符路径下坏 URL）
+    qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "FileUrl", new FileUrl);
     // C5：TTS 控制器按 settings.json 的 tts/ 分区构建引擎（system/openai），
     // reconfigure 由设置页在保存后再次调用以热切换引擎。
     // P1#15：旧 tts/voice 单键 → 按当前引擎拆分

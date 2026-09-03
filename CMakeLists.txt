@@ -61,6 +61,9 @@ qt_add_executable(Readdict
     src/tts/TTSEngine.h
     src/ui/ReaderTextHelper.cpp
     src/ui/ReaderTextHelper.h
+    # Windows 本地路径 → file:// URL 统一转换（QML 侧禁手工拼接）
+    src/ui/FileUrl.cpp
+    src/ui/FileUrl.h
     src/ui/LanguageController.cpp
     src/ui/LanguageController.h
     # 任务4：PDF 朗读逐句高亮 C++ 桥（QPdfDocument::getSelectionAtIndex → QRectF）

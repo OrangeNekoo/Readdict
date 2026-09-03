@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Effects
+import Readdict.Backend
 import Readdict.UI 1.0
 
 // 阅读背景层：浅色（Kindle 暖白 Token）/ 深色（Kindle 深色系）/ 米白纸色 / 自定义图片。
@@ -28,9 +29,9 @@ Item {
         id: img
         anchors.fill: parent
         visible: mode === "image"
-        // imagePath 是本地绝对路径；为空串时 source 置空（"file://"+"" 会被当作根目录打开报错）；
-        // 防御重复 file:// 前缀。图片被删除时加载失败：MultiEffect 输出透明，底色 Rectangle 兜底
-        source: bg.imagePath ? (bg.imagePath.indexOf("file://") === 0 ? bg.imagePath : "file://" + bg.imagePath) : ""
+        // imagePath 是本地绝对路径；为空串时 source 置空。FileUrl 统一转 file URL
+        // （已是 file:/ 等scheme 的原样保留）。图片被删除时加载失败：MultiEffect 输出透明，底色 Rectangle 兜底
+        source: bg.imagePath ? FileUrl.fromPath(bg.imagePath) : ""
         fillMode: Image.PreserveAspectCrop
         smooth: true
     }

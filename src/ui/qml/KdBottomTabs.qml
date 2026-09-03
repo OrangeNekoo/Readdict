@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import Readdict.Backend
 import Readdict.UI 1.0
 
 // Kindle 底部导航：2 等宽文字标签（选中加粗 + 3px 下划线）+ 中间悬浮迷你封面
@@ -62,7 +63,8 @@ Rectangle {
                     const cover = tabs.currentBook ? String(tabs.currentBook.cover || "") : ""
                     if (!cover) return ""
                     // 书库封面是绝对本地路径；已有 URL（file:/、qrc:/、http(s):）原样保留。
-                    return /^[A-Za-z][A-Za-z0-9+.-]*:/.test(cover) ? cover : "file://" + cover
+                    // Windows 盘符 "F:/..." 同形于 scheme 正则，由 FileUrl 区分处理。
+                    return FileUrl.fromPath(cover)
                 }
                 fillMode: Image.PreserveAspectCrop
                 // U1 修正：Image 无 border 属性（报错致组件加载失败）；描边改由

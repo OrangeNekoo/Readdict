@@ -1292,10 +1292,12 @@ Flickable {
             readonly property bool pureImage: !!para.paraData.imagePath
                 && (para.paraData.html ?? "").replace(/<img[^>]*>/gi, "").trim().length === 0
             // 解析器输出的行内图 src 为无 scheme 的本地绝对路径；QQuickText 会按文档 URL
-            // （qrc 模块地址）解析导致加载失败，统一补 file:// 前缀（已有 scheme 的保持原样）
+            // （qrc 模块地址）解析导致加载失败，统一经 FileUrl 转 file URL（已有 scheme
+            // 的保持原样；Windows 盘符路径 "F:/..." 不会被误判为 URL）。
+            // Qt 富文本 img src 支持 %20 式百分号转义（QUrl 解析），空格等特殊字符安全。
             readonly property string mixedHtml: para.pureImage ? "" : (para.paraData.html ?? "")
                 .replace(/src="([^"]*)"/g, function (m, p) {
-                    return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(p) ? m : 'src="file://' + p + '"'
+                    return 'src="' + FileUrl.fromPath(p) + '"'
                 })
             // C5 逐句高亮：本段句子与全局起始索引
             readonly property var sentences: para.paraData.sentences ?? []
@@ -1362,7 +1364,7 @@ Flickable {
                 // 按源图宽高比换算高度（implicit 尺寸即源尺寸）
                 height: imgPara.implicitWidth > 0 ? parent.width * imgPara.implicitHeight / imgPara.implicitWidth : 0
                 fillMode: Image.PreserveAspectFit
-                source: para.paraData.imagePath ? "file://" + para.paraData.imagePath : ""
+                source: para.paraData.imagePath ? FileUrl.fromPath(para.paraData.imagePath) : ""
             }
 
             // 段内是否含真实行内标记（b/i/em/strong/hN/img/br——解析器实际输出集）：

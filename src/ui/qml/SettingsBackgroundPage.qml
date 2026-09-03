@@ -171,11 +171,8 @@ Page {
                     id: bgThumbImg
                     anchors.fill: parent
                     visible: bgGrid.currentValue === "image"
-                    // 与 ReaderBackground 同源构造：本地绝对路径补 file://，防御重复前缀
-                    source: page.bgImagePath
-                            ? (page.bgImagePath.indexOf("file://") === 0
-                               ? page.bgImagePath : "file://" + page.bgImagePath)
-                            : ""
+                    // 与 ReaderBackground 同源构造：FileUrl 统一转 file URL（已是 scheme 的保留）
+                    source: page.bgImagePath ? FileUrl.fromPath(page.bgImagePath) : ""
                     fillMode: Image.PreserveAspectCrop
                     smooth: true
                 }
