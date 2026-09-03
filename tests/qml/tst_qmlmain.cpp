@@ -33,6 +33,7 @@
 #include "tts/TtsController.h"
 #include "ui/PdfTextGeometry.h"
 #include "ui/ReaderTextHelper.h"
+#include "ui/FileUrl.h"
 #include "ui/LanguageController.h"
 
 // B2：合成带真实封面的最小 EPUB（OPF <meta name="cover"> 指向纯红图 850x1214，
@@ -344,6 +345,7 @@ int main(int argc, char *argv[]) {
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "PdfText", new PdfTextGeometry);
     // C7：TextEdit 行距助手（同生产 main.cpp）
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "ReaderText", new ReaderTextHelper);
+    qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "FileUrl", new FileUrl);
     // D6：语言控制器（同生产 main.cpp；初始 zh_CN，测试资源已编入三份 .qm）
     qmlRegisterSingletonInstance("Readdict.Backend", 1, 0, "Lang", new LanguageController("zh_CN"));
     // U1：Kindle 设计 Token 单例（QML 文件单例）——同生产 main.cpp 注册，测试进程

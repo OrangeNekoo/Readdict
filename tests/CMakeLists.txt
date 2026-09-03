@@ -57,6 +57,12 @@ target_include_directories(tst_search PRIVATE ../src)
 target_link_libraries(tst_search PRIVATE Qt6::Test Qt6::Sql)
 add_test(NAME tst_search COMMAND tst_search)
 
+# Windows 本地路径 → file URL 转换（QML 手拼 file://+path 回归）
+qt_add_executable(tst_fileurl tst_fileurl.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/FileUrl.cpp)
+target_include_directories(tst_fileurl PRIVATE ../src)
+target_link_libraries(tst_fileurl PRIVATE Qt6::Test)
+add_test(NAME tst_fileurl COMMAND tst_fileurl)
+
 qt_add_executable(tst_bookimporter
     tst_bookimporter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/DatabaseManager.cpp
@@ -220,6 +226,9 @@ qt_add_executable(tst_qml
     # 任务4：PDF 朗读逐句高亮 C++ 桥（PdfText 单例，QML 侧取句矩形）
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/PdfTextGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/PdfTextGeometry.h
+    # 本地路径 → file URL 转换（FileUrl 单例，QML 封面/图片加载用）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/FileUrl.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/FileUrl.h
     # D6：语言控制器（Lang 单例，QML 冒烟驱动三语切换）
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/LanguageController.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/ui/LanguageController.h

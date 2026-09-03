@@ -95,7 +95,7 @@ Item {
             Image {
                 id: coverImage
                 anchors.fill: parent
-                source: card.book.cover ? "file://" + card.book.cover : ""
+                source: card.book.cover ? FileUrl.fromPath(card.book.cover) : ""
                 fillMode: Image.PreserveAspectCrop
                 visible: !card.showPlaceholder
             }
