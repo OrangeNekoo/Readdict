@@ -214,31 +214,57 @@ if(NOT _deploy_result EQUAL 0)
 endif()
 include(\"${Qt6_DIR}/../Qt6Qml/Qt6QmlDeploySupport.cmake\")
 qt6_deploy_qml_imports(TARGET Readdict)
-# 补拷缺失的 @rpath framework（QML 插件私有依赖）
-file(GLOB_RECURSE _binaries
-     \"Readdict.app/Contents/PlugIns/*.dylib\"
-     \"Readdict.app/Contents/Resources/qml/*.dylib\"
-     \"Readdict.app/Contents/MacOS/Readdict\"
-     \"Readdict.app/Contents/Frameworks/*/*\")
-set(_missing \"\")
-foreach(_bin IN LISTS _binaries)
-    execute_process(COMMAND /usr/bin/otool -L \"\${_bin}\"
-                    OUTPUT_VARIABLE _otool_out ERROR_QUIET)
-    string(REGEX MATCHALL \"@rpath/[A-Za-z0-9_.]+\\.framework\" _refs \"\${_otool_out}\")
-    foreach(_ref IN LISTS _refs)
-        get_filename_component(_name \"\${_ref}\" NAME)
-        if(NOT EXISTS \"Readdict.app/Contents/Frameworks/\${_name}\")
-            list(APPEND _missing \"\${_name}\")
-        endif()
+# 补拷缺失的 @rpath framework（QML 插件私有依赖）。迭代执行：新补拷进来的
+# framework 自身可能还引用别的缺失 framework（如 QtQuickDialogs2 →
+# QtQuickDialogs2Utils），单遍扫描会漏，直到一轮扫描无缺失为止。
+set(_round 0)
+while(TRUE)
+    math(EXPR _round \"\${_round} + 1\")
+    if(\${_round} GREATER 10)
+        message(FATAL_ERROR \"补拷 framework 迭代超限，疑似循环依赖\")
+    endif()
+    file(GLOB_RECURSE _binaries
+         \"Readdict.app/Contents/PlugIns/*.dylib\"
+         \"Readdict.app/Contents/Resources/qml/*.dylib\"
+         \"Readdict.app/Contents/MacOS/Readdict\"
+         \"Readdict.app/Contents/Frameworks/*/*\")
+    set(_missing \"\")
+    foreach(_bin IN LISTS _binaries)
+        execute_process(COMMAND /usr/bin/otool -L \"\${_bin}\"
+                        OUTPUT_VARIABLE _otool_out ERROR_QUIET)
+        string(REGEX MATCHALL \"@rpath/[A-Za-z0-9_.]+\\.framework\" _refs \"\${_otool_out}\")
+        foreach(_ref IN LISTS _refs)
+            get_filename_component(_name \"\${_ref}\" NAME)
+            if(NOT EXISTS \"Readdict.app/Contents/Frameworks/\${_name}\")
+                list(APPEND _missing \"\${_name}\")
+            endif()
+        endforeach()
     endforeach()
-endforeach()
-if(_missing)
+    if(NOT _missing)
+        message(STATUS \"补拷 framework 完成，共 \${_round} 轮\")
+        break()
+    endif()
     list(REMOVE_DUPLICATES _missing)
     foreach(_fw IN LISTS _missing)
-        message(STATUS \"补拷缺失 framework: \${_fw}\")
+        message(STATUS \"补拷缺失 framework(第\${_round}轮): \${_fw}\")
         file(COPY \"${_readdict_qt_lib}/\${_fw}\" DESTINATION \"Readdict.app/Contents/Frameworks/\")
     endforeach()
+endwhile()
+# 重新签名：macdeployqt 之后 qt6_deploy_qml_imports 与补拷又向包内添加了文件，
+# 原密封（seal）已破坏——quarantine 下签名无效会被 Gatekeeper 静默拒绝启动。
+# 所有文件就位后统一 ad-hoc 重签（未公证分发；正式分发需 Developer ID + 公证）。
+execute_process(COMMAND /usr/bin/codesign --force --deep --sign -
+                \"Readdict.app\"
+                RESULT_VARIABLE _sign_result OUTPUT_QUIET ERROR_QUIET)
+if(NOT _sign_result EQUAL 0)
+    message(FATAL_ERROR \"ad-hoc 重签失败: \${_sign_result}\")
 endif()
+execute_process(COMMAND /usr/bin/codesign --verify --deep --strict \"Readdict.app\"
+                RESULT_VARIABLE _verify_result OUTPUT_QUIET ERROR_QUIET)
+if(NOT _verify_result EQUAL 0)
+    message(FATAL_ERROR \"重签后校验未通过: \${_verify_result}\")
+endif()
+message(STATUS \"ad-hoc 重签完成并通过校验\")
 ")
     add_custom_target(deploy_script
         COMMAND ${CMAKE_COMMAND} -P "${CMAKE_CURRENT_BINARY_DIR}/deploy_full.cmake"
