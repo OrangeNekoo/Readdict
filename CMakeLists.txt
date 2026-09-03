@@ -169,6 +169,7 @@ if(APPLE)
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
         MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
         MACOSX_BUNDLE_COPYRIGHT "Readdict"
+        MACOSX_BUNDLE_ICON_FILE "Readdict.icns"
     )
     add_custom_command(TARGET Readdict POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory
@@ -177,6 +178,13 @@ if(APPLE)
             ${READDICT_FONT_FILES}
             "$<TARGET_BUNDLE_CONTENT_DIR:Readdict>/Resources/fonts/"
         COMMENT "拷贝字体到 bundle Resources/fonts"
+    )
+    # 应用图标：icns 拷入 Resources，与 MACOSX_BUNDLE_ICON_FILE（CFBundleIconFile）配套
+    add_custom_command(TARGET Readdict POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/packaging/macos/Readdict.icns"
+            "$<TARGET_BUNDLE_CONTENT_DIR:Readdict>/Resources/Readdict.icns"
+        COMMENT "拷贝应用图标到 bundle Resources"
     )
     # 部署脚本：cmake --build build --target deploy_script 即生成自包含 .app。
     # 三步部署：
