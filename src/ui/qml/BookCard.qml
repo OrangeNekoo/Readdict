@@ -10,7 +10,6 @@ Item {
     property bool compact: false
     // 测试/外部句柄（QML 冒烟经此驱动删除对话框交互，对齐 ShelfPage/SettingsPage 模式）
     property alias deleteDialog: deleteDialog
-    property alias deleteFilesCheck: deleteFilesCheck
     property alias deleteWarning: deleteWarning
     // B2：封面兜底测试句柄——封面图/占位块/首字文本供冒烟断言互斥显示
     property alias coverImage: coverImage
@@ -311,7 +310,7 @@ Item {
         }
     }
 
-    // B1：删除确认对话框——破坏性操作必须有确认；默认不勾选删文件（防误触）
+    // B1：删除确认对话框——破坏性操作必须有确认；删除即清除书籍数据与书库文件
     Dialog {
         id: deleteDialog
         title: qsTr("删除书籍") + (card.book.title ? " — " + card.book.title : "")
@@ -322,17 +321,11 @@ Item {
             spacing: 12
             Label {
                 id: deleteWarning
-                text: qsTr("删除后无法恢复，确定要删除这本书吗？")
+                text: qsTr("将删除该书及其书库文件，删除后无法恢复，确定要删除吗？")
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
-            CheckBox {
-                id: deleteFilesCheck
-                text: qsTr("同时删除书库中的文件")
-            }
         }
-        // 每次打开复位为不删文件，避免上次勾选状态误伤
-        onOpened: deleteFilesCheck.checked = false
-        onAccepted: Books.removeBookWithFiles(card.book.id, deleteFilesCheck.checked)
+        onAccepted: Books.removeBookWithFiles(card.book.id, true)
     }
 }

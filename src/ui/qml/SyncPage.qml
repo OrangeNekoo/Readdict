@@ -85,7 +85,11 @@ Page {
             width: Math.max(0, syncScroll.availableWidth)
             spacing: 12
 
-            RowLayout {
+            ColumnLayout {
+                spacing: 8
+                Layout.fillWidth: true
+                // 标签在上方、输入框占满整行：窄窗口下长 URL 溢出的根因是
+                // RowLayout 的 Label 无约束 + TextField fillWidth（B4 同款布局）
                 Label { text: qsTr("服务器地址") }
                 TextField {
                     id: urlField
@@ -95,8 +99,16 @@ Page {
                     // L8（P1#11）：即改即写——按钮不再承担保存职责
                     onTextChanged: Settings.setValue("webdav/url", text.trim())
                 }
+                // 示例地址常显说明：placeholder 仅空值可见，已填内容后用户无从参考
+                Label {
+                    text: qsTr("示例：https://dav.jianguoyun.com/dav/")
+                    color: UITheme.textSecondary
+                    font.pixelSize: 12
+                }
             }
-            RowLayout {
+            ColumnLayout {
+                spacing: 8
+                Layout.fillWidth: true
                 Label { text: qsTr("用户名") }
                 TextField {
                     id: userField
@@ -105,7 +117,9 @@ Page {
                     onTextChanged: Settings.setValue("webdav/user", text.trim())
                 }
             }
-            RowLayout {
+            ColumnLayout {
+                spacing: 8
+                Layout.fillWidth: true
                 Label { text: qsTr("密码") }
                 TextField {
                     id: passField
@@ -156,6 +170,7 @@ Page {
                 }
             }
             RowLayout {
+                Layout.fillWidth: true
                 Button {
                     // L8（P1#11）：配置已即改即写，按钮只触发同步
                     text: qsTr("立即同步")
@@ -166,6 +181,9 @@ Page {
                     id: statusLabel
                     text: ""
                     color: UITheme.success
+                    // 失败信息可能很长（多文件失败逐行拼接），溢出会顶破布局
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
                 }
             }
             Label { text: qsTr("同步日志"); font.bold: true }
@@ -181,6 +199,10 @@ Page {
                     text: modelData
                     width: ListView.view.width
                     wrapMode: Text.Wrap
+                    // 长行（长 URL/书名）最多 4 行折行显示，超出省略——日志区
+                    // 保持可读概览，完整明细已落盘 <dataDir>/logs/sync.log
+                    maximumLineCount: 4
+                    elide: Text.ElideRight
                     font.pixelSize: 12
                     // 失败行 = 时间戳后紧跟"失败"/"注册失败"的消息（与 SyncManager::fail
                     // 的两类消息前缀同源；books 信息行可能含书名里的"失败"字）

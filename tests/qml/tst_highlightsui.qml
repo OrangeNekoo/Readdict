@@ -244,7 +244,7 @@ Item {
             c.chapter = root.makeChapter()
             c.bookId = 9003
             wait(50)
-            c.simulateSelection(2, "第1段第一句。")
+            c.simulateSelection(2, "第1段第一句。", 0, 8)
             verify(c.selectionToolbar.visible, "选择后工具条应出现")
             compare(c.selSentenceIndex, 2)
             c.doAddHighlight("#FFEB3B")
@@ -252,7 +252,34 @@ Item {
             verify(list.length === 1 && list[0].sentenceIndex === 2 && list[0].color === "#FFEB3B",
                    "划线应落库（章节/句索引/颜色），实际 " + JSON.stringify(list))
             compare(list[0].chapter, "章")
+            compare(list[0].selStart, 0, "字符区间起点应落库")
+            compare(list[0].selLength, 8)
             verify(!c.selectionToolbar.visible, "划线后工具条应收起")
+            loader.destroy()
+        }
+        // 字符级精度核心回归：部分句选择只染所选区间——句 0 = "第1段第一句。"，
+        // 选中 [1,4) 即"1段第"，渲染 HTML 中仅该子串包划线 span，两侧文本无背景色
+        function test_partialSelectionRendersExactRange() {
+            var loader = contentComp.createObject(root)
+            loader.width = 800; loader.height = 600
+            var c = loader.item
+            c.typography = { fontFamily: "Source Han Sans VF", fontSize: 18, lineHeight: 1.6,
+                             align: "left", pageWidth: "normal" }
+            c.chapter = root.makeChapter()
+            c.bookId = 9007
+            wait(50)
+            c.simulateSelection(2, "1段第", 1, 3)
+            c.doAddHighlight("#FFEB3B")
+            var list = Highlights.highlightsForBook(9007)
+            compare(list.length, 1)
+            compare(list[0].selStart, 1)
+            compare(list[0].selLength, 3)
+            var html = c.paragraphRepeater.itemAt(1).children[0].text.toLowerCase()
+            var idx = html.indexOf("background-color:#ffeb3b")
+            verify(idx >= 0, "渲染 HTML 应含划线背景 span，实际 " + html)
+            var spanStart = html.indexOf(">", idx) + 1
+            verify(html.substring(spanStart, spanStart + 3) === "1段第",
+                   "划线 span 应恰好包住所选「1段第」，实际 " + html.substring(spanStart - 60, spanStart + 20))
             loader.destroy()
         }
         // C7 复审：工具条视口固定——滚动后仍应在可见区内（selBar 是 contentItem 子项，
@@ -304,7 +331,7 @@ Item {
             verify(!c.colorToolbar.visible, "再点划线应收起色板")
             loader.destroy()
         }
-        // C7 复审：同句重复划线 → 复用行 id 更新颜色，不产生重复行
+        // C7 复审：同选区重复落库 → 复用行 id 更新颜色，不产生重复行
         function test_duplicateHighlightUpdatesColor() {
             var loader = contentComp.createObject(root)
             loader.width = 800; loader.height = 600
@@ -314,12 +341,12 @@ Item {
             c.chapter = root.makeChapter()
             c.bookId = 9005
             wait(50)
-            c.simulateSelection(2, "第1段第一句。")
+            c.simulateSelection(2, "第1段第一句。", 0, 8)
             c.doAddHighlight("#FFEB3B")
             var list1 = Highlights.highlightsForBook(9005)
             compare(list1.length, 1)
-            // 同句再划另一色 → updateColor 复用行
-            c.simulateSelection(2, "第1段第一句。")
+            // 同选区再划另一色 → updateColor 复用行
+            c.simulateSelection(2, "第1段第一句。", 0, 8)
             c.doAddHighlight("#F8BBD0")
             var list2 = Highlights.highlightsForBook(9005)
             compare(list2.length, 1, "同句重复划线不应产生重复行")
@@ -328,7 +355,8 @@ Item {
             Highlights.removeHighlight(list2[0].id)
             loader.destroy()
         }
-        // 笔记入口：无划线 → 先建默认色划线，Dialog 填 note → accept → updateNote
+        // 笔记入口（合一 Dialog）：确定时经 doAddHighlight 一次落库（色+笔记+区间），
+        // 不再预建默认色划线
         function test_noteDialogAddsNote() {
             var loader = contentComp.createObject(root)
             loader.width = 800; loader.height = 600
@@ -338,15 +366,21 @@ Item {
             c.chapter = root.makeChapter()
             c.bookId = 9004
             wait(50)
-            c.simulateSelection(3, "第二句！")
+            c.simulateSelection(3, "第二句！", 7, 4)
             c.openNoteDialog()
             verify(c.noteDialog.visible, "笔记 Dialog 应打开")
+            compare(Highlights.highlightsForBook(9004).length, 0,
+                    "打开 Dialog 不应预建划线（合一路径确定才落库）")
             c.noteTextArea.text = "好句！"
+            c.noteDialog.pickedColor = "#A5D6A7"
             c.noteDialog.accept()
             var list = Highlights.highlightsForBook(9004)
-            verify(list.length === 1, "笔记入口应先建划线")
-            compare(list[0].note, "好句！", "accept 应把笔记写入 updateNote")
+            verify(list.length === 1, "确定应落库一条划线")
+            compare(list[0].note, "好句！", "accept 应把笔记写入")
             compare(list[0].sentenceIndex, 3)
+            compare(list[0].color, "#A5D6A7", "Dialog 内选色应生效")
+            compare(list[0].selStart, 7, "字符区间起点应落库")
+            compare(list[0].selLength, 4, "字符区间长度应落库")
             loader.destroy()
         }
         // C7 二次复审：顶部空间不足（选中句贴近视口顶）→ 工具条翻到选中内容下方，
@@ -408,8 +442,7 @@ Item {
                    "中部工具条色板应在下方且不超视口（cb.y=" + cb.y + ", tb.y=" + tb.y + "）")
             loader.destroy()
         }
-        // C7 二次复审：笔记 Dialog 取消 → 自动创建的默认色划线回滚删除（无残留）；
-        // 已有划线时取消 → 原划线保留
+        // 合一路径下取消零副作用：不预建划线、无回滚；已有划线时取消 → 原划线保留
         function test_noteDialogCancelRollsBackAutoMarker() {
             var loader = contentComp.createObject(root)
             loader.width = 800; loader.height = 600
@@ -419,21 +452,21 @@ Item {
             c.chapter = root.makeChapter()
             c.bookId = 9006
             wait(50)
-            // 场景 1：无原有划线 → 打开笔记 Dialog（自动建默认色划线）→ 取消 → 回滚
-            c.simulateSelection(3, "第二句！")
+            // 场景 1：无原有划线 → 打开笔记 Dialog → 取消 → 不落任何行（零副作用）
+            c.simulateSelection(3, "第二句！", 7, 4)
             c.openNoteDialog()
             verify(c.noteDialog.visible, "笔记 Dialog 应打开")
-            compare(Highlights.highlightsForBook(9006).length, 1, "打开 Dialog 应先建默认色划线")
             c.noteDialog.reject()
             tryVerify(function () { return !c.noteDialog.visible }, 2000, "取消后 Dialog 应收起")
             compare(Highlights.highlightsForBook(9006).length, 0,
-                    "取消后自动创建的划线应回滚删除（无残留）")
-            // 场景 2：已有划线 → 打开笔记 Dialog（不自动创建）→ 取消 → 原划线保留
-            c.simulateSelection(2, "第1段第一句。")
-            c.doAddHighlight("#FFEB3B")
+                    "取消不应落库（合一确定时才写入，无需回滚）")
+            // 场景 2：先经合一确定建划线 → 再打开（应预填笔记/色）→ 取消 → 原划线保留
+            c.simulateSelection(2, "第1段第一句。", 0, 8)
+            c.doAddHighlight("#FFEB3B", "保留笔记")
             compare(Highlights.highlightsForBook(9006).length, 1)
-            c.simulateSelection(2, "第1段第一句。")
+            c.simulateSelection(2, "第1段第一句。", 0, 8)
             c.openNoteDialog()
+            compare(c.noteTextArea.text, "保留笔记", "同区间再开 Dialog 应预填笔记")
             c.noteDialog.reject()
             tryVerify(function () { return !c.noteDialog.visible }, 2000, "取消后 Dialog 应收起")
             var rows = Highlights.highlightsForBook(9006)
@@ -458,28 +491,39 @@ Item {
             tryVerify(function () { return page.chapter.paragraphs && page.chapter.paragraphs.length > 0 }, 5000,
                       "打开应加载章节")
             var cv = page.contentView
+            var ch2Para = null
+            var ch2ParaIdx = -1
             // 章 1（h2 "第一章"）：划线句 1 黄色
             page.loadChapter(1)
             tryVerify(function () { return page.chapter.title === "第一章" }, 3000,
                       "第 2 章标题应为 第一章（首个 h2 保留），实际 " + page.chapter.title)
             tryVerify(function () { return cv.paragraphRepeater.itemAt(1) !== null }, 3000,
                       "章 1 段落应渲染完成")
-            cv.simulateSelection(1, "这是第一章的第一段正文。")
+            cv.simulateSelection(1, "这是第一章的第一段正文。", 0, 12)
             cv.doAddHighlight("#FFEB3B")
             var list1 = Highlights.highlightsForBook(book.id)
             compare(list1.length, 1)
             compare(list1[0].chapter, "第一章")
             compare(list1[0].sentenceIndex, 1)
-            // 章 2（重复 h2 → Books 兜底 "第3章"）：同句索引，渲染不得串染章 1 划线色
+            // 章 2（重复 h2 → Books 兜底 "第3章"）：同句索引，渲染不得串染章 1 划线色。
+            // 注意 itemAt(1) 在 scroll 窗口重建后可能仍是章 1 段落（章 1 本就该染
+            // 自己的划线）——按段自带 chapterTitle 找章 2 的同句段来断言不串染。
             page.loadChapter(2)
             tryVerify(function () { return page.chapter.title === "第3章" }, 3000,
                       "重复 h2 章标题应兜底为 第3章，实际 " + page.chapter.title)
             tryVerify(function () {
-                var d = cv.paragraphRepeater.itemAt(1)
-                return d && d.children[0].text.toLowerCase().indexOf("#ffeb3b") < 0
-            }, 3000, "章 2 不应渲染章 1 的划线色（跨章串染）")
-            // 章 2 同句再划粉色 → 应新建独立行（而非 updateColor 误改章 1 行）
-            cv.simulateSelection(1, "这是第二章的第一段正文。")
+                for (var i = 0; i < cv.paragraphRepeater.count; i++) {
+                    var d = cv.paragraphRepeater.itemAt(i)
+                    if (d && d.chapterTitle === "第3章") { ch2Para = d; ch2ParaIdx = i; return true }
+                }
+                return false
+            }, 3000, "章 2 段落应渲染完成（按 chapterTitle 定位）")
+            verify(ch2Para.children[0].text.toLowerCase().indexOf("#ffeb3b") < 0,
+                   "章 2 段落不应渲染章 1 的划线色（跨章串染），实际 "
+                   + ch2Para.children[0].text)
+            // 章 2 同句再划粉色 → 应新建独立行（而非 updateColor 误改章 1 行）。
+            // simulateSelection 需全局句索引：目标段自身 sentenceStart + 句 1
+            cv.simulateSelection(ch2Para.sentenceStart + 1, "这是第二章的第一段正文。", 0, 12)
             cv.doAddHighlight("#F8BBD0")
             var list2 = Highlights.highlightsForBook(book.id)
             compare(list2.length, 2, "跨章同句应产生两条独立划线行")

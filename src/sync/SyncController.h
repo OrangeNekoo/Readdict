@@ -37,6 +37,8 @@ public:
 private:
     QString settingsPath() const;   // db 同目录 settings.json（与 SyncManager::settingsPath 同源）
     void doSync(const SyncManager::Options &opts);
+    // 同步日志追加落盘 <数据目录>/logs/sync.log（doSync 末尾调用，ok 标记本次成败）
+    void persistSyncLog(bool ok);
     QString m_dbPath;
     SyncManager m_mgr;
     QTimer m_timer;

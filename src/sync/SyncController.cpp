@@ -2,7 +2,10 @@
 #include "../core/SettingsStore.h"
 #include "WebDavClient.h"
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QDateTime>
+#include <QTextStream>
 
 SyncController::SyncController(const QString &dbPath, const QString &libraryDir,
                                const QString &connection, QObject *parent)
@@ -31,6 +34,24 @@ QString SyncController::settingsPath() const {
     // settings.json 与 db 同目录（生产即 AppDataLocation）；测试注入临时目录时
     // 同样指向测试的 settings.json，避免硬编码 AppDataLocation 污染真实配置。
     return QFileInfo(m_dbPath).absoluteDir().filePath(QStringLiteral("settings.json"));
+}
+
+// 同步日志落盘：追加到 <数据目录>/logs/sync.log（与 FileLogger 应用日志同目录）。
+// 每次同步一条分节（起止成败 + 逐文件明细）；日志只增不清理，失败记录保留完整
+// 错误文本供事后排查（SyncPage 界面仅展示本次且超长行省略）。
+void SyncController::persistSyncLog(bool ok) {
+    const QDir dir = QFileInfo(m_dbPath).absoluteDir();
+    if (!dir.mkpath(QStringLiteral("logs")))
+        return;
+    QFile f(dir.filePath(QStringLiteral("logs/sync.log")));
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+        return;
+    QTextStream ts(&f);
+    ts << QStringLiteral("---- 同步 %1 （%2）----\n")
+          .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")),
+               ok ? QStringLiteral("完成") : QStringLiteral("失败"));
+    for (const QString &line : m_log)
+        ts << line << '\n';
 }
 
 void SyncController::run(bool settings, bool progress, bool highlights, bool books) {
@@ -75,6 +96,7 @@ void SyncController::doSync(const SyncManager::Options &opts) {
     const SyncManager::Result r = m_mgr.sync(client, opts);
     m_log = m_mgr.log();
     emit logChanged();
+    persistSyncLog(r.ok);
 
     m_running = false;
     emit runningChanged();

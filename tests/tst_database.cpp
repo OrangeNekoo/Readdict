@@ -19,13 +19,15 @@ private slots:
         QVERIFY(db.tables().contains("books_fts"));
         QVERIFY(db.tables().contains("book_page_cache"));          // 新表
         QVERIFY(db.record("books").contains("page_count"));        // 新列
-        QCOMPARE(m_mgr->schemaVersion(), 3);
+        QVERIFY(db.record("highlights").contains("sel_start"));    // v4：字符级选区
+        QVERIFY(db.record("highlights").contains("sel_length"));
+        QCOMPARE(m_mgr->schemaVersion(), 4);
     }
     void reopensWithSameVersion() {
         QTemporaryDir dir;
         const QString path = dir.filePath("t.db");
-        { DatabaseManager a(path); QCOMPARE(a.schemaVersion(), 3); }
-        { DatabaseManager b(path); QCOMPARE(b.schemaVersion(), 3); }
+        { DatabaseManager a(path); QCOMPARE(a.schemaVersion(), 4); }
+        { DatabaseManager b(path); QCOMPARE(b.schemaVersion(), 4); }
     }
 private:
     std::unique_ptr<DatabaseManager> m_mgr;

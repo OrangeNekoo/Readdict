@@ -347,18 +347,27 @@ Item {
             tryVerify(function () { return cv.selectionToolbar.visible }, 3000,
                       "选择后工具条应出现")
             verify(!page.sheetOpen, "选择本身不应打开 Sheet")
-            // 工具条结构：selBar(Rectangle) → Row → [复制, 划线, 笔记]（声明序）
+            // 工具条结构：selBar(Rectangle) → Row → [复制, 笔记]（声明序；原「划线」
+            // 入口并入笔记 Dialog 色板，独立色板经 toggleColorBar 保留）
             var row = cv.selectionToolbar.children[0]
-            var markBtn = row.children[1]   // 「划线」按钮
-            verify(markBtn !== undefined && markBtn.text.length > 0, "工具条应含划线按钮")
+            var noteBtn = row.children[1]   // 「笔记」按钮
+            verify(noteBtn !== undefined && noteBtn.text.length > 0, "工具条第 2 槽位应为笔记按钮")
             // 真实点击按钮中心（映射到正文宿主视口坐标）——按钮点中的同时不得
             // 连带触发 contentTapped → Sheet
-            var bp = markBtn.mapToItem(cv, markBtn.width / 2, markBtn.height / 2)
+            var bp = noteBtn.mapToItem(cv, noteBtn.width / 2, noteBtn.height / 2)
             mouseClick(cv, bp.x, bp.y)
-            tryVerify(function () { return cv.colorToolbar.visible }, 3000,
-                      "点划线按钮应展开色板（按钮行为照常）")
+            tryVerify(function () { return cv.noteDialog.visible }, 3000,
+                      "点笔记按钮应打开合一对称框（按钮行为照常）")
             verify(!page.sheetOpen, "点击选择工具条按钮不应连带打开 Sheet")
-            // 色板结构：colorBar(Rectangle) → Row → [色块×3]（Repeater 委托）
+            // Dialog 取消（零副作用）：reject 会 clearSelection 清空选择状态，
+            // 重新注入选择后经 toggleColorBar 验证独立色板仍可用
+            cv.noteDialog.reject()
+            tryVerify(function () { return !cv.noteDialog.visible }, 3000, "取消应收起笔记框")
+            cv.simulateSelection(0, firstSentence)
+            tryVerify(function () { return cv.selectionToolbar.visible }, 3000,
+                      "重新选择后工具条应出现")
+            cv.toggleColorBar()
+            verify(cv.colorToolbar.visible, "toggleColorBar 应展开色板")
             var cRow = cv.colorToolbar.children[0]
             var swatch = cRow.children[0]
             var before = Highlights.highlightsForBook(page.book.id).length
@@ -393,10 +402,13 @@ Item {
             cv.simulateSelection(0, firstSentence)
             tryVerify(function () { return cv.selectionToolbar.visible }, 3000,
                       "选择后工具条应出现")
-            // 工具条结构：selBar(Rectangle) → Row → [复制, 划线, 笔记]（声明序）
+            // 工具条结构：selBar(Rectangle) → Row → [复制, 笔记]（声明序；原「划线」
+            // 入口已并入笔记 Dialog 色板）
             var row = cv.selectionToolbar.children[0]
             var copyBtn = row.children[0]   // 「复制」按钮
             verify(copyBtn !== undefined && copyBtn.text.length > 0, "工具条应含复制按钮")
+            verify(row.children[1] !== undefined && row.children[1].text.length > 0,
+                   "工具条第 2 槽位应为笔记按钮（无独立划线按钮）")
             var bp = copyBtn.mapToItem(cv, copyBtn.width / 2, copyBtn.height / 2)
             mouseClick(cv, bp.x, bp.y)
             // clearSelection 执行：工具条隐藏 + selText 清空（旧缺陷 ReferenceError
@@ -419,9 +431,9 @@ Item {
             h.stack.destroy()
         }
 
-        // 任务5：工具条「删除划线」——选中句已划线时按钮可见（highlightMap 命中），
-        // 点击后 Highlights.removeHighlight(id) + clearSelection：划线清除、工具条收起；
-        // 未划线句选中时按钮隐藏。
+        // 删除划线（经笔记 Dialog 合一路径：选色确定 = 划线落库）——选中已划线选区时
+        // 「删除」按钮可见，点击后 Highlights.removeHighlight(id) + clearSelection：
+        // 划线清除、工具条收起；未划线选区选中时按钮隐藏。
         function test_deleteHighlightFromToolbar() {
             var h = openPage()
             var page = h.page
@@ -434,48 +446,48 @@ Item {
             var stale = Highlights.highlightsForBook(page.book.id)
             for (var i = 0; i < stale.length; i++)
                 Highlights.removeHighlight(stale[i].id)
-            // 选中首段首句 → 划线按钮 → 色块 → 落库
+            // 选中首段首句 → 笔记按钮 → Dialog 选色确定 → 落库（整句选区：句 0）
             var firstSentence = (page.chapter.paragraphs[0].sentences
                                  && page.chapter.paragraphs[0].sentences[0]) || "首句"
-            cv.simulateSelection(0, firstSentence)
+            cv.simulateSelection(0, firstSentence, 0, firstSentence.length)
             tryVerify(function () { return cv.selectionToolbar.visible }, 3000,
                       "选择后工具条应出现")
             var row = cv.selectionToolbar.children[0]
-            var markBtn = row.children[1]   // 「划线」按钮
-            var bp = markBtn.mapToItem(cv, markBtn.width / 2, markBtn.height / 2)
+            var noteBtn = row.children[1]   // 「笔记」按钮（第 2 槽位）
+            var bp = noteBtn.mapToItem(cv, noteBtn.width / 2, noteBtn.height / 2)
             mouseClick(cv, bp.x, bp.y)
-            tryVerify(function () { return cv.colorToolbar.visible }, 3000,
-                      "点划线按钮应展开色板")
-            var cRow = cv.colorToolbar.children[0]
-            var swatch = cRow.children[0]
-            var sp = swatch.mapToItem(cv, swatch.width / 2, swatch.height / 2)
-            mouseClick(cv, sp.x, sp.y)
+            tryVerify(function () { return cv.noteDialog.visible }, 3000,
+                      "点笔记按钮应打开合一对称框")
+            cv.noteDialog.pickedColor = "#FFEB3B"
+            cv.noteDialog.accept()
+            tryVerify(function () { return !cv.noteDialog.visible }, 3000,
+                      "笔记确定后 Dialog 应关闭（关闭动画结束后再继续，模态遮罩不拦后续点击）")
             tryVerify(function () {
                 var rows = Highlights.highlightsForBook(page.book.id)
                 return rows.length === 1 && rows[0].sentenceIndex === 0
-            }, 3000, "划线应落库（句 0）")
-            // 再选中同一句 → 「删除划线」按钮出现
-            cv.simulateSelection(0, firstSentence)
+            }, 3000, "笔记确定应落库划线（句 0）")
+            // 再选中同一选区 → 「删除」按钮出现
+            cv.simulateSelection(0, firstSentence, 0, firstSentence.length)
             tryVerify(function () { return cv.selectionToolbar.visible }, 3000,
                       "再次选择后工具条应出现")
-            // 工具条结构：selBar(Rectangle) → Row → [复制, 划线, 笔记, 删除划线]（声明序）
-            var delBtn = row.children[3]   // 「删除划线」按钮
-            verify(delBtn !== undefined && delBtn.text.length > 0, "工具条应含删除划线按钮")
+            // 工具条结构：selBar(Rectangle) → Row → [复制, 笔记, 删除]（声明序）
+            var delBtn = row.children[2]   // 「删除」按钮
+            verify(delBtn !== undefined && delBtn.text.length > 0, "工具条应含删除按钮")
             tryVerify(function () { return delBtn.visible }, 3000,
-                      "已划线句选中时删除按钮应可见")
+                      "已划线选区选中时删除按钮应可见")
             // 真实点击删除按钮 → 划线清除 + 工具条收起
             var dp = delBtn.mapToItem(cv, delBtn.width / 2, delBtn.height / 2)
             mouseClick(cv, dp.x, dp.y)
             tryVerify(function () {
                 return Highlights.highlightsForBook(page.book.id).length === 0
-            }, 3000, "点击删除划线后划线应清除")
+            }, 3000, "点击删除后划线应清除")
             tryVerify(function () { return !cv.selectionToolbar.visible }, 3000,
                       "删除后工具条应收起")
-            // 未划线句选中 → 删除按钮不可见
-            cv.simulateSelection(0, firstSentence)
+            // 未划线选区选中 → 删除按钮不可见
+            cv.simulateSelection(0, firstSentence, 0, firstSentence.length)
             tryVerify(function () { return cv.selectionToolbar.visible }, 3000,
                       "选择后工具条应出现")
-            verify(!delBtn.visible, "未划线句选中时删除按钮应隐藏")
+            verify(!delBtn.visible, "未划线选区选中时删除按钮应隐藏")
             h.stack.destroy()
         }
 
@@ -1326,11 +1338,12 @@ Item {
             c.noteTextArea.text = "富文本句笔记"
             c.noteDialog.accept()
             var list = Highlights.highlightsForBook(9010)
-            verify(list.length === 1, "笔记入口应先建划线，实际 " + JSON.stringify(list))
+            verify(list.length === 1, "笔记确定应落库划线，实际 " + JSON.stringify(list))
             compare(list[0].sentenceIndex, 2,
                     "落库句索引应指向被选句（段内第 3 句 = 全局 2），实际 " + list[0].sentenceIndex)
             compare(list[0].chapter, "章")
             compare(list[0].note, "富文本句笔记")
+            compare(list[0].selStart, -1, "富文本段无字符坐标，应整句粒度落库（selStart=-1）")
             Highlights.removeHighlight(list[0].id)
             loader.destroy()
         }
@@ -1371,11 +1384,13 @@ Item {
             c.noteTextArea.text = "部分句笔记"
             c.noteDialog.accept()
             var list = Highlights.highlightsForBook(9011)
-            verify(list.length === 1, "笔记入口应先建划线，实际 " + JSON.stringify(list))
+            verify(list.length === 1, "笔记确定应落库划线，实际 " + JSON.stringify(list))
             compare(list[0].sentenceIndex, 1,
                     "落库句索引应指向被选中句所在句（全局 1）而非段首句，实际 "
                     + list[0].sentenceIndex)
             compare(list[0].note, "部分句笔记")
+            compare(list[0].selStart, 7, "纯文本段字符区间应落库（selectionStart=7）")
+            compare(list[0].selLength, 3, "字符区间长度应落库（选 3 字符）")
             Highlights.removeHighlight(list[0].id)
             loader.destroy()
         }

@@ -9,10 +9,12 @@ class HighlightManager : public QObject {
 public:
     explicit HighlightManager(const QString &dbPath, const QString &connection = {}, QObject *parent = nullptr);
     // C7：全部 Q_INVOKABLE 供 QML 直接调用；highlightsForBook 返回 QVariantList<QVariantMap>
-    // （键 id/bookId/chapter/sentenceIndex/text/color/note/chapterIndex），QML 侧按 map 字段读取。
+    // （键 id/bookId/chapter/sentenceIndex/text/color/note/chapterIndex/selStart/selLength），
+    // QML 侧按 map 字段读取。selStart/selLength：选区在段内纯文本坐标的字符区间
+    // （v4 起），负值 = 未提供（整句粒度，旧行为）；默认参数保持旧调用兼容。
     Q_INVOKABLE qint64 addHighlight(qint64 bookId, const QString &chapter, int sentenceIndex,
                                     const QString &text, const QString &color, const QString &note = {},
-                                    int chapterIndex = 0);
+                                    int chapterIndex = 0, int selStart = -1, int selLength = -1);
     Q_INVOKABLE void removeHighlight(qint64 id);
     Q_INVOKABLE void updateNote(qint64 id, const QString &note);
     // C7 复审：同句重复划线 → 复用行 id 更新颜色（不产生重复行）

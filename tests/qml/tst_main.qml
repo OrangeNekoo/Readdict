@@ -1278,12 +1278,10 @@ Item {
             card.requestDelete()
             tryVerify(function () { return card.deleteDialog.opened === true }, 2000,
                       "requestDelete 应打开确认对话框")
-            compare(card.deleteFilesCheck.checked, false, "默认不勾选删文件（防误触）")
             verify((card.deleteDialog.title || "").indexOf("delme") >= 0,
                    "对话框标题应含书名，实际 " + card.deleteDialog.title)
             verify((card.deleteWarning.text || "").length > 0, "应有警告文案")
 
-            card.deleteFilesCheck.checked = true
             card.deleteDialog.accept()
             wait(100)
             verify(card.deleteDialog.opened === false, "accept 后对话框应关闭")

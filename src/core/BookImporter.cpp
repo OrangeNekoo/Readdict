@@ -182,10 +182,52 @@ QString opfCoverEntry(const QByteArray &opf, const QString &opfEntry) {
     return {};
 }
 
-// 统一封面归一化：等比放大至填满 300x400 后居中裁剪（书架 3:4 裁切显示，
-// 避免白边，封面顶部标题约 1% 的裁剪可接受）。EPUB 提取与 PDF 首页渲染共用。
+// 自动裁掉封面四周的纯色空白边（PDF 首页渲染常见整页白边；EPUB 封面图偶有
+// 装饰边框）。取样四角中位色作背景色，按 8% 容差扫描内容包围盒，四边各留 2%
+// 边距；全部空白或扫描异常时返回原图。
+QImage trimCoverBorder(const QImage &src) {
+    QImage img = src.convertToFormat(QImage::Format_RGB32);
+    const int w = img.width(), h = img.height();
+    if (w < 8 || h < 8) return src;
+    // 背景色取四角像素的中位分量（封面背景几乎总是四角同色）
+    const QColor corners[4] = { img.pixelColor(0, 0), img.pixelColor(w - 1, 0),
+                                img.pixelColor(0, h - 1), img.pixelColor(w - 1, h - 1) };
+    int br = 0, bg = 0, bb = 0;
+    for (const QColor &c : corners) { br += c.red(); bg += c.green(); bb += c.blue(); }
+    br /= 4; bg /= 4; bb /= 4;
+    const int tol = 20; // 每分量容差：抗 JPEG 噪声与渐变压缩痕
+    auto isBg = [&](const QColor &c) {
+        return qAbs(c.red() - br) <= tol && qAbs(c.green() - bg) <= tol
+            && qAbs(c.blue() - bb) <= tol;
+    };
+    // 逐边扫描内容包围盒：从四边向内找第一个非背景行/列（步进 2 像素加速）
+    int top = 0, bottom = h - 1, left = 0, right = w - 1;
+    auto rowHasContent = [&](int y) {
+        for (int x = 0; x < w; x += 2) if (!isBg(img.pixelColor(x, y))) return true;
+        return false;
+    };
+    auto colHasContent = [&](int x) {
+        for (int y = 0; y < h; y += 2) if (!isBg(img.pixelColor(x, y))) return true;
+        return false;
+    };
+    while (top < bottom && !rowHasContent(top)) top += 2;
+    while (bottom > top && !rowHasContent(bottom)) bottom -= 2;
+    while (left < right && !colHasContent(left)) left += 2;
+    while (right > left && !colHasContent(right)) right -= 2;
+    const QRect box(left, top, right - left + 1, bottom - top + 1);
+    if (box.width() < 8 || box.height() < 8 || box == img.rect()) return src;
+    // 内容区四边各留 2% 边距（clamp 到图界），避免贴边裁掉标题描边
+    const int mx = qMax(1, box.width() / 50), my = qMax(1, box.height() / 50);
+    const QRect padded = box.adjusted(-mx, -my, mx, my).intersected(img.rect());
+    return img.copy(padded);
+}
+
+// 统一封面归一化：先裁掉四周空白边，再等比放大至填满 300x400 后居中裁剪
+// （书架 3:4 裁切显示，避免白边，封面顶部标题约 1% 的裁剪可接受）。
+// EPUB 提取与 PDF 首页渲染共用。
 QImage normalizeCover(QImage img) {
     const QSize target(300, 400);
+    img = trimCoverBorder(img);
     if (img.size() != target) {
         img = img.scaled(target, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
         const QRect crop((img.width() - target.width()) / 2,

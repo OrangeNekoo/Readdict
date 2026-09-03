@@ -145,7 +145,10 @@ Page {
             cellHeight: 326
             model: Books.booksModel
             delegate: BookCard {
+                // 卡片固定 180×316（BookCard 设计尺寸），在随窗口变宽的 cell 内
+                // 水平居中——不跟 cell 拉伸（封面/字号按 180 设计，拉伸会比例失调）
                 width: 180
+                x: (grid.cellWidth - width) / 2
                 book: modelData
                 onClicked: {
                     const win = Window.window

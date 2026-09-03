@@ -79,4 +79,15 @@ void DatabaseManager::migrate() {
             || !q3.exec("COMMIT"))
             qFatal("数据库迁移 v3 失败: %s", qPrintable(q3.lastError().text()));
     }
+    if (v < 4) {
+        // v3→v4：highlights 增字符级选区 sel_start/sel_length（段内字符区间，纯文本
+        // 坐标）。旧行 NULL = 整句粒度（渲染回退句 span），新行精确区间渲染。
+        QSqlQuery q4(m_db);
+        if (!q4.exec("BEGIN")
+            || !q4.exec("ALTER TABLE highlights ADD COLUMN sel_start INTEGER")
+            || !q4.exec("ALTER TABLE highlights ADD COLUMN sel_length INTEGER")
+            || !q4.exec("PRAGMA user_version = 4")
+            || !q4.exec("COMMIT"))
+            qFatal("数据库迁移 v4 失败: %s", qPrintable(q4.lastError().text()));
+    }
 }

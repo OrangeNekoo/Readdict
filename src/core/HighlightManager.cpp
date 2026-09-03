@@ -16,10 +16,11 @@ HighlightManager::HighlightManager(const QString &dbPath, const QString &connect
 
 qint64 HighlightManager::addHighlight(qint64 bookId, const QString &chapter, int sentenceIndex,
                                       const QString &text, const QString &color, const QString &note,
-                                      int chapterIndex) {
+                                      int chapterIndex, int selStart, int selLength) {
     QSqlQuery q(m_db);
-    q.prepare("INSERT INTO highlights(book_id,chapter,sentence_index,text,color,note,created_at,chapter_index)"
-              " VALUES(?,?,?,?,?,?,?,?)");
+    q.prepare("INSERT INTO highlights(book_id,chapter,sentence_index,text,color,note,created_at,"
+              "chapter_index,sel_start,sel_length)"
+              " VALUES(?,?,?,?,?,?,?,?,?,?)");
     q.addBindValue(bookId);
     q.addBindValue(chapter);
     q.addBindValue(sentenceIndex);
@@ -28,6 +29,9 @@ qint64 HighlightManager::addHighlight(qint64 bookId, const QString &chapter, int
     q.addBindValue(note);
     q.addBindValue(QDateTime::currentDateTime().toString(Qt::ISODate));
     q.addBindValue(chapterIndex);
+    // 字符级选区（段内纯文本坐标）；负值 = 未提供（旧行为整句粒度）
+    q.addBindValue(selStart >= 0 ? selStart : QVariant());
+    q.addBindValue(selStart >= 0 ? selLength : QVariant());
     if (!q.exec()) {
         qWarning() << "addHighlight:" << q.lastError().text();
         return -1;
@@ -117,7 +121,8 @@ QVariantList HighlightManager::highlightsForBook(qint64 bookId) const {
     // chapter_index, sentence_index, id 三级序保证跨章阅读顺序稳定
     //（chapter_index 旧行默认 0 排最前，经 backfillChapterIndexes 回填归位；
     // NULL sentence_index 在 SQLite 中排最前，章内影响与原实现一致）
-    q.prepare("SELECT id,book_id,chapter,sentence_index,text,color,note,chapter_index"
+    q.prepare("SELECT id,book_id,chapter,sentence_index,text,color,note,chapter_index,"
+              "sel_start,sel_length"
               " FROM highlights WHERE book_id=? ORDER BY chapter_index, sentence_index, id");
     q.addBindValue(bookId);
     if (!q.exec()) {
@@ -134,6 +139,9 @@ QVariantList HighlightManager::highlightsForBook(qint64 bookId) const {
         m[QStringLiteral("color")] = q.value(5).toString();
         m[QStringLiteral("note")] = q.value(6).toString();
         m[QStringLiteral("chapterIndex")] = q.value(7).toInt();
+        // 字符级选区（v4 起）；旧行 NULL → -1/-1（整句粒度渲染回退）
+        m[QStringLiteral("selStart")] = q.value(8).isNull() ? -1 : q.value(8).toInt();
+        m[QStringLiteral("selLength")] = q.value(9).isNull() ? -1 : q.value(9).toInt();
         out.append(m);
     }
     return out;
