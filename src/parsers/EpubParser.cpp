@@ -283,7 +283,9 @@ private:
 
 QByteArray EpubParser::readZipEntry(const QString &zipPath, const QString &entry,
                                     QString *error) const {
-    unzFile zip = unzOpen64(zipPath.toUtf8().constData());
+    // Windows fopen 按系统 ANSI 代码页解析窄路径，toUtf8 在中文系统上会打开失败；
+    // toLocal8Bit 在 Unix 上等价 UTF-8，跨平台正确
+    unzFile zip = unzOpen64(zipPath.toLocal8Bit().constData());
     if (!zip) {
         if (error) *error = QStringLiteral("无法打开 EPUB 压缩包（非有效 zip 或已损坏）: %1").arg(zipPath);
         return {};

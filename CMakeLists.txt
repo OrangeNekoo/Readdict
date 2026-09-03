@@ -41,6 +41,8 @@ qt_add_executable(Readdict
     src/core/SettingsStore.cpp
     # 便携数据目录边界：路径解析/目录准备/Windows 旧数据迁移（main.cpp 唯一数据目录来源）
     src/core/PortableData.cpp
+    src/core/FileLogger.cpp
+    src/core/FileLogger.h
     src/core/BookImporter.cpp
     src/core/HighlightManager.cpp
     src/core/SearchEngine.cpp
@@ -135,8 +137,10 @@ target_link_libraries(Readdict PRIVATE
     Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Sql Qt6::Network Qt6::Pdf Qt6::TextToSpeech Qt6::Multimedia
     MINIZIP::minizipstatic mobi zlibstatic
 )
-# Windows UAC 提权 helper（PortableData.cpp 的 ShellExecuteExW）需要 shell32
+# Windows：GUI 子系统（无控制台窗口）；rc 资源挂载 exe 文件图标
 if(WIN32)
+    set_target_properties(Readdict PROPERTIES WIN32_EXECUTABLE TRUE)
+    target_sources(Readdict PRIVATE packaging/windows/readdict.rc)
     target_link_libraries(Readdict PRIVATE shell32)
 endif()
 # TextParser 的 GB18030 解码走系统 iconv；macOS 的 iconv 在 libiconv.dylib 中需显式链接

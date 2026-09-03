@@ -132,7 +132,7 @@ DocumentModel MobiParser::parse(const QString &mobiPath) {
         m_error = QStringLiteral("内存分配失败");
         return model;
     }
-    const MOBI_RET loadRet = mobi_load_filename(m, mobiPath.toUtf8().constData());
+    const MOBI_RET loadRet = mobi_load_filename(m, mobiPath.toLocal8Bit().constData());
     // 加密优先判定：libmobi 对部分异常文件也可能加载成功，但 rh 已带
     // encryption_type；零字节/垃圾文件则走 loadRet 错误分支
     if (loadRet != MOBI_SUCCESS || mobi_is_encrypted(m)) {
@@ -354,7 +354,7 @@ DocumentModel MobiParser::readMetadataOnly(const QString &mobiPath) {
         m_error = QStringLiteral("内存分配失败");
         return model;
     }
-    const MOBI_RET loadRet = mobi_load_filename(m, mobiPath.toUtf8().constData());
+    const MOBI_RET loadRet = mobi_load_filename(m, mobiPath.toLocal8Bit().constData());
     if (loadRet != MOBI_SUCCESS || mobi_is_encrypted(m)) {
         m_error = mobi_is_encrypted(m)
             ? QStringLiteral("该文件受 DRM 保护（已加密），无法解析")

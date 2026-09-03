@@ -14,6 +14,7 @@
 #include <qqml.h>
 #include "core/BookManager.h"
 #include "core/BookImporter.h"
+#include "core/FileLogger.h"
 #include "core/HighlightManager.h"
 #include "core/PortableData.h"
 #include "core/SearchEngine.h"
@@ -157,6 +158,9 @@ int main(int argc, char *argv[]) {
     }
     if (portable.elevated)
         qInfo().noquote() << "数据目录已通过提权 helper 准备完成:" << dataDir;
+
+    // 日志文件化：此后 qInfo/qWarning 等写入 <dataDir>/logs/（按天分文件，7 天清理）
+    FileLogger::install(dataDir);
 
     loadBundledFonts();
 

@@ -55,7 +55,8 @@ void writeIndexFailCounts(const QString &libraryDir, const QJsonObject &counts) 
 }
 
 QByteArray readZipEntry(const QString &zipPath, const QString &entry) {
-    unzFile zip = unzOpen64(zipPath.toUtf8().constData());
+    // Windows fopen 按系统 ANSI 代码页解析窄路径，统一 toLocal8Bit（Unix 等价 UTF-8）
+    unzFile zip = unzOpen64(zipPath.toLocal8Bit().constData());
     if (!zip) return {};
     QByteArray out;
     // 先精确匹配，再大小写不敏感兜底（真实书条目名大小写偶有出入）
